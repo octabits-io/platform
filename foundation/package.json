@@ -1,0 +1,52 @@
+{
+  "name": "@octabits-io/foundation",
+  "version": "0.1.0",
+  "description": "Core utilities: Result types, IoC container, logger, and helpers",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsup"
+  },
+  "exports": {
+    "./result": {
+      "import": "./dist/result/index.js",
+      "types": "./dist/result/index.d.ts"
+    },
+    "./ioc": {
+      "import": "./dist/ioc/index.js",
+      "types": "./dist/ioc/index.d.ts"
+    },
+    "./logger": {
+      "import": "./dist/logger/index.js",
+      "types": "./dist/logger/index.d.ts"
+    },
+    "./utils": {
+      "import": "./dist/utils/index.js",
+      "types": "./dist/utils/index.d.ts"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/octabits-io/platform.git",
+    "directory": "foundation"
+  },
+  "homepage": "https://github.com/octabits-io/platform/tree/main/foundation",
+  "bugs": {
+    "url": "https://github.com/octabits-io/platform/issues"
+  },
+  "devDependencies": {
+    "vitest": "^4"
+  },
+  "peerDependencies": {
+    "typescript": "^5",
+    "zod": "^4"
+  }
+}

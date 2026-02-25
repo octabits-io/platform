@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@3.1.2/schema.json",
+  "changelog": ["@changesets/changelog-github", { "repo": "octabits-io/platform" }],
+  "commit": false,
+  "fixed": [],
+  "linked": [
+    ["@octabits-io/foundation", "@octabits-io/drizzle-toolkit", "@octabits-io/pii", "@octabits-io/drizzle-test"]
+  ],
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": []
+}

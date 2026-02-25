@@ -1,0 +1,32 @@
+{
+  "name": "@octabits-io/platform",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@10.5.2",
+  "scripts": {
+    "prepare": "simple-git-hooks",
+    "build": "turbo build",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "clean": "turbo clean && rm -rf node_modules .turbo",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:publish": "turbo run build && changeset publish"
+  },
+  "simple-git-hooks": {
+    "commit-msg": "pnpm commitlint --edit $1"
+  },
+  "devDependencies": {
+    "@changesets/changelog-github": "^0.5.2",
+    "@changesets/cli": "^2.29.8",
+    "@commitlint/cli": "^20.4.2",
+    "@commitlint/config-conventional": "^20.4.2",
+    "@types/bun": "latest",
+    "simple-git-hooks": "^2.13.1",
+    "tsup": "^8",
+    "turbo": "^2.8.10",
+    "typescript": "^5",
+    "zod": "^4"
+  }
+}

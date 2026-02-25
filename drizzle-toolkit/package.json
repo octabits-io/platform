@@ -1,0 +1,53 @@
+{
+  "name": "@octabits-io/drizzle-toolkit",
+  "version": "0.1.0",
+  "description": "Drizzle ORM toolkit: database helpers and workflow utilities",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./db": {
+      "import": "./dist/db/index.js",
+      "types": "./dist/db/index.d.ts"
+    },
+    "./workflow": {
+      "import": "./dist/workflow/index.js",
+      "types": "./dist/workflow/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:integration": "vitest run --project integration",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsup"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/octabits-io/platform.git",
+    "directory": "drizzle-toolkit"
+  },
+  "homepage": "https://github.com/octabits-io/platform/tree/main/drizzle-toolkit",
+  "bugs": {
+    "url": "https://github.com/octabits-io/platform/issues"
+  },
+  "devDependencies": {
+    "drizzle-orm": "^0.45",
+    "vitest": "^4",
+    "@octabits-io/drizzle-test": "workspace:*",
+    "testcontainers": "^11",
+    "@testcontainers/postgresql": "^11",
+    "pg": "^8",
+    "@types/pg": "^8"
+  },
+  "peerDependencies": {
+    "typescript": "^5",
+    "drizzle-orm": "^0.45",
+    "zod": "^4",
+    "@octabits-io/foundation": "workspace:^"
+  }
+}

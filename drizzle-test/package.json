@@ -1,0 +1,49 @@
+{
+  "name": "@octabits-io/drizzle-test",
+  "version": "0.1.0",
+  "description": "Drizzle ORM test utilities with testcontainers for PostgreSQL",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsup"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/octabits-io/platform.git",
+    "directory": "drizzle-test"
+  },
+  "homepage": "https://github.com/octabits-io/platform/tree/main/drizzle-test",
+  "bugs": {
+    "url": "https://github.com/octabits-io/platform/issues"
+  },
+  "devDependencies": {
+    "@types/pg": "^8",
+    "vitest": "^4",
+    "testcontainers": "^11",
+    "@testcontainers/postgresql": "^11",
+    "pg": "^8",
+    "drizzle-orm": "^0.45"
+  },
+  "peerDependencies": {
+    "typescript": "^5",
+    "drizzle-orm": "^0.45",
+    "pg": "^8",
+    "vitest": "^3",
+    "testcontainers": "^11",
+    "@testcontainers/postgresql": "^11"
+  }
+}

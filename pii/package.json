@@ -1,0 +1,47 @@
+{
+  "name": "@octabits-io/pii",
+  "version": "0.1.0",
+  "description": "PII encryption and tokenization utilities",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsup"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE", "THIRD-PARTY-NOTICES.md"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/octabits-io/platform.git",
+    "directory": "pii"
+  },
+  "homepage": "https://github.com/octabits-io/platform/tree/main/pii",
+  "bugs": {
+    "url": "https://github.com/octabits-io/platform/issues"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2",
+    "@noble/ciphers": "^2",
+    "@noble/curves": "^2",
+    "@scure/base": "^2"
+  },
+  "devDependencies": {
+    "vitest": "^4"
+  },
+  "peerDependencies": {
+    "typescript": "^5",
+    "zod": "^4",
+    "@octabits-io/foundation": "workspace:^"
+  }
+}
