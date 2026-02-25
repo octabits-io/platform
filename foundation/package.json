@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/foundation",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Core utilities: Result types, IoC container, logger, and helpers",
   "license": "MIT",
   "type": "module",
@@ -29,7 +29,11 @@
       "types": "./dist/utils/index.d.ts"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "publishConfig": {
     "access": "public"
   },

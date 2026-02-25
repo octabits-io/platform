@@ -11,8 +11,8 @@
     "typecheck": "turbo typecheck",
     "clean": "turbo clean && rm -rf node_modules .turbo",
     "changeset": "changeset",
-    "changeset:version": "changeset version",
-    "changeset:publish": "turbo run build && changeset publish"
+    "changeset:version": "GITHUB_TOKEN=$(passage show github/token) changeset version",
+    "changeset:publish": "GITHUB_TOKEN=$(passage show github/token) turbo run build && changeset publish"
   },
   "simple-git-hooks": {
     "commit-msg": "pnpm commitlint --edit $1"

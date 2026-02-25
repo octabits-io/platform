@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/pii",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "PII encryption and tokenization utilities",
   "license": "MIT",
   "type": "module",
@@ -17,7 +17,12 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist", "README.md", "LICENSE", "THIRD-PARTY-NOTICES.md"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md"
+  ],
   "publishConfig": {
     "access": "public"
   },
