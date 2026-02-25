@@ -12,7 +12,7 @@
     "clean": "turbo clean && rm -rf node_modules .turbo",
     "changeset": "changeset",
     "changeset:version": "GITHUB_TOKEN=$(passage show github/token) changeset version",
-    "changeset:publish": "GITHUB_TOKEN=$(passage show github/token) turbo run build && changeset publish"
+    "changeset:publish": "turbo run build && echo \"//registry.npmjs.org/:_authToken=$(passage show npm/token/octabits)\" > .npmrc && changeset publish; rm -f .npmrc"
   },
   "simple-git-hooks": {
     "commit-msg": "pnpm commitlint --edit $1"
