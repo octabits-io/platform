@@ -1,4 +1,4 @@
-import { type OctError, type Result } from '@octabits-io/foundation/result';
+import { type OctError, type Result, ok, err } from '@octabits-io/foundation/result';
 import crypto from 'node:crypto';
 import { Encrypter, Decrypter } from './typage/index.js';
 
@@ -41,10 +41,7 @@ export function encryptSymmetric(value: string, symmetricKey: Buffer): Result<Bu
   encData = Buffer.concat([encData, cipher.final()]);
   const authTag = cipher.getAuthTag();
   const buffer = Buffer.concat([iv, authTag, encData]);
-  return {
-    ok: true,
-    value: buffer
-  }
+  return ok(buffer);
 }
 
 export function decryptSymmetric(encrypted: Buffer, symmetricKey: Buffer): Result<string, SymmetricEncryptionError> {
@@ -57,16 +54,9 @@ export function decryptSymmetric(encrypted: Buffer, symmetricKey: Buffer): Resul
     decipher.setAuthTag(tag);
     let decryptedData = decipher.update(encData);
     decryptedData = Buffer.concat([decryptedData, decipher.final()]);
-    return {
-      ok: true,
-      value: decryptedData.toString('utf8'),
-    };
+    return ok(decryptedData.toString('utf8'));
   } catch(e) {
-    return {
-      ok: false,
-      error: { key: 'symmetric_encryption_error', message: e instanceof Error ? e.message : String(e) },
-    }
-
+    return err({ key: 'symmetric_encryption_error' as const, message: e instanceof Error ? e.message : String(e) });
   }
 }
 
@@ -85,15 +75,9 @@ export async function encryptHybrid(value: string, recipient: string): Promise<R
     const encrypter = new Encrypter();
     encrypter.addRecipient(recipient);
     const ciphertext = await encrypter.encrypt(value);
-    return {
-      ok: true,
-      value: Buffer.from(ciphertext),
-    };
+    return ok(Buffer.from(ciphertext));
   } catch (error) {
-    return {
-      ok: false,
-      error: { key: 'hybrid_encryption_error', message: error instanceof Error ? error.message : String(error) },
-    };
+    return err({ key: 'hybrid_encryption_error' as const, message: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -110,27 +94,18 @@ export async function decryptHybrid(
   try {
     // Verify this is age format
     if (!isAgeFormat(encrypted)) {
-      return {
-        ok: false,
-        error: {
-          key: 'invalid_format_error',
-          message: 'Data is not in age encryption format. Legacy RSA data must be migrated first.',
-        },
-      };
+      return err({
+        key: 'invalid_format_error' as const,
+        message: 'Data is not in age encryption format. Legacy RSA data must be migrated first.',
+      });
     }
 
     // Age format: use age decryption
     const decrypter = new Decrypter();
     decrypter.addIdentity(identity);
     const plaintext = await decrypter.decrypt(encrypted, 'text');
-    return {
-      ok: true,
-      value: plaintext,
-    };
+    return ok(plaintext);
   } catch (error) {
-    return {
-      ok: false,
-      error: { key: 'hybrid_decryption_error', message: error instanceof Error ? error.message : String(error) },
-    };
+    return err({ key: 'hybrid_decryption_error' as const, message: error instanceof Error ? error.message : String(error) });
   }
 }

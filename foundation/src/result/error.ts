@@ -1,4 +1,5 @@
 import type { Result } from './types.ts';
+import { ok, err } from './types.ts';
 
 export interface OctError {
   key: string;
@@ -95,15 +96,15 @@ function toExceptionError(thrown: unknown): OctExceptionError {
 
 export function tryCatch<T>(fn: () => T): Result<T, OctExceptionError> {
   try {
-    return { ok: true, value: fn() };
+    return ok(fn());
   } catch (e) {
-    return { ok: false, error: toExceptionError(e) };
+    return err(toExceptionError(e));
   }
 }
 
 export function tryCatchAsync<T>(fn: () => Promise<T>): Promise<Result<T, OctExceptionError>> {
   return fn().then(
-    (value) => ({ ok: true, value }) as Result<T, OctExceptionError>,
-    (e) => ({ ok: false, error: toExceptionError(e) }),
+    (value) => ok(value),
+    (e) => err(toExceptionError(e)),
   );
 }

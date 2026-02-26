@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { Result, OctError } from '@octabits-io/foundation/result';
+import { type Result, type OctError, ok, err } from '@octabits-io/foundation/result';
 import { encryptSymmetric, decryptSymmetric } from './encryption.ts';
 
 export interface MasterKeyError extends OctError {
@@ -40,29 +40,17 @@ export function createEnvVarMasterKeyProvider(masterKeySource: string, info = DE
     async encrypt(plaintext: Buffer): Promise<Result<Buffer, MasterKeyError>> {
       const result = encryptSymmetric(plaintext.toString('utf8'), key);
       if (!result.ok) {
-        return {
-          ok: false,
-          error: {
-            key: 'master_key_error',
-            message: `Failed to encrypt with master key: ${result.error.message}`,
-          },
-        };
+        return err({ key: 'master_key_error' as const, message: `Failed to encrypt with master key: ${result.error.message}` });
       }
-      return { ok: true, value: result.value };
+      return ok(result.value);
     },
 
     async decrypt(ciphertext: Buffer): Promise<Result<Buffer, MasterKeyError>> {
       const result = decryptSymmetric(ciphertext, key);
       if (!result.ok) {
-        return {
-          ok: false,
-          error: {
-            key: 'master_key_error',
-            message: `Failed to decrypt with master key: ${result.error.message}`,
-          },
-        };
+        return err({ key: 'master_key_error' as const, message: `Failed to decrypt with master key: ${result.error.message}` });
       }
-      return { ok: true, value: Buffer.from(result.value, 'utf8') };
+      return ok(Buffer.from(result.value, 'utf8'));
     },
   };
 }

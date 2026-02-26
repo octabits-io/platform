@@ -10,12 +10,12 @@ Type-safe error handling using the Result pattern — no thrown exceptions.
 
 ```ts
 import type { Result, OctError } from '@octabits-io/foundation/result';
-import { tryCatch, tryCatchAsync, isOctError, toOctError } from '@octabits-io/foundation/result';
+import { ok, err, tryCatch, tryCatchAsync, isOctError, toOctError } from '@octabits-io/foundation/result';
 
 // Result<T, E> is { ok: true; value: T } | { ok: false; error: E }
 function divide(a: number, b: number): Result<number> {
-  if (b === 0) return { ok: false, error: { key: 'division_by_zero', message: 'Cannot divide by zero' } };
-  return { ok: true, value: a / b };
+  if (b === 0) return err({ key: 'division_by_zero', message: 'Cannot divide by zero' });
+  return ok(a / b);
 }
 
 // Wrap throwing code into a Result

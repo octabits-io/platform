@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
+import { ok } from '@octabits-io/foundation/result';
 import { defineStep, buildTypedWorkflow, isRetryableError } from './define-step.ts';
 import { createStepHandlerRegistry } from './step-handler-registry.ts';
 import type { StepExecutionContext } from './types.ts';
@@ -389,7 +390,7 @@ describe('buildTypedWorkflow', () => {
       startWorkflow: async (def: any, input: any) => {
         receivedDefinition = def;
         receivedInput = input;
-        return { ok: true as const, value: { workflowId: 1, totalSteps: 1, enqueuedSteps: ['stepA'] } };
+        return ok({ workflowId: 1, totalSteps: 1, enqueuedSteps: ['stepA'] });
       },
     } as any;
 

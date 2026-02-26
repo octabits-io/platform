@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, inject } from 'v
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
 import { Pool } from 'pg';
+import { ok, err } from '@octabits-io/foundation/result';
 import { createWorkflowEngine } from './engine.ts';
 import { createStepHandlerRegistry } from './step-handler-registry.ts';
 import type { StepHandler } from './types.ts';
@@ -43,7 +44,7 @@ beforeEach(async () => {
 describe('workflow engine integration', () => {
   it('starts a single-step workflow and creates records', async () => {
     const registry = createStepHandlerRegistry();
-    const handler: StepHandler = async () => ({ ok: true, value: { result: 'done' } });
+    const handler: StepHandler = async () => ok({ result: 'done' });
     registry.register('simple-handler', handler);
 
     const enqueuedJobs: any[] = [];
@@ -54,7 +55,7 @@ describe('workflow engine integration', () => {
       stepHandlerRegistry: registry,
       enqueueStepJob: async (payload) => {
         enqueuedJobs.push(payload);
-        return { ok: true, value: { jobId: `job-${payload.stepId}`, queue: 'test' } };
+        return ok({ jobId: `job-${payload.stepId}`, queue: 'test' });
       },
       tenantId: TENANT_ID,
     });
@@ -90,7 +91,7 @@ describe('workflow engine integration', () => {
 
   it('executes a step and marks workflow complete', async () => {
     const registry = createStepHandlerRegistry();
-    const handler: StepHandler = async () => ({ ok: true, value: { answer: 42 } });
+    const handler: StepHandler = async () => ok({ answer: 42 });
     registry.register('compute', handler);
 
     const engine = createWorkflowEngine({
@@ -98,7 +99,7 @@ describe('workflow engine integration', () => {
       tables: { workflow: workflowTable, workflowStep: workflowStepTable },
       logger: noopLogger(),
       stepHandlerRegistry: registry,
-      enqueueStepJob: async (payload) => ({ ok: true, value: { jobId: `job-${payload.stepId}`, queue: 'test' } }),
+      enqueueStepJob: async (payload) => ok({ jobId: `job-${payload.stepId}`, queue: 'test' }),
       tenantId: TENANT_ID,
     });
 
@@ -135,10 +136,10 @@ describe('workflow engine integration', () => {
   it('runs a multi-step DAG workflow end-to-end', async () => {
     const registry = createStepHandlerRegistry();
 
-    const fetchHandler: StepHandler = async () => ({ ok: true, value: { data: 'raw-data' } });
+    const fetchHandler: StepHandler = async () => ok({ data: 'raw-data' });
     const processHandler: StepHandler = async (ctx) => {
       const fetchOutput = ctx.dependencyOutputs['fetch'] as any;
-      return { ok: true, value: { processed: `${fetchOutput.data}-processed` } };
+      return ok({ processed: `${fetchOutput.data}-processed` });
     };
 
     registry.register('fetch', fetchHandler);
@@ -152,7 +153,7 @@ describe('workflow engine integration', () => {
       stepHandlerRegistry: registry,
       enqueueStepJob: async (payload) => {
         enqueuedJobs.push(payload);
-        return { ok: true, value: { jobId: `job-${payload.stepId}`, queue: 'test' } };
+        return ok({ jobId: `job-${payload.stepId}`, queue: 'test' });
       },
       tenantId: TENANT_ID,
     });
@@ -202,11 +203,8 @@ describe('workflow engine integration', () => {
   it('handles step failure and skips downstream steps', async () => {
     const registry = createStepHandlerRegistry();
 
-    const failHandler: StepHandler = async () => ({
-      ok: false,
-      error: { key: 'step_error', message: 'Fetch failed', retryable: false },
-    });
-    const neverHandler: StepHandler = async () => ({ ok: true, value: {} });
+    const failHandler: StepHandler = async () => err({ key: 'step_error' as const, message: 'Fetch failed', retryable: false });
+    const neverHandler: StepHandler = async () => ok({});
 
     registry.register('fail-step', failHandler);
     registry.register('downstream', neverHandler);
@@ -216,7 +214,7 @@ describe('workflow engine integration', () => {
       tables: { workflow: workflowTable, workflowStep: workflowStepTable },
       logger: noopLogger(),
       stepHandlerRegistry: registry,
-      enqueueStepJob: async (payload) => ({ ok: true, value: { jobId: `job-${payload.stepId}`, queue: 'test' } }),
+      enqueueStepJob: async (payload) => ok({ jobId: `job-${payload.stepId}`, queue: 'test' }),
       tenantId: TENANT_ID,
     });
 
@@ -261,14 +259,14 @@ describe('workflow engine integration', () => {
 
   it('cancels a running workflow', async () => {
     const registry = createStepHandlerRegistry();
-    registry.register('handler', async () => ({ ok: true, value: {} }));
+    registry.register('handler', async () => ok({}));
 
     const engine = createWorkflowEngine({
       db,
       tables: { workflow: workflowTable, workflowStep: workflowStepTable },
       logger: noopLogger(),
       stepHandlerRegistry: registry,
-      enqueueStepJob: async (payload) => ({ ok: true, value: { jobId: `job-${payload.stepId}`, queue: 'test' } }),
+      enqueueStepJob: async (payload) => ok({ jobId: `job-${payload.stepId}`, queue: 'test' }),
       tenantId: TENANT_ID,
     });
 
@@ -301,14 +299,14 @@ describe('workflow engine integration', () => {
 
   it('lists workflows with filtering', async () => {
     const registry = createStepHandlerRegistry();
-    registry.register('handler', async () => ({ ok: true, value: {} }));
+    registry.register('handler', async () => ok({}));
 
     const engine = createWorkflowEngine({
       db,
       tables: { workflow: workflowTable, workflowStep: workflowStepTable },
       logger: noopLogger(),
       stepHandlerRegistry: registry,
-      enqueueStepJob: async (payload) => ({ ok: true, value: { jobId: `job-${payload.stepId}`, queue: 'test' } }),
+      enqueueStepJob: async (payload) => ok({ jobId: `job-${payload.stepId}`, queue: 'test' }),
       tenantId: TENANT_ID,
     });
 
@@ -343,7 +341,7 @@ describe('workflow engine integration', () => {
       tables: { workflow: workflowTable, workflowStep: workflowStepTable },
       logger: noopLogger(),
       stepHandlerRegistry: registry,
-      enqueueStepJob: async () => ({ ok: true, value: { jobId: '1', queue: 'test' } }),
+      enqueueStepJob: async () => ok({ jobId: '1', queue: 'test' }),
       tenantId: TENANT_ID,
     });
 
@@ -356,14 +354,14 @@ describe('workflow engine integration', () => {
 
   it('handles handleStepExhausted for DLQ scenarios', async () => {
     const registry = createStepHandlerRegistry();
-    registry.register('handler', async () => ({ ok: true, value: {} }));
+    registry.register('handler', async () => ok({}));
 
     const engine = createWorkflowEngine({
       db,
       tables: { workflow: workflowTable, workflowStep: workflowStepTable },
       logger: noopLogger(),
       stepHandlerRegistry: registry,
-      enqueueStepJob: async (payload) => ({ ok: true, value: { jobId: `job-${payload.stepId}`, queue: 'test' } }),
+      enqueueStepJob: async (payload) => ok({ jobId: `job-${payload.stepId}`, queue: 'test' }),
       tenantId: TENANT_ID,
     });
 
@@ -397,7 +395,7 @@ describe('workflow engine integration', () => {
     let handlerCalled = false;
     registry.register('handler', async () => {
       handlerCalled = true;
-      return { ok: true, value: {} };
+      return ok({});
     });
 
     const engine = createWorkflowEngine({
@@ -405,7 +403,7 @@ describe('workflow engine integration', () => {
       tables: { workflow: workflowTable, workflowStep: workflowStepTable },
       logger: noopLogger(),
       stepHandlerRegistry: registry,
-      enqueueStepJob: async (payload) => ({ ok: true, value: { jobId: `job-${payload.stepId}`, queue: 'test' } }),
+      enqueueStepJob: async (payload) => ok({ jobId: `job-${payload.stepId}`, queue: 'test' }),
       tenantId: TENANT_ID,
     });
 
@@ -434,16 +432,13 @@ describe('workflow engine integration', () => {
   it('handles parallel branches in a diamond DAG', async () => {
     const registry = createStepHandlerRegistry();
 
-    registry.register('start', async () => ({ ok: true, value: { started: true } }));
-    registry.register('branch-a', async () => ({ ok: true, value: { a: 'done' } }));
-    registry.register('branch-b', async () => ({ ok: true, value: { b: 'done' } }));
-    registry.register('merge', async (ctx) => ({
-      ok: true,
-      value: {
-        merged: true,
-        fromA: (ctx.dependencyOutputs['branch-a'] as any)?.a,
-        fromB: (ctx.dependencyOutputs['branch-b'] as any)?.b,
-      },
+    registry.register('start', async () => ok({ started: true }));
+    registry.register('branch-a', async () => ok({ a: 'done' }));
+    registry.register('branch-b', async () => ok({ b: 'done' }));
+    registry.register('merge', async (ctx) => ok({
+      merged: true,
+      fromA: (ctx.dependencyOutputs['branch-a'] as any)?.a,
+      fromB: (ctx.dependencyOutputs['branch-b'] as any)?.b,
     }));
 
     const enqueuedJobs: any[] = [];
@@ -454,7 +449,7 @@ describe('workflow engine integration', () => {
       stepHandlerRegistry: registry,
       enqueueStepJob: async (payload) => {
         enqueuedJobs.push(payload);
-        return { ok: true, value: { jobId: `job-${payload.stepId}`, queue: 'test' } };
+        return ok({ jobId: `job-${payload.stepId}`, queue: 'test' });
       },
       tenantId: TENANT_ID,
     });

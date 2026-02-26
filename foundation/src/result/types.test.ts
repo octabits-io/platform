@@ -1,10 +1,7 @@
 import { describe, it, expect, expectTypeOf } from 'vitest';
 import type { Result } from './types.ts';
+import { ok, err } from './types.ts';
 import { tryCatch, type OctError, type OctErrorWithKey, type OctExceptionError } from './error.ts';
-
-// Helper to create ok/error results (mirrors real usage patterns)
-const ok = <T>(value: T): Result<T> => ({ ok: true, value });
-const err = <E = OctError>(error: E): Result<never, E> => ({ ok: false, error });
 
 describe('Result<T, E>', () => {
   describe('ok variant', () => {
@@ -114,9 +111,9 @@ describe('error propagation', () => {
   // Safe — returns errors as values
   function safe(n: number): Result<number, DomainError> {
     if (n % 3 === 1) {
-      return { ok: false, error: { key: 'domain', message: 'bad input', detail: 'odd-mod-3' } };
+      return err({ key: 'domain', message: 'bad input', detail: 'odd-mod-3' });
     }
-    return { ok: true, value: n };
+    return ok(n);
   }
 
   // Composes both, propagating errors via early return

@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { ok } from '@octabits-io/foundation/result';
 import { createStepHandlerRegistry } from './step-handler-registry.ts';
 import type { StepHandler } from './types.ts';
 
-const noopHandler: StepHandler = async () => ({ ok: true, value: {} });
+const noopHandler: StepHandler = async () => ok({});
 
 describe('createStepHandlerRegistry', () => {
   it('starts empty', () => {
@@ -39,8 +40,8 @@ describe('createStepHandlerRegistry', () => {
 
   it('overwrites handler when registering same type twice', () => {
     const registry = createStepHandlerRegistry();
-    const handler1: StepHandler = async () => ({ ok: true, value: { v: 1 } });
-    const handler2: StepHandler = async () => ({ ok: true, value: { v: 2 } });
+    const handler1: StepHandler = async () => ok({ v: 1 });
+    const handler2: StepHandler = async () => ok({ v: 2 });
 
     registry.register('step', handler1);
     registry.register('step', handler2);

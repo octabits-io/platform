@@ -1,7 +1,7 @@
 import { eq, and, sql } from 'drizzle-orm';
 import type { PgDatabase } from 'drizzle-orm/pg-core';
 import type { z } from 'zod';
-import type { Result } from '@octabits-io/foundation/result';
+import { type Result, ok, err } from '@octabits-io/foundation/result';
 import type { Logger } from '@octabits-io/foundation/logger';
 import type { ServiceResolver } from '@octabits-io/foundation/ioc';
 import type { QueuedJob, QueueError } from './queue';
@@ -65,20 +65,14 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
     const { steps } = definition;
 
     if (steps.length === 0) {
-      return {
-        ok: false,
-        error: { key: 'invalid_workflow_definition_error', message: 'Workflow must have at least one step' },
-      };
+      return err({ key: 'invalid_workflow_definition_error' as const, message: 'Workflow must have at least one step' });
     }
 
     // Check unique keys
     const keys = new Set<string>();
     for (const step of steps) {
       if (keys.has(step.key)) {
-        return {
-          ok: false,
-          error: { key: 'invalid_workflow_definition_error', message: `Duplicate step key: ${step.key}` },
-        };
+        return err({ key: 'invalid_workflow_definition_error' as const, message: `Duplicate step key: ${step.key}` });
       }
       keys.add(step.key);
     }
@@ -87,19 +81,13 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
     for (const step of steps) {
       for (const dep of step.dependencies ?? []) {
         if (!keys.has(dep)) {
-          return {
-            ok: false,
-            error: {
-              key: 'invalid_workflow_definition_error',
-              message: `Step '${step.key}' depends on unknown step '${dep}'`,
-            },
-          };
+          return err({
+            key: 'invalid_workflow_definition_error' as const,
+            message: `Step '${step.key}' depends on unknown step '${dep}'`,
+          });
         }
         if (dep === step.key) {
-          return {
-            ok: false,
-            error: { key: 'invalid_workflow_definition_error', message: `Step '${step.key}' cannot depend on itself` },
-          };
+          return err({ key: 'invalid_workflow_definition_error' as const, message: `Step '${step.key}' cannot depend on itself` });
         }
       }
     }
@@ -135,27 +123,21 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
     }
 
     if (visited !== steps.length) {
-      return {
-        ok: false,
-        error: { key: 'invalid_workflow_definition_error', message: 'Workflow contains circular dependencies' },
-      };
+      return err({ key: 'invalid_workflow_definition_error' as const, message: 'Workflow contains circular dependencies' });
     }
 
     // Check all handlers exist
     for (const step of steps) {
       if (!stepHandlerRegistry.has(step.type)) {
-        return {
-          ok: false,
-          error: {
-            key: 'step_handler_not_found',
-            message: `No handler registered for step type '${step.type}'`,
-            stepType: step.type,
-          },
-        };
+        return err({
+          key: 'step_handler_not_found' as const,
+          message: `No handler registered for step type '${step.type}'`,
+          stepType: step.type,
+        });
       }
     }
 
-    return { ok: true, value: undefined };
+    return ok(undefined);
   }
 
   /**
@@ -249,10 +231,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
       enqueuedSteps: enqueuedStepKeys,
     });
 
-    return {
-      ok: true,
-      value: { workflowId, totalSteps: steps.length, enqueuedSteps: enqueuedStepKeys },
-    };
+    return ok({ workflowId, totalSteps: steps.length, enqueuedSteps: enqueuedStepKeys });
   }
 
   /**
@@ -275,13 +254,13 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
       .then((rows) => rows[0]);
 
     if (!workflow) {
-      return { ok: false, error: { key: 'workflow_not_found', message: `Workflow ${workflowId} not found` } };
+      return err({ key: 'workflow_not_found' as const, message: `Workflow ${workflowId} not found` });
     }
 
     // Skip if workflow is already in a terminal state
     if (workflow.status === 'cancelled' || workflow.status === 'failed') {
       logger.info('Skipping step for non-active workflow', { workflowId, stepId, status: workflow.status });
-      return { ok: true, value: undefined };
+      return ok(undefined);
     }
 
     const step = await db
@@ -296,7 +275,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
       .then((rows) => rows[0]);
 
     if (!step) {
-      return { ok: false, error: { key: 'workflow_not_found', message: `Step ${stepId} not found` } };
+      return err({ key: 'workflow_not_found' as const, message: `Step ${stepId} not found` });
     }
 
     // Mark step as running
@@ -318,10 +297,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
         const depStep = depSteps.find((s) => s.key === depKey);
         if (!depStep || depStep.status !== 'completed') {
           logger.error('Step dependency not completed', new Error(`Dependency '${depKey}' is ${depStep?.status ?? 'missing'}`));
-          return {
-            ok: false,
-            error: { key: 'step_error', message: `Dependency '${depKey}' is not completed` },
-          };
+          return err({ key: 'step_error' as const, message: `Dependency '${depKey}' is not completed` });
         }
         dependencyOutputs[depKey] = depStep.output;
       }
@@ -331,10 +307,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
     const handler = stepHandlerRegistry.get(step.type);
     if (!handler) {
       await markStepFailed(stepId, workflowId, `No handler for step type '${step.type}'`);
-      return {
-        ok: false,
-        error: { key: 'step_handler_not_found', message: `No handler for '${step.type}'`, stepType: step.type },
-      };
+      return err({ key: 'step_handler_not_found' as const, message: `No handler for '${step.type}'`, stepType: step.type });
     }
 
     // Execute handler
@@ -364,7 +337,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
         await checkWorkflowFailure(workflowId);
       }
 
-      return { ok: true, value: undefined };
+      return ok(undefined);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown step execution error';
       logger.error('Step execution threw', error instanceof Error ? error : new Error(message));
@@ -538,11 +511,11 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
       .then((rows) => rows[0]);
 
     if (!workflow) {
-      return { ok: false, error: { key: 'workflow_not_found', message: `Workflow ${workflowId} not found` } };
+      return err({ key: 'workflow_not_found' as const, message: `Workflow ${workflowId} not found` });
     }
 
     if (workflow.status !== 'pending' && workflow.status !== 'running') {
-      return { ok: true, value: undefined };
+      return ok(undefined);
     }
 
     const now = new Date().toISOString();
@@ -563,7 +536,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
       .where(eq(tables.workflow.id, workflowId));
 
     logger.info('Workflow cancelled', { workflowId });
-    return { ok: true, value: undefined };
+    return ok(undefined);
   }
 
   /**
@@ -584,7 +557,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
       .then((rows) => rows[0]);
 
     if (!workflow) {
-      return { ok: false, error: { key: 'workflow_not_found', message: `Workflow ${workflowId} not found` } };
+      return err({ key: 'workflow_not_found' as const, message: `Workflow ${workflowId} not found` });
     }
 
     const steps = await db
@@ -592,10 +565,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
       .from(tables.workflowStep)
       .where(eq(tables.workflowStep.workflowId, workflowId));
 
-    return {
-      ok: true,
-      value: mapWorkflowToStatusResult(workflow, steps),
-    };
+    return ok(mapWorkflowToStatusResult(workflow, steps));
   }
 
   /**
@@ -632,7 +602,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
       results.push(mapWorkflowToStatusResult(w, steps));
     }
 
-    return { ok: true, value: results };
+    return ok(results);
   }
 
   /**

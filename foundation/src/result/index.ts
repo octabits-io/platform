@@ -12,3 +12,4 @@ export type {
 export { isOctError, toOctError, isAbortError, tryCatch, tryCatchAsync } from './error.ts';
 export type { OctExceptionError } from './error.ts';
 export type { Result } from './types.ts';
+export { ok, err } from './types.ts';

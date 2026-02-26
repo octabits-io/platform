@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { Result } from '@octabits-io/foundation/result';
+import { type Result, ok, err } from '@octabits-io/foundation/result';
 import type { ServiceResolver } from '@octabits-io/foundation/ioc';
 import type {
   StepHandler,
@@ -151,14 +151,11 @@ export function defineStep<
       // Phase 1: Parse workflow input
       const inputResult = workflowInputSchema.safeParse(ctx.workflowInput);
       if (!inputResult.success) {
-        return {
-          ok: false,
-          error: {
-            key: 'step_error',
-            message: `[${type}] Invalid workflow input: ${inputResult.error.message}`,
-            retryable: false,
-          },
-        };
+        return err({
+          key: 'step_error' as const,
+          message: `[${type}] Invalid workflow input: ${inputResult.error.message}`,
+          retryable: false,
+        });
       }
 
       // Phase 2: Parse dependency outputs
@@ -167,14 +164,11 @@ export function defineStep<
         const depOutput = ctx.dependencyOutputs[depKey];
         const depResult = (depStep as TypedStep).outputSchema.safeParse(depOutput);
         if (!depResult.success) {
-          return {
-            ok: false,
-            error: {
-              key: 'step_error',
-              message: `[${type}] Invalid dependency output '${depKey}': ${depResult.error.message}`,
-              retryable: false,
-            },
-          };
+          return err({
+            key: 'step_error' as const,
+            message: `[${type}] Invalid dependency output '${depKey}': ${depResult.error.message}`,
+            retryable: false,
+          });
         }
         parsedDeps[depKey] = depResult.data;
       }
@@ -198,29 +192,23 @@ export function defineStep<
       // Phase 5: Validate output
       const outputResult = outputSchema.safeParse(output);
       if (!outputResult.success) {
-        return {
-          ok: false,
-          error: {
-            key: 'step_error',
-            message: `[${type}] Invalid step output: ${outputResult.error.message}`,
-            retryable: false,
-          },
-        };
+        return err({
+          key: 'step_error' as const,
+          message: `[${type}] Invalid step output: ${outputResult.error.message}`,
+          retryable: false,
+        });
       }
 
-      return { ok: true, value: outputResult.data };
+      return ok(outputResult.data);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown step error';
       const retryable = checkRetryable(error);
 
-      return {
-        ok: false,
-        error: {
-          key: 'step_error',
-          message,
-          retryable,
-        },
-      };
+      return err({
+        key: 'step_error' as const,
+        message,
+        retryable,
+      });
     }
   };
 

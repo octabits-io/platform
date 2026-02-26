@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { ok } from '@octabits-io/foundation/result';
 import { createWorkflowEngine } from './engine.ts';
 import { createStepHandlerRegistry } from './step-handler-registry.ts';
 import type { StepHandler } from './types.ts';
 
-const noopHandler: StepHandler = async () => ({ ok: true, value: {} });
+const noopHandler: StepHandler = async () => ok({});
 
 /**
  * Creates a minimal engine instance suitable for testing validateDefinition.
@@ -20,7 +21,7 @@ function createTestEngine(registeredTypes: string[] = []) {
     tables: { workflow: {} as any, workflowStep: {} as any },
     logger: { info: () => {}, error: () => {}, warn: () => {}, debug: () => {} } as any,
     stepHandlerRegistry: registry,
-    enqueueStepJob: async () => ({ ok: true, value: { jobId: '1', queue: 'test' } }),
+    enqueueStepJob: async () => ok({ jobId: '1', queue: 'test' }),
     tenantId: 'tenant-1',
   });
 }

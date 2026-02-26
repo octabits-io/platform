@@ -10,7 +10,7 @@
  * - Result pattern for error handling
  */
 
-import type { Result, OctError } from '@octabits-io/foundation/result';
+import { type Result, type OctError, ok, err } from '@octabits-io/foundation/result';
 import { z } from 'zod';
 import { encryptHybrid, decryptHybrid } from './encryption.ts';
 
@@ -34,16 +34,13 @@ export async function encryptPiiString(
   recipient: string
 ): Promise<Result<Buffer | null, PiiEncryptionError>> {
   if (value === null || value === undefined) {
-    return { ok: true, value: null };
+    return ok(null);
   }
   const result = await encryptHybrid(value, recipient);
   if (!result.ok) {
-    return {
-      ok: false,
-      error: { key: 'pii_encryption_error', message: `Failed to encrypt PII: ${result.error.message}` },
-    };
+    return err({ key: 'pii_encryption_error' as const, message: `Failed to encrypt PII: ${result.error.message}` });
   }
-  return { ok: true, value: result.value };
+  return ok(result.value);
 }
 
 /**
@@ -58,16 +55,13 @@ export async function decryptPiiString(
   identity: string
 ): Promise<Result<string | null, PiiDecryptionError>> {
   if (encrypted === null) {
-    return { ok: true, value: null };
+    return ok(null);
   }
   const result = await decryptHybrid(encrypted, identity);
   if (!result.ok) {
-    return {
-      ok: false,
-      error: { key: 'pii_decryption_error', message: `Failed to decrypt PII: ${result.error.message}` },
-    };
+    return err({ key: 'pii_decryption_error' as const, message: `Failed to decrypt PII: ${result.error.message}` });
   }
-  return { ok: true, value: result.value };
+  return ok(result.value);
 }
 
 /**
@@ -82,7 +76,7 @@ export async function encryptPiiJson<T>(
   recipient: string
 ): Promise<Result<Buffer | null, PiiEncryptionError>> {
   if (value === null || value === undefined) {
-    return { ok: true, value: null };
+    return ok(null);
   }
   return encryptPiiString(JSON.stringify(value), recipient);
 }
@@ -102,29 +96,23 @@ export async function decryptPiiJson<T extends z.ZodType>(
   schema: T
 ): Promise<Result<z.infer<T> | null, PiiDecryptionError>> {
   if (encrypted === null) {
-    return { ok: true, value: null };
+    return ok(null);
   }
   const result = await decryptPiiString(encrypted, identity);
   if (!result.ok) {
     return result;
   }
   if (result.value === null) {
-    return { ok: true, value: null };
+    return ok(null);
   }
   try {
     const parsed = JSON.parse(result.value);
     const validated = schema.safeParse(parsed);
     if (!validated.success) {
-      return {
-        ok: false,
-        error: { key: 'pii_decryption_error', message: `Validation failed: ${validated.error.message}` },
-      };
+      return err({ key: 'pii_decryption_error' as const, message: `Validation failed: ${validated.error.message}` });
     }
-    return { ok: true, value: validated.data };
+    return ok(validated.data);
   } catch {
-    return {
-      ok: false,
-      error: { key: 'pii_decryption_error', message: 'Failed to parse decrypted JSON' },
-    };
+    return err({ key: 'pii_decryption_error' as const, message: 'Failed to parse decrypted JSON' });
   }
 }

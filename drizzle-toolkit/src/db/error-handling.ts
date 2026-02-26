@@ -1,4 +1,4 @@
-import type { Result, OctError } from '@octabits-io/foundation/result';
+import { type Result, type OctError, err } from '@octabits-io/foundation/result';
 import type { PostgresErrorCode, OctDatabaseError } from './errors.ts';
 
 /**
@@ -86,15 +86,12 @@ export async function withDbErrorHandling<T, E extends OctError>(
 
     if (pgError?.code) {
       const code = PG_ERROR_CODE_MAP[pgError.code] ?? 'unknown';
-      return {
-        ok: false,
-        error: {
-          key: 'database_error',
-          code,
-          constraint: pgError.constraint,
-          message: error instanceof Error ? error.message : 'Database operation failed',
-        },
-      };
+      return err({
+        key: 'database_error' as const,
+        code,
+        constraint: pgError.constraint,
+        message: error instanceof Error ? error.message : 'Database operation failed',
+      });
     }
 
     // Re-throw non-PostgreSQL errors
@@ -127,22 +124,19 @@ export function handleTransactionError<E extends OctError>(
 ): Result<never, E | OctDatabaseError> {
   // Preserve typed errors from nested service calls
   if (error instanceof TransactionRollbackError) {
-    return { ok: false, error: error.typedError as E };
+    return err(error.typedError as E);
   }
 
   // Convert PostgreSQL errors to OctDatabaseError
   const pgError = extractPgError(error);
   if (pgError?.code) {
     const code = PG_ERROR_CODE_MAP[pgError.code] ?? 'unknown';
-    return {
-      ok: false,
-      error: {
-        key: 'database_error',
-        code,
-        constraint: pgError.constraint,
-        message: error instanceof Error ? error.message : 'Database operation failed',
-      },
-    };
+    return err({
+      key: 'database_error' as const,
+      code,
+      constraint: pgError.constraint,
+      message: error instanceof Error ? error.message : 'Database operation failed',
+    });
   }
 
   // Re-throw unexpected errors

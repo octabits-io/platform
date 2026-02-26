@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { ok, err } from '@octabits-io/foundation/result';
 import {
   TransactionRollbackError,
   PG_ERROR_CODE_MAP,
@@ -106,19 +107,13 @@ describe('extractPgError', () => {
 
 describe('withDbErrorHandling', () => {
   it('passes through a successful result', async () => {
-    const result = await withDbErrorHandling(async () => ({
-      ok: true as const,
-      value: { id: 1 },
-    }));
+    const result = await withDbErrorHandling(async () => ok({ id: 1 }));
 
     expect(result).toEqual({ ok: true, value: { id: 1 } });
   });
 
   it('passes through an error result from the operation', async () => {
-    const result = await withDbErrorHandling(async () => ({
-      ok: false as const,
-      error: { key: 'not_found' as const, message: 'Not found' },
-    }));
+    const result = await withDbErrorHandling(async () => err({ key: 'not_found' as const, message: 'Not found' }));
 
     expect(result).toEqual({ ok: false, error: { key: 'not_found', message: 'Not found' } });
   });
