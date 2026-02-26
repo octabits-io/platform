@@ -1,6 +1,4 @@
-export {
-  createStepHandlerRegistry,
-} from './types.ts';
+export { createStepHandlerRegistry } from './step-handler-registry.ts';
 export type {
   WorkflowStatus,
   WorkflowStepStatus,

@@ -1,6 +1,11 @@
+import type { OctError } from '../result/index.ts';
 import type { Result } from '../result/index.ts';
 
-export function tryDecodeBase64(str: string): Result<string> {
+export interface Base64DecodeError extends OctError {
+  key: 'base64_decode_error';
+}
+
+export function tryDecodeBase64(str: string): Result<string, Base64DecodeError> {
   // Check if the string matches the base64 pattern
   const base64Regex = /^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/;
 
@@ -8,7 +13,7 @@ export function tryDecodeBase64(str: string): Result<string> {
   if (str.length % 4 !== 0) {
     return {
       ok: false,
-      error: null!,
+      error: { key: 'base64_decode_error' as const, message: 'Input length is not a multiple of 4' },
     };
   }
 
@@ -16,7 +21,7 @@ export function tryDecodeBase64(str: string): Result<string> {
   if (!base64Regex.test(str)) {
     return {
       ok: false,
-      error: null!,
+      error: { key: 'base64_decode_error' as const, message: 'Input contains invalid base64 characters' },
     };
   }
 
@@ -30,7 +35,7 @@ export function tryDecodeBase64(str: string): Result<string> {
   } catch (e) {
     return {
       ok: false,
-      error: null!,
+      error: { key: 'base64_decode_error' as const, message: 'Failed to decode base64 string' },
     };
   }
 }

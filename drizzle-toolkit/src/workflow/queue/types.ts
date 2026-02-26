@@ -136,7 +136,7 @@ export interface QueueError extends OctError {
  * Error returned by job handlers when processing fails.
  */
 export interface JobFailedError extends OctError {
-  key: 'job_failed';
+  key: 'job_failed_error';
   message: string;
   /** Job ID that failed */
   jobId?: string;

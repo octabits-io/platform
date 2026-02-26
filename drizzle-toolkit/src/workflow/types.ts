@@ -116,28 +116,6 @@ export interface StepHandlerRegistry {
   types(): string[];
 }
 
-/**
- * Creates a step handler registry.
- */
-export function createStepHandlerRegistry(): StepHandlerRegistry {
-  const handlers = new Map<string, StepHandler>();
-
-  return {
-    register(type: string, handler: StepHandler): void {
-      handlers.set(type, handler);
-    },
-    get(type: string): StepHandler | undefined {
-      return handlers.get(type);
-    },
-    has(type: string): boolean {
-      return handlers.has(type);
-    },
-    types(): string[] {
-      return Array.from(handlers.keys());
-    },
-  };
-}
-
 // ============================================================================
 // Workflow Status / Result Types
 // ============================================================================
@@ -188,12 +166,12 @@ export interface WorkflowNotFoundError extends OctError {
 }
 
 export interface WorkflowAlreadyRunningError extends OctError {
-  key: 'workflow_already_running';
+  key: 'workflow_already_running_error';
   message: string;
 }
 
 export interface InvalidWorkflowDefinitionError extends OctError {
-  key: 'invalid_workflow_definition';
+  key: 'invalid_workflow_definition_error';
   message: string;
 }
 

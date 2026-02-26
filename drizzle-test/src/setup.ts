@@ -5,7 +5,7 @@ import { Pool } from 'pg';
 
 let testPool: Pool | null = null;
 
-export interface SetupTestDatabaseOptions<TSchema extends Record<string, unknown>> {
+export interface SetupTestDatabaseConfig<TSchema extends Record<string, unknown>> {
   /** Drizzle schema object — passed to drizzle() constructor */
   schema: TSchema;
   /** Enable Drizzle query logging (default: false) */
@@ -21,7 +21,7 @@ export interface SetupTestDatabaseOptions<TSchema extends Record<string, unknown
  * Call in beforeAll().
  */
 export async function setupTestDatabase<TSchema extends Record<string, unknown>>(
-  options: SetupTestDatabaseOptions<TSchema>,
+  options: SetupTestDatabaseConfig<TSchema>,
 ): Promise<NodePgDatabase<TSchema>> {
   const { inject } = await import('vitest');
   const connectionString = inject('testDbConnectionString');

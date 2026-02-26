@@ -3,6 +3,7 @@ export { slugify, isUrlFriendly, URL_FRIENDLY_REGEX } from './slugify.ts';
 
 // Base64
 export { tryDecodeBase64 } from './base64.ts';
+export type { Base64DecodeError } from './base64.ts';
 
 // Query param normalization
 export {

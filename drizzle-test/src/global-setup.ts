@@ -9,14 +9,14 @@ declare module 'vitest' {
   }
 }
 
-export interface GlobalSetupOptions {
+export interface GlobalSetupConfig {
   /** PostgreSQL Docker image (default: 'postgres:17-alpine') */
   image?: string;
   /** Path to Drizzle migrations directory */
   migrationsFolder: string;
 }
 
-export function createGlobalSetup(options: GlobalSetupOptions) {
+export function createGlobalSetup(options: GlobalSetupConfig) {
   let container: StartedPostgreSqlContainer | null = null;
 
   async function setup({ provide }: { provide: (key: string, value: string) => void }) {

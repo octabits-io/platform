@@ -67,7 +67,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
     if (steps.length === 0) {
       return {
         ok: false,
-        error: { key: 'invalid_workflow_definition', message: 'Workflow must have at least one step' },
+        error: { key: 'invalid_workflow_definition_error', message: 'Workflow must have at least one step' },
       };
     }
 
@@ -77,7 +77,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
       if (keys.has(step.key)) {
         return {
           ok: false,
-          error: { key: 'invalid_workflow_definition', message: `Duplicate step key: ${step.key}` },
+          error: { key: 'invalid_workflow_definition_error', message: `Duplicate step key: ${step.key}` },
         };
       }
       keys.add(step.key);
@@ -90,7 +90,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
           return {
             ok: false,
             error: {
-              key: 'invalid_workflow_definition',
+              key: 'invalid_workflow_definition_error',
               message: `Step '${step.key}' depends on unknown step '${dep}'`,
             },
           };
@@ -98,7 +98,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
         if (dep === step.key) {
           return {
             ok: false,
-            error: { key: 'invalid_workflow_definition', message: `Step '${step.key}' cannot depend on itself` },
+            error: { key: 'invalid_workflow_definition_error', message: `Step '${step.key}' cannot depend on itself` },
           };
         }
       }
@@ -137,7 +137,7 @@ export function createWorkflowEngine<TServices = Record<string, unknown>>(
     if (visited !== steps.length) {
       return {
         ok: false,
-        error: { key: 'invalid_workflow_definition', message: 'Workflow contains circular dependencies' },
+        error: { key: 'invalid_workflow_definition_error', message: 'Workflow contains circular dependencies' },
       };
     }
 

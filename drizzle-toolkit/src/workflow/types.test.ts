@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createStepHandlerRegistry, type StepHandler } from './types.ts';
+import { createStepHandlerRegistry } from './step-handler-registry.ts';
+import type { StepHandler } from './types.ts';
 
 const noopHandler: StepHandler = async () => ({ ok: true, value: {} });
 

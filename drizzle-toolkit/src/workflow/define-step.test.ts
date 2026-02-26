@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 import { defineStep, buildTypedWorkflow, isRetryableError } from './define-step.ts';
-import { createStepHandlerRegistry, type StepExecutionContext } from './types.ts';
+import { createStepHandlerRegistry } from './step-handler-registry.ts';
+import type { StepExecutionContext } from './types.ts';
 
 // ============================================================================
 // isRetryableError

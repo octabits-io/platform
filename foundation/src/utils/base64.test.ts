@@ -56,43 +56,43 @@ describe('tryDecodeBase64', () => {
     it('rejects string with invalid length (not multiple of 4)', () => {
       const result = tryDecodeBase64('SGVsbG8'); // 7 characters
       assert(!result.ok);
-      expect(result.error).toBe(null);
+      expect(result.error.key).toBe('base64_decode_error');
     });
 
     it('rejects string with invalid characters', () => {
       const result = tryDecodeBase64('SGVs@G8='); // contains @
       assert(!result.ok);
-      expect(result.error).toBe(null);
+      expect(result.error.key).toBe('base64_decode_error');
     });
 
     it('rejects string with invalid characters (space)', () => {
       const result = tryDecodeBase64('SGVs bG8='); // contains space
       assert(!result.ok);
-      expect(result.error).toBe(null);
+      expect(result.error.key).toBe('base64_decode_error');
     });
 
     it('rejects string with invalid characters (special symbols)', () => {
       const result = tryDecodeBase64('SGVs#bG8='); // contains #
       assert(!result.ok);
-      expect(result.error).toBe(null);
+      expect(result.error.key).toBe('base64_decode_error');
     });
 
     it('rejects string with incorrect padding position', () => {
       const result = tryDecodeBase64('SGVs=bG8'); // padding in wrong position
       assert(!result.ok);
-      expect(result.error).toBe(null);
+      expect(result.error.key).toBe('base64_decode_error');
     });
 
     it('rejects string with too much padding', () => {
       const result = tryDecodeBase64('SGVs==='); // too many = characters
       assert(!result.ok);
-      expect(result.error).toBe(null);
+      expect(result.error.key).toBe('base64_decode_error');
     });
 
     it('rejects malformed base64 that passes regex but fails decoding', () => {
       const result = tryDecodeBase64('SGVsbG!'); // Invalid character but length is wrong anyway
       assert(!result.ok);
-      expect(result.error).toBe(null);
+      expect(result.error.key).toBe('base64_decode_error');
     });
   });
 
@@ -100,7 +100,7 @@ describe('tryDecodeBase64', () => {
     it('handles single character input', () => {
       const result = tryDecodeBase64('A');
       assert(!result.ok);
-      expect(result.error).toBe(null);
+      expect(result.error.key).toBe('base64_decode_error');
     });
 
     it('handles very long valid base64', () => {
@@ -114,7 +114,7 @@ describe('tryDecodeBase64', () => {
     it('handles base64 with URL-safe characters (should fail)', () => {
       const result = tryDecodeBase64('SGVsbG8_V29ybGQ-'); // URL-safe base64
       assert(!result.ok);
-      expect(result.error).toBe(null);
+      expect(result.error.key).toBe('base64_decode_error');
     });
 
     it('handles mixed case correctly', () => {

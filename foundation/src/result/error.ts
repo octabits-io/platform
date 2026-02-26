@@ -31,10 +31,6 @@ export const toOctError = (error: unknown): OctError => {
 // API Error Response Types (Discriminated Union)
 // ============================================================================
 
-/** Base API error with key as discriminator */
-interface BaseApiError extends OctError {
-}
-
 /** Validation error with field details */
 export interface ValidationApiError extends OctErrorWithKey<'validation_error'> {
   fields: Array<{
@@ -44,28 +40,28 @@ export interface ValidationApiError extends OctErrorWithKey<'validation_error'> 
 }
 
 /** Resource not found error */
-export interface NotFoundApiError extends BaseApiError {
+export interface NotFoundApiError extends OctError {
   key: `${string}_not_found`;
   resourceId?: string | number;
 }
 
 /** Generic bad request error */
-export interface BadRequestApiError extends BaseApiError {
+export interface BadRequestApiError extends OctError {
   key: 'bad_request';
 }
 
 /** Authorization error */
-export interface UnauthorizedApiError extends BaseApiError {
+export interface UnauthorizedApiError extends OctError {
   key: 'unauthorized';
 }
 
 /** Permission denied error */
-export interface ForbiddenApiError extends BaseApiError {
+export interface ForbiddenApiError extends OctError {
   key: 'forbidden';
 }
 
 /** Internal server error */
-export interface InternalApiError extends BaseApiError {
+export interface InternalApiError extends OctError {
   key: 'internal_server_error';
 }
 

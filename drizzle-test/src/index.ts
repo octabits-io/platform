@@ -1,7 +1,7 @@
-export { createGlobalSetup, type GlobalSetupOptions } from './global-setup';
+export { createGlobalSetup, type GlobalSetupConfig } from './global-setup';
 export {
   setupTestDatabase,
   cleanupTestDatabase,
   resetDatabase,
-  type SetupTestDatabaseOptions,
+  type SetupTestDatabaseConfig,
 } from './setup';

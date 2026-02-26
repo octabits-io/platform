@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createWorkflowEngine } from './engine.ts';
-import { createStepHandlerRegistry, type StepHandler } from './types.ts';
+import { createStepHandlerRegistry } from './step-handler-registry.ts';
+import type { StepHandler } from './types.ts';
 
 const noopHandler: StepHandler = async () => ({ ok: true, value: {} });
 
@@ -30,7 +31,7 @@ describe('validateDefinition', () => {
     const result = engine.validateDefinition({ type: 'test', steps: [] });
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.key).toBe('invalid_workflow_definition');
+      expect(result.error.key).toBe('invalid_workflow_definition_error');
       expect(result.error.message).toContain('at least one step');
     }
   });

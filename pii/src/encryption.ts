@@ -16,7 +16,11 @@ export interface HybridEncryptionError extends OctError {
 }
 
 export interface HybridDecryptionError extends OctError {
-  key: 'hybrid_decryption_error' | 'invalid_format';
+  key: 'hybrid_decryption_error';
+}
+
+export interface InvalidFormatError extends OctError {
+  key: 'invalid_format_error';
 }
 
 /**
@@ -28,7 +32,7 @@ export function isAgeFormat(data: Buffer): boolean {
 }
 
 
-export const encryptSymmetric = (value: string, symmetricKey: Buffer): Result<Buffer, SymmetricEncryptionError> => {
+export function encryptSymmetric(value: string, symmetricKey: Buffer): Result<Buffer, SymmetricEncryptionError> {
   const iv = crypto.randomBytes(IV_SIZE);
   const cipher = crypto.createCipheriv(ALGORITHM, symmetricKey, iv, {
     authTagLength: AUTH_TAG_SIZE,
@@ -41,9 +45,9 @@ export const encryptSymmetric = (value: string, symmetricKey: Buffer): Result<Bu
     ok: true,
     value: buffer
   }
-};
+}
 
-export const decryptSymmetric = (encrypted: Buffer, symmetricKey: Buffer): Result<string, SymmetricEncryptionError> => {
+export function decryptSymmetric(encrypted: Buffer, symmetricKey: Buffer): Result<string, SymmetricEncryptionError> {
   try {
 
     const iv = encrypted.subarray(0, IV_SIZE);
@@ -64,9 +68,11 @@ export const decryptSymmetric = (encrypted: Buffer, symmetricKey: Buffer): Resul
     }
 
   }
-};
+}
 
-export const generateSymmetricKey = () => crypto.randomBytes(KEY_SIZE);
+export function generateSymmetricKey() {
+  return crypto.randomBytes(KEY_SIZE);
+}
 
 /**
  * Encrypt a value using age encryption (X25519 + ChaCha20-Poly1305).
@@ -74,7 +80,7 @@ export const generateSymmetricKey = () => crypto.randomBytes(KEY_SIZE);
  * @param value - The plaintext string to encrypt
  * @param recipient - Age recipient (age1...) for encryption
  */
-export const encryptHybrid = async (value: string, recipient: string): Promise<Result<Buffer, HybridEncryptionError>> => {
+export async function encryptHybrid(value: string, recipient: string): Promise<Result<Buffer, HybridEncryptionError>> {
   try {
     const encrypter = new Encrypter();
     encrypter.addRecipient(recipient);
@@ -89,7 +95,7 @@ export const encryptHybrid = async (value: string, recipient: string): Promise<R
       error: { key: 'hybrid_encryption_error', message: error instanceof Error ? error.message : String(error) },
     };
   }
-};
+}
 
 /**
  * Decrypt a value using age encryption.
@@ -97,17 +103,17 @@ export const encryptHybrid = async (value: string, recipient: string): Promise<R
  * @param encrypted - The encrypted data (must be age format)
  * @param identity - Age identity (AGE-SECRET-KEY-1...) for decryption
  */
-export const decryptHybrid = async (
+export async function decryptHybrid(
   encrypted: Buffer,
   identity: string
-): Promise<Result<string, HybridDecryptionError>> => {
+): Promise<Result<string, HybridDecryptionError | InvalidFormatError>> {
   try {
     // Verify this is age format
     if (!isAgeFormat(encrypted)) {
       return {
         ok: false,
         error: {
-          key: 'invalid_format',
+          key: 'invalid_format_error',
           message: 'Data is not in age encryption format. Legacy RSA data must be migrated first.',
         },
       };
@@ -127,4 +133,4 @@ export const decryptHybrid = async (
       error: { key: 'hybrid_decryption_error', message: error instanceof Error ? error.message : String(error) },
     };
   }
-};
+}

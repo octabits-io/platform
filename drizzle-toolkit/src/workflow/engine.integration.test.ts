@@ -3,7 +3,8 @@ import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { sql } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { createWorkflowEngine } from './engine.ts';
-import { createStepHandlerRegistry, type StepHandler } from './types.ts';
+import { createStepHandlerRegistry } from './step-handler-registry.ts';
+import type { StepHandler } from './types.ts';
 import { workflowStepTable, workflowTable } from './tables.ts';
 
 export const testSchema = {
