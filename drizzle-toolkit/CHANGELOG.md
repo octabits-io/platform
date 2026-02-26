@@ -1,5 +1,11 @@
 # @octabits-io/drizzle-toolkit
 
+## 0.1.2
+
+### Patch Changes
+
+- Export missing public API types and utilities from pii and drizzle-toolkit
+
 ## 0.1.1
 
 ### Patch Changes

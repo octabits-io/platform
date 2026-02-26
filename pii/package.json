@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/pii",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "PII encryption and tokenization utilities",
   "license": "MIT",
   "type": "module",
