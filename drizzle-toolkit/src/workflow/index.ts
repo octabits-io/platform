@@ -40,3 +40,17 @@ export type {
   TypedStepContext,
   TypedWorkflow,
 } from './define-step.ts';
+
+export { SCHEMA_BASE_JOB_PAYLOAD } from './queue/index.ts';
+export type {
+  BaseJobPayload,
+  JobContext,
+  QueueDomainConfig,
+  QueueDomain,
+  JobHandler,
+  WorkerOptions,
+  QueuedJob,
+  QueueError,
+  JobFailedError,
+  PayloadValidationError,
+} from './queue/index.ts';
