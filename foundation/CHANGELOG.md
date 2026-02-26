@@ -1,5 +1,11 @@
 # @octabits-io/foundation
 
+## 0.1.3
+
+### Patch Changes
+
+- Add `ok()` and `err()` Result constructors, standardize naming conventions across all packages
+
 ## 0.1.1
 
 ### Patch Changes
