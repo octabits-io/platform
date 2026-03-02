@@ -39,7 +39,7 @@ importers:
         specifier: ^4
         version: 4.3.6
 
-  drizzle-test:
+  packages/drizzle-test:
     dependencies:
       typescript:
         specifier: ^5
@@ -64,7 +64,7 @@ importers:
         specifier: ^4
         version: 4.0.18(@types/node@22.19.11)(jiti@2.6.1)(yaml@2.8.2)
 
-  drizzle-toolkit:
+  packages/drizzle-toolkit:
     dependencies:
       '@octabits-io/foundation':
         specifier: workspace:^
@@ -98,7 +98,7 @@ importers:
         specifier: ^4
         version: 4.0.18(@types/node@22.19.11)(jiti@2.6.1)(yaml@2.8.2)
 
-  foundation:
+  packages/foundation:
     dependencies:
       typescript:
         specifier: ^5
@@ -111,7 +111,7 @@ importers:
         specifier: ^4
         version: 4.0.18(@types/node@22.19.11)(jiti@2.6.1)(yaml@2.8.2)
 
-  pii:
+  packages/pii:
     dependencies:
       '@noble/ciphers':
         specifier: ^2

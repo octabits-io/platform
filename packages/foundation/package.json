@@ -40,9 +40,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/octabits-io/platform.git",
-    "directory": "foundation"
+    "directory": "packages/foundation"
   },
-  "homepage": "https://github.com/octabits-io/platform/tree/main/foundation",
+  "homepage": "https://github.com/octabits-io/platform/tree/main/packages/foundation",
   "bugs": {
     "url": "https://github.com/octabits-io/platform/issues"
   },

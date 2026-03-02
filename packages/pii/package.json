@@ -29,9 +29,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/octabits-io/platform.git",
-    "directory": "pii"
+    "directory": "packages/pii"
   },
-  "homepage": "https://github.com/octabits-io/platform/tree/main/pii",
+  "homepage": "https://github.com/octabits-io/platform/tree/main/packages/pii",
   "bugs": {
     "url": "https://github.com/octabits-io/platform/issues"
   },

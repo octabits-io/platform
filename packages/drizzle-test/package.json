@@ -28,9 +28,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/octabits-io/platform.git",
-    "directory": "drizzle-test"
+    "directory": "packages/drizzle-test"
   },
-  "homepage": "https://github.com/octabits-io/platform/tree/main/drizzle-test",
+  "homepage": "https://github.com/octabits-io/platform/tree/main/packages/drizzle-test",
   "bugs": {
     "url": "https://github.com/octabits-io/platform/issues"
   },
