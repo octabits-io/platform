@@ -4,7 +4,7 @@
   "commit": false,
   "fixed": [],
   "linked": [
-    ["@octabits-io/foundation", "@octabits-io/drizzle-toolkit", "@octabits-io/pii", "@octabits-io/drizzle-test"]
+    ["@octabits-io/foundation", "@octabits-io/drizzle-toolkit", "@octabits-io/pii", "@octabits-io/drizzle-test", "@octabits-io/core"]
   ],
   "access": "public",
   "baseBranch": "main",

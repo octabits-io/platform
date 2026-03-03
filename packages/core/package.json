@@ -1,0 +1,91 @@
+{
+  "name": "@octabits-io/core",
+  "version": "0.1.0",
+  "description": "Multi-tenant SaaS infrastructure: auth, tenant management, CRUD, queues, mail, storage",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsup"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./tenant": {
+      "import": "./dist/tenant/index.js",
+      "types": "./dist/tenant/index.d.ts"
+    },
+    "./auth": {
+      "import": "./dist/auth/index.js",
+      "types": "./dist/auth/index.d.ts"
+    },
+    "./crud": {
+      "import": "./dist/crud/index.js",
+      "types": "./dist/crud/index.d.ts"
+    },
+    "./queue": {
+      "import": "./dist/queue/index.js",
+      "types": "./dist/queue/index.d.ts"
+    },
+    "./mail": {
+      "import": "./dist/mail/index.js",
+      "types": "./dist/mail/index.d.ts"
+    },
+    "./storage": {
+      "import": "./dist/storage/index.js",
+      "types": "./dist/storage/index.d.ts"
+    },
+    "./config": {
+      "import": "./dist/config/index.js",
+      "types": "./dist/config/index.d.ts"
+    },
+    "./database": {
+      "import": "./dist/database/index.js",
+      "types": "./dist/database/index.d.ts"
+    },
+    "./utils": {
+      "import": "./dist/utils/index.js",
+      "types": "./dist/utils/index.d.ts"
+    },
+    "./test": {
+      "import": "./dist/test/index.js",
+      "types": "./dist/test/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/octabits-io/platform.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/octabits-io/platform/tree/main/packages/core",
+  "bugs": {
+    "url": "https://github.com/octabits-io/platform/issues"
+  },
+  "devDependencies": {
+    "vitest": "^4"
+  },
+  "peerDependencies": {
+    "@octabits-io/foundation": "workspace:^",
+    "@octabits-io/pii": "workspace:^",
+    "@octabits-io/drizzle-toolkit": "workspace:^",
+    "drizzle-orm": "^0.45",
+    "pg": "^8",
+    "pg-boss": "^12",
+    "jose": "^6",
+    "zod": "^4",
+    "typescript": "^5"
+  }
+}
