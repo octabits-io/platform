@@ -1,5 +1,14 @@
 # @octabits-io/pii
 
+## 0.1.4
+
+### Patch Changes
+
+- Reorganize monorepo directory structure for open core model and fix CJS export compatibility in foundation
+
+- Updated dependencies []:
+  - @octabits-io/foundation@0.1.4
+
 ## 0.1.3
 
 ### Patch Changes

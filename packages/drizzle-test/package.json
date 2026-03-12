@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/drizzle-test",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Drizzle ORM test utilities with testcontainers for PostgreSQL",
   "license": "MIT",
   "type": "module",
