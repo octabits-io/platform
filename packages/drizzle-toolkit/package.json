@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/drizzle-toolkit",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "Drizzle ORM toolkit: database error handling and pagination helpers",
   "license": "MIT",
   "type": "module",
