@@ -5,5 +5,6 @@ export {
 export type {
   ServiceResolver,
   DisposableServiceResolver,
+  DisposeOptions,
   SystemScopeFactory,
 } from './container.ts';

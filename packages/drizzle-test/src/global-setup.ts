@@ -14,6 +14,12 @@ export interface GlobalSetupConfig {
   image?: string;
   /** Path to Drizzle migrations directory */
   migrationsFolder: string;
+  /**
+   * PostgreSQL max_connections (default: 200).
+   * With parallel test files each holding its own pool, the PG default of 100
+   * is easily exhausted — pair this with a small per-file `poolMax` in setup.
+   */
+  maxConnections?: number;
 }
 
 export function createGlobalSetup(options: GlobalSetupConfig) {
@@ -24,6 +30,7 @@ export function createGlobalSetup(options: GlobalSetupConfig) {
 
     container = await new PostgreSqlContainer(image)
       .withExposedPorts(5432)
+      .withCommand(['-c', `max_connections=${options.maxConnections ?? 200}`])
       .start();
 
     const connectionString = container.getConnectionUri();

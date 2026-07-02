@@ -109,3 +109,41 @@ export async function decryptHybrid(
     return err({ key: 'hybrid_decryption_error' as const, message: error instanceof Error ? error.message : String(error) });
   }
 }
+
+/**
+ * Encrypt raw bytes (e.g. an attachment blob) under an age recipient. Same
+ * hybrid layer as {@link encryptHybrid}, but skips the text encoding so binary
+ * payloads round-trip without base64 bloat.
+ */
+export async function encryptHybridBytes(value: Uint8Array, recipient: string): Promise<Result<Buffer, HybridEncryptionError>> {
+  try {
+    const encrypter = new Encrypter();
+    encrypter.addRecipient(recipient);
+    const ciphertext = await encrypter.encrypt(value);
+    return ok(Buffer.from(ciphertext));
+  } catch (error) {
+    return err({ key: 'hybrid_encryption_error' as const, message: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+/** Decrypt bytes produced by {@link encryptHybridBytes}. Returns raw bytes (no text decode). */
+export async function decryptHybridBytes(
+  encrypted: Buffer,
+  identity: string
+): Promise<Result<Buffer, HybridDecryptionError | InvalidFormatError>> {
+  try {
+    if (!isAgeFormat(encrypted)) {
+      return err({
+        key: 'invalid_format_error' as const,
+        message: 'Data is not in age encryption format. Legacy RSA data must be migrated first.',
+      });
+    }
+
+    const decrypter = new Decrypter();
+    decrypter.addIdentity(identity);
+    const plaintext = await decrypter.decrypt(encrypted, 'uint8array');
+    return ok(Buffer.from(plaintext));
+  } catch (error) {
+    return err({ key: 'hybrid_decryption_error' as const, message: error instanceof Error ? error.message : String(error) });
+  }
+}

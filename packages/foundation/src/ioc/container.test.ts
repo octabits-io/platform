@@ -773,6 +773,48 @@ describe('IoC Container', () => {
       await scope.dispose()
       expect(runCount).toBe(1)
     })
+
+    it('should run remaining disposables even when an earlier one throws', async () => {
+      // Order of execution is reverse of registration — onDispose B runs first.
+      // If B throws, A (the connection-release) must still run; otherwise we leak.
+      const container = new IoC<{ value: string }>()
+      container.register('value', () => 'test', ServiceLifetime.Singleton)
+
+      const scope = container.createScope()
+      let aRan = false
+      scope.onDispose(() => { aRan = true })
+      scope.onDispose(() => { throw new Error('B failed') })
+
+      await expect(scope.dispose()).rejects.toThrow('B failed')
+      expect(aRan).toBe(true)
+    })
+
+    it('should aggregate errors when multiple disposables throw', async () => {
+      const container = new IoC<{ value: string }>()
+      container.register('value', () => 'test', ServiceLifetime.Singleton)
+
+      const scope = container.createScope()
+      scope.onDispose(() => { throw new Error('A failed') })
+      scope.onDispose(() => { throw new Error('B failed') })
+
+      await expect(scope.dispose()).rejects.toThrowError(AggregateError)
+    })
+
+    it('should pass dispose options to disposables, defaulting to commit: true', async () => {
+      const container = new IoC<{ value: string }>()
+      container.register('value', () => 'test', ServiceLifetime.Singleton)
+
+      const scope = container.createScope()
+      const seen: boolean[] = []
+      scope.onDispose((opts) => { seen.push(opts.commit) })
+
+      await scope.dispose()
+      expect(seen).toEqual([true])
+
+      scope.onDispose((opts) => { seen.push(opts.commit) })
+      await scope.dispose({ commit: false })
+      expect(seen).toEqual([true, false])
+    })
   })
 
   describe('Scoped Services with Request Context', () => {

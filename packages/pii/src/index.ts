@@ -14,7 +14,7 @@ export type { BlindIndexService } from './blind-index.ts';
 export type { PiiEncryptionError, PiiDecryptionError } from './pii-encryption.ts';
 
 // Low-level (for advanced use)
-export { encryptHybrid, decryptHybrid, encryptSymmetric, decryptSymmetric, generateSymmetricKey } from './encryption.ts';
+export { encryptHybrid, decryptHybrid, encryptHybridBytes, decryptHybridBytes, encryptSymmetric, decryptSymmetric, generateSymmetricKey } from './encryption.ts';
 export type { SymmetricEncryptionError, HybridEncryptionError, HybridDecryptionError, InvalidFormatError } from './encryption.ts';
 
 // Age encryption primitives

@@ -22,6 +22,8 @@ import {
   decryptPiiString,
   encryptPiiJson,
   decryptPiiJson,
+  encryptPiiBytes,
+  decryptPiiBytes,
   type PiiEncryptionError,
   type PiiDecryptionError,
 } from './pii-encryption.ts';
@@ -61,6 +63,15 @@ export function createPiiEncryptionOnlyService({ recipient }: PiiEncryptionOnlyS
     encryptJson<T>(value: T | null | undefined): Promise<Result<Buffer | null, PiiEncryptionError>> {
       return encryptPiiJson(value, recipient);
     },
+
+    /**
+     * Encrypt raw bytes (e.g. an attachment blob) for storage.
+     * Skips text encoding so binary payloads round-trip without base64 bloat.
+     * Returns ok with null for null/undefined input (pass-through).
+     */
+    encryptBytes(value: Uint8Array | null | undefined): Promise<Result<Buffer | null, PiiEncryptionError>> {
+      return encryptPiiBytes(value, recipient);
+    },
   };
 }
 
@@ -99,6 +110,14 @@ export function createPiiEncryptionService({ recipient, identity }: PiiEncryptio
       schema: T
     ): Promise<Result<z.infer<T> | null, PiiDecryptionError>> {
       return decryptPiiJson(encrypted, identity, schema);
+    },
+
+    /**
+     * Decrypt a buffer to raw bytes.
+     * Returns ok with null for null input (pass-through).
+     */
+    decryptBytes(encrypted: Buffer | null): Promise<Result<Buffer | null, PiiDecryptionError>> {
+      return decryptPiiBytes(encrypted, identity);
     },
   };
 }

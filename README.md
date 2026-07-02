@@ -6,10 +6,11 @@ Monorepo for shared platform libraries. Managed with [pnpm workspaces](https://p
 
 | Package | Description |
 |---|---|
-| [`foundation`](./foundation) | Core utilities: Result types, IoC container, structured logger, and helpers |
-| [`pii`](./pii) | PII encryption (age/X25519), blind indexes, master key provider |
-| [`drizzle-toolkit`](./drizzle-toolkit) | Drizzle ORM utilities: DB error handling, pagination, DAG workflow engine |
-| [`drizzle-test`](./drizzle-test) | Integration test helpers: Testcontainers + Drizzle setup and isolation |
+| [`foundation`](./packages/foundation) | Core utilities: Result types, IoC container, structured logger, and helpers |
+| [`pii`](./packages/pii) | PII encryption (age/X25519), blind indexes, master key provider |
+| [`drizzle-toolkit`](./packages/drizzle-toolkit) | Drizzle ORM utilities: DB error handling and pagination |
+| [`drizzle-test`](./packages/drizzle-test) | Integration test helpers: Testcontainers + Drizzle setup and isolation |
+| [`flow`](./packages/flow) | Durable DAG workflow engine: Zod-typed steps over Postgres + pg-boss, optional AI add-on |
 
 ## Getting Started
 

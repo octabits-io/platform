@@ -43,9 +43,15 @@ export interface ServiceResolver<T> {
   resolve<K extends keyof T>(key: K): T[K];
 }
 
+/** Options passed to disposables. `commit` controls whether request-scoped
+ *  transactions COMMIT (true) or ROLLBACK (false) when the scope is torn down. */
+export interface DisposeOptions {
+  commit: boolean;
+}
+
 /** A service resolver that holds resources and must be disposed after use. */
 export interface DisposableServiceResolver<T> extends ServiceResolver<T> {
-  dispose(): Promise<void>;
+  dispose(opts?: DisposeOptions): Promise<void>;
 }
 
 /** Factory that creates a disposable, tenant-scoped system scope for background jobs. */
@@ -60,7 +66,7 @@ export class IoC<T> implements ServiceResolver<T> {
   private scoped = new Map<keyof T, any>()
   private parent: IoC<any> | null = null
   private rootCache: IoC<any> | null = null
-  private disposables: Array<() => void | Promise<void>> = []
+  private disposables: Array<(opts: DisposeOptions) => void | Promise<void>> = []
 
   /**
    * Register a service with a factory function and lifetime
@@ -200,20 +206,33 @@ export class IoC<T> implements ServiceResolver<T> {
    * Register a cleanup function to be called when this scope is disposed.
    * Disposables run in reverse order (LIFO) during dispose().
    */
-  onDispose(fn: () => void | Promise<void>): void {
+  onDispose(fn: (opts: DisposeOptions) => void | Promise<void>): void {
     this.disposables.push(fn)
   }
 
   /**
    * Dispose this scope by running all registered cleanup functions in reverse order,
    * then clearing scoped service instances. Does NOT dispose parent or singleton services.
+   *
+   * `opts` is passed to each disposable. The default (`commit: true`) is intentional:
+   * most callers run to completion before disposing, and want their work persisted.
+   * Pass `{ commit: false }` from error paths to roll request transactions back.
    */
-  async dispose(): Promise<void> {
+  async dispose(opts: DisposeOptions = { commit: true }): Promise<void> {
+    const errors: unknown[] = []
     for (const fn of this.disposables.reverse()) {
-      await fn()
+      try {
+        await fn(opts)
+      } catch (e) {
+        // Collect and continue — we must still run remaining disposables
+        // (e.g., release a pool client even if RESET threw).
+        errors.push(e)
+      }
     }
     this.disposables = []
     this.scoped.clear()
+    if (errors.length === 1) throw errors[0]
+    if (errors.length > 1) throw new AggregateError(errors, 'IoC dispose errors')
   }
 
   /**

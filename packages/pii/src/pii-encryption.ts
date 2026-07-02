@@ -12,7 +12,7 @@
 
 import { type Result, type OctError, ok, err } from '@octabits-io/foundation/result';
 import { z } from 'zod';
-import { encryptHybrid, decryptHybrid } from './encryption.ts';
+import { encryptHybrid, decryptHybrid, encryptHybridBytes, decryptHybridBytes } from './encryption.ts';
 
 export interface PiiEncryptionError extends OctError {
   key: 'pii_encryption_error';
@@ -60,6 +60,48 @@ export async function decryptPiiString(
   const result = await decryptHybrid(encrypted, identity);
   if (!result.ok) {
     return err({ key: 'pii_decryption_error' as const, message: `Failed to decrypt PII: ${result.error.message}` });
+  }
+  return ok(result.value);
+}
+
+/**
+ * Encrypt raw bytes (e.g. an attachment blob) using age encryption.
+ * Returns ok with null for null/undefined input (pass-through).
+ *
+ * @param value - The bytes to encrypt
+ * @param recipient - Age recipient (age1...) for encryption
+ */
+export async function encryptPiiBytes(
+  value: Uint8Array | null | undefined,
+  recipient: string
+): Promise<Result<Buffer | null, PiiEncryptionError>> {
+  if (value === null || value === undefined) {
+    return ok(null);
+  }
+  const result = await encryptHybridBytes(value, recipient);
+  if (!result.ok) {
+    return err({ key: 'pii_encryption_error' as const, message: `Failed to encrypt PII bytes: ${result.error.message}` });
+  }
+  return ok(result.value);
+}
+
+/**
+ * Decrypt a buffer to raw bytes using age encryption.
+ * Returns ok with null for null input (pass-through).
+ *
+ * @param encrypted - The encrypted buffer
+ * @param identity - Age identity (AGE-SECRET-KEY-1...) for decryption
+ */
+export async function decryptPiiBytes(
+  encrypted: Buffer | null,
+  identity: string
+): Promise<Result<Buffer | null, PiiDecryptionError>> {
+  if (encrypted === null) {
+    return ok(null);
+  }
+  const result = await decryptHybridBytes(encrypted, identity);
+  if (!result.ok) {
+    return err({ key: 'pii_decryption_error' as const, message: `Failed to decrypt PII bytes: ${result.error.message}` });
   }
   return ok(result.value);
 }

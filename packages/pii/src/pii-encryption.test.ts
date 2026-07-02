@@ -6,6 +6,8 @@ import {
   decryptPiiString,
   encryptPiiJson,
   decryptPiiJson,
+  encryptPiiBytes,
+  decryptPiiBytes,
 } from './pii-encryption.ts';
 
 let identity: string;
@@ -176,5 +178,42 @@ describe('decryptPiiJson', () => {
     const decrypted = await decryptPiiJson(encrypted.value, identity, arraySchema);
     assert(decrypted.ok);
     expect(decrypted.value).toEqual(original);
+  });
+});
+
+describe('encryptPiiBytes / decryptPiiBytes', () => {
+  test('round-trips binary payloads', async () => {
+    const payload = new Uint8Array([0x00, 0xff, 0xfe, 0x89, 0x50, 0x4e, 0x47]);
+
+    const enc = await encryptPiiBytes(payload, recipient);
+    assert(enc.ok);
+    expect(enc.value).toBeInstanceOf(Buffer);
+
+    const dec = await decryptPiiBytes(enc.value, identity);
+    assert(dec.ok);
+    assert(dec.value !== null);
+    expect(new Uint8Array(dec.value)).toEqual(payload);
+  });
+
+  test('passes through null and undefined on encrypt', async () => {
+    const encNull = await encryptPiiBytes(null, recipient);
+    assert(encNull.ok);
+    expect(encNull.value).toBeNull();
+
+    const encUndefined = await encryptPiiBytes(undefined, recipient);
+    assert(encUndefined.ok);
+    expect(encUndefined.value).toBeNull();
+  });
+
+  test('passes through null on decrypt', async () => {
+    const dec = await decryptPiiBytes(null, identity);
+    assert(dec.ok);
+    expect(dec.value).toBeNull();
+  });
+
+  test('returns pii_decryption_error for invalid data', async () => {
+    const dec = await decryptPiiBytes(Buffer.from('garbage'), identity);
+    assert(!dec.ok);
+    expect(dec.error.key).toBe('pii_decryption_error');
   });
 });

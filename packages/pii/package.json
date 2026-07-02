@@ -39,14 +39,14 @@
     "@noble/hashes": "^2",
     "@noble/ciphers": "^2",
     "@noble/curves": "^2",
-    "@scure/base": "^2"
+    "@scure/base": "^2",
+    "@octabits-io/foundation": "workspace:^"
   },
   "devDependencies": {
     "vitest": "^4"
   },
   "peerDependencies": {
-    "typescript": "^5",
-    "zod": "^4",
-    "@octabits-io/foundation": "workspace:^"
+    "typescript": "^5 || ^6",
+    "zod": "^4"
   }
 }

@@ -10,6 +10,12 @@ export interface SetupTestDatabaseConfig<TSchema extends Record<string, unknown>
   schema: TSchema;
   /** Enable Drizzle query logging (default: false) */
   logger?: boolean;
+  /**
+   * Max connections for this file's pool (default: 2).
+   * Kept small because many test files may run in parallel against the
+   * shared container — see `maxConnections` in the global setup.
+   */
+  poolMax?: number;
 }
 
 /**
@@ -32,7 +38,7 @@ export async function setupTestDatabase<TSchema extends Record<string, unknown>>
     );
   }
 
-  testPool = new Pool({ connectionString });
+  testPool = new Pool({ connectionString, max: options.poolMax ?? 2 });
 
   return drizzle({
     client: testPool,

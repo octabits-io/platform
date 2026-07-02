@@ -132,3 +132,32 @@ describe('createPiiEncryptionService', () => {
     expect(decrypted.value).toBe(value);
   });
 });
+
+describe('bytes methods', () => {
+  test('encryptBytes / decryptBytes round-trip binary payloads', async () => {
+    const svc = createPiiEncryptionService({ recipient, identity });
+    const payload = new Uint8Array([0x00, 0xff, 0xfe, 0x89, 0x50, 0x4e, 0x47]);
+
+    const encrypted = await svc.encryptBytes(payload);
+    assert(encrypted.ok);
+    assert(encrypted.value !== null);
+    expect(encrypted.value).toBeInstanceOf(Buffer);
+
+    const decrypted = await svc.decryptBytes(encrypted.value);
+    assert(decrypted.ok);
+    assert(decrypted.value !== null);
+    expect(new Uint8Array(decrypted.value)).toEqual(payload);
+  });
+
+  test('bytes methods pass through null', async () => {
+    const svc = createPiiEncryptionService({ recipient, identity });
+
+    const encrypted = await svc.encryptBytes(null);
+    assert(encrypted.ok);
+    expect(encrypted.value).toBeNull();
+
+    const decrypted = await svc.decryptBytes(null);
+    assert(decrypted.ok);
+    expect(decrypted.value).toBeNull();
+  });
+});
