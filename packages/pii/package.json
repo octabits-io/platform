@@ -36,14 +36,14 @@
     "url": "https://github.com/octabits-io/platform/issues"
   },
   "dependencies": {
-    "@noble/hashes": "^2",
-    "@noble/ciphers": "^2",
-    "@noble/curves": "^2",
-    "@scure/base": "^2",
-    "@octabits-io/foundation": "workspace:^"
+    "@noble/ciphers": "^2.2.0",
+    "@noble/curves": "^2.2.0",
+    "@noble/hashes": "^2.2.0",
+    "@octabits-io/foundation": "workspace:^",
+    "@scure/base": "^2.2.0"
   },
   "devDependencies": {
-    "vitest": "^4"
+    "vitest": "^4.1.9"
   },
   "peerDependencies": {
     "typescript": "^5 || ^6",

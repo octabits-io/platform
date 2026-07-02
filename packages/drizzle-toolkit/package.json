@@ -38,7 +38,7 @@
     "@octabits-io/foundation": "workspace:^"
   },
   "devDependencies": {
-    "vitest": "^4"
+    "vitest": "^4.1.9"
   },
   "peerDependencies": {
     "typescript": "^5 || ^6"
