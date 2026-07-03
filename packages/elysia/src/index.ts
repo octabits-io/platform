@@ -10,3 +10,4 @@ export * from './security-headers';
 export * from './client-ip';
 export * from './responses';
 export * from './errors';
+export * from './config';

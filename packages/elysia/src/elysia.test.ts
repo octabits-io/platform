@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { Elysia } from 'elysia';
 import { z } from 'zod';
 import { createSecurityHeadersPlugin } from './security-headers';
@@ -19,6 +19,15 @@ import {
   ForbiddenError,
   createErrorHandler,
 } from './errors';
+import {
+  getEnv,
+  getEnvOptional,
+  getEnvNumber,
+  getEnvBoolean,
+  isProduction,
+  parseCsv,
+  parseCorsOrigins,
+} from './config';
 
 describe('getStatusCodeForError', () => {
   it('maps by key convention', () => {
@@ -158,5 +167,50 @@ describe('createErrorHandler', () => {
     expect(SCHEMA_ERROR_RESPONSE.safeParse({ key: 'x', message: 'y' }).success).toBe(true);
     const _z = z; // keep z import used
     expect(typeof _z).toBe('object');
+  });
+});
+
+describe('config helpers', () => {
+  const KEY = '__ELYSIA_CFG_TEST__';
+  afterEach(() => { delete process.env[KEY]; delete process.env.PRODUCTION; delete process.env.NODE_ENV; });
+
+  it('getEnv returns value, default, or throws', () => {
+    process.env[KEY] = 'hi';
+    expect(getEnv(KEY)).toBe('hi');
+    expect(getEnv('__MISSING__', 'def')).toBe('def');
+    expect(() => getEnv('__MISSING__')).toThrow(/Missing required/);
+  });
+
+  it('getEnvOptional / getEnvNumber / getEnvBoolean', () => {
+    expect(getEnvOptional('__MISSING__')).toBeUndefined();
+    process.env[KEY] = '42';
+    expect(getEnvNumber(KEY, 7)).toBe(42);
+    expect(getEnvNumber('__MISSING__', 7)).toBe(7);
+    process.env[KEY] = 'TRUE';
+    expect(getEnvBoolean(KEY, false)).toBe(true);
+    process.env[KEY] = '1';
+    expect(getEnvBoolean(KEY, false)).toBe(true);
+    process.env[KEY] = 'no';
+    expect(getEnvBoolean(KEY, true)).toBe(false);
+  });
+
+  it('isProduction honors NODE_ENV and PRODUCTION', () => {
+    expect(isProduction()).toBe(false);
+    process.env.PRODUCTION = 'true';
+    expect(isProduction()).toBe(true);
+    delete process.env.PRODUCTION;
+    process.env.NODE_ENV = 'production';
+    expect(isProduction()).toBe(true);
+  });
+
+  it('parseCsv trims and drops empties; undefined → []', () => {
+    expect(parseCsv('a, b ,,c')).toEqual(['a', 'b', 'c']);
+    expect(parseCsv(undefined)).toEqual([]);
+    expect(parseCsv('')).toEqual([]);
+  });
+
+  it('parseCorsOrigins → list, or true when unset', () => {
+    expect(parseCorsOrigins('https://a.com, https://b.com')).toEqual(['https://a.com', 'https://b.com']);
+    expect(parseCorsOrigins(undefined)).toBe(true);
   });
 });
