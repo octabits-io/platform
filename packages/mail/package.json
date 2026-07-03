@@ -1,0 +1,54 @@
+{
+  "name": "@octabits-io/mail",
+  "version": "0.1.0",
+  "description": "Provider-agnostic mail transport contract with SMTP, Mailjet, Brevo, logger, and in-memory outbound transports",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsup"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/octabits-io/platform.git",
+    "directory": "packages/mail"
+  },
+  "homepage": "https://github.com/octabits-io/platform/tree/main/packages/mail",
+  "bugs": {
+    "url": "https://github.com/octabits-io/platform/issues"
+  },
+  "dependencies": {
+    "@octabits-io/foundation": "^0.2.0",
+    "node-mailjet": "^6.0.11",
+    "nodemailer": "^9.0.3",
+    "wretch": "^3.0.9"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/nodemailer": "^8.0.1",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "peerDependencies": {
+    "typescript": "^5 || ^6"
+  }
+}
