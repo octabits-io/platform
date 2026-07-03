@@ -36,6 +36,16 @@
       "types": "./dist/config-schema/index.d.ts",
       "import": "./dist/config-schema/index.js",
       "default": "./dist/config-schema/index.js"
+    },
+    "./rbac": {
+      "types": "./dist/rbac/index.d.ts",
+      "import": "./dist/rbac/index.js",
+      "default": "./dist/rbac/index.js"
+    },
+    "./auth": {
+      "types": "./dist/auth/index.d.ts",
+      "import": "./dist/auth/index.js",
+      "default": "./dist/auth/index.js"
     }
   },
   "files": [
@@ -54,6 +64,9 @@
   "homepage": "https://github.com/octabits-io/platform/tree/main/packages/foundation",
   "bugs": {
     "url": "https://github.com/octabits-io/platform/issues"
+  },
+  "dependencies": {
+    "jose": "^6.2.3"
   },
   "devDependencies": {
     "vitest": "^4.1.9"

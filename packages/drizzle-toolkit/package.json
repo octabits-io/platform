@@ -8,6 +8,14 @@
     "./db": {
       "import": "./dist/db/index.js",
       "types": "./dist/db/index.d.ts"
+    },
+    "./factory": {
+      "import": "./dist/factory/index.js",
+      "types": "./dist/factory/index.d.ts"
+    },
+    "./migrate": {
+      "import": "./dist/migrate/index.js",
+      "types": "./dist/migrate/index.d.ts"
     }
   },
   "scripts": {
@@ -35,9 +43,12 @@
     "url": "https://github.com/octabits-io/platform/issues"
   },
   "dependencies": {
-    "@octabits-io/foundation": "workspace:^"
+    "@octabits-io/foundation": "workspace:^",
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.22.0"
   },
   "devDependencies": {
+    "@types/pg": "^8.20.0",
     "vitest": "^4.1.9"
   },
   "peerDependencies": {

@@ -5,3 +5,4 @@ export {
   resetDatabase,
   type SetupTestDatabaseConfig,
 } from './setup';
+export { unusedService } from './unused-service';

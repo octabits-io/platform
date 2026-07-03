@@ -23,6 +23,9 @@
     "README.md",
     "LICENSE"
   ],
+  "dependencies": {
+    "elysia-rate-limit": "^4.6.2"
+  },
   "publishConfig": {
     "access": "public"
   },

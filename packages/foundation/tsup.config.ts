@@ -7,6 +7,8 @@ export default defineConfig({
     "logger/index": "src/logger/index.ts",
     "utils/index": "src/utils/index.ts",
     "config-schema/index": "src/config-schema/index.ts",
+    "rbac/index": "src/rbac/index.ts",
+    "auth/index": "src/auth/index.ts",
   },
   format: "esm",
   dts: true,
