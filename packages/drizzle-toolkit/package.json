@@ -43,7 +43,7 @@
     "url": "https://github.com/octabits-io/platform/issues"
   },
   "dependencies": {
-    "@octabits-io/foundation": "workspace:^",
+    "@octabits-io/foundation": "^0.2.0",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.22.0"
   },

@@ -67,8 +67,8 @@ importers:
   packages/drizzle-toolkit:
     dependencies:
       '@octabits-io/foundation':
-        specifier: workspace:^
-        version: link:../foundation
+        specifier: ^0.2.0
+        version: 0.2.0(typescript@6.0.3)(zod@4.4.3)
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/pg@8.20.0)(bun-types@1.3.14)(pg@8.22.0)
