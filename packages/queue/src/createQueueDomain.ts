@@ -1,4 +1,5 @@
-import type { PgBoss, Job, SendOptions, WorkOptions } from 'pg-boss';
+import type { PgBoss, JobWithMetadata, JobResult, SendOptions } from 'pg-boss';
+import type { ZodError } from 'zod';
 import type { Result } from '@octabits-io/foundation/result';
 import type {
   BaseJobPayload,
@@ -6,6 +7,8 @@ import type {
   QueueDomain,
   QueuedJob,
   QueueError,
+  EnqueueError,
+  PayloadValidationError,
   JobHandler,
   WorkerOptions,
   JobContext,
@@ -25,6 +28,7 @@ export interface CreateQueueDomainDeps {
  * - Runtime validation: Zod schema validates payloads from the database
  * - Isolation: Domains don't share handler logic
  * - Result pattern: All methods return Result<T, E>
+ * - Per-job acking: a failing job never fails or retries its batch-mates
  */
 export function createQueueDomain<TPayload extends BaseJobPayload>(
   deps: CreateQueueDomainDeps,
@@ -40,6 +44,16 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
     retryDelay,
     expireInSeconds,
   };
+
+  function payloadValidationError(error: ZodError, jobId?: string): PayloadValidationError {
+    return {
+      key: 'payload_validation_error',
+      message: `Invalid payload: ${error.message}`,
+      queue: name,
+      ...(jobId != null && { jobId }),
+      issues: error.issues,
+    };
+  }
 
   // Create the queue with deadLetter configuration on first use
   let queueCreated = false;
@@ -76,19 +90,12 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
     }
   }
 
-  async function enqueue(payload: TPayload): Promise<Result<QueuedJob, QueueError>> {
+  async function enqueue(payload: TPayload): Promise<Result<QueuedJob, EnqueueError>> {
     try {
       // Validate payload before enqueueing (fail fast)
       const validation = schema.safeParse(payload);
       if (!validation.success) {
-        return {
-          ok: false,
-          error: {
-            key: 'queue_error',
-            message: `Invalid payload: ${validation.error.message}`,
-            queue: name,
-          },
-        };
+        return { ok: false, error: payloadValidationError(validation.error) };
       }
 
       await ensureQueue();
@@ -121,41 +128,63 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
     try {
       await ensureQueue();
 
-      const workOpts: WorkOptions = {
-        batchSize: workerOptions?.concurrency ?? 1,
-        ...(workerOptions?.pollingIntervalSeconds != null && {
-          pollingIntervalSeconds: workerOptions.pollingIntervalSeconds,
-        }),
-      };
+      // `perJobResults` acks each job individually — a failing job never fails
+      // (and re-runs) batch-mates whose handlers already succeeded.
+      // `includeMetadata` exposes the real retryCount to handlers.
+      workerId = await boss.work(
+        name,
+        {
+          batchSize: workerOptions?.batchSize ?? 1,
+          ...(workerOptions?.pollingIntervalSeconds != null && {
+            pollingIntervalSeconds: workerOptions.pollingIntervalSeconds,
+          }),
+          perJobResults: true,
+          includeMetadata: true,
+        },
+        async (jobs: JobWithMetadata<TPayload>[]): Promise<JobResult[]> => {
+          const results: JobResult[] = [];
 
-      // pg-boss v12 work handler receives an array of jobs
-      workerId = await boss.work<TPayload>(name, workOpts, async (jobs: Job<TPayload>[]) => {
-        // Process each job in the batch
-        for (const job of jobs) {
-          // Validate payload from database (defense-in-depth)
-          const validation = schema.safeParse(job.data);
-          if (!validation.success) {
-            // Invalid payload - don't retry, move directly to DLQ
-            throw new Error(
-              `Payload validation failed for job ${job.id}: ${validation.error.message}`
-            );
+          for (const job of jobs) {
+            // Validate payload from database (defense-in-depth). Retrying an
+            // invalid payload can't help — route it straight to the DLQ.
+            const validation = schema.safeParse(job.data);
+            if (!validation.success) {
+              results.push({
+                id: job.id,
+                status: 'deadletter',
+                output: { message: `Payload validation failed: ${validation.error.message}` },
+              });
+              continue;
+            }
+
+            const context: JobContext<TPayload> = {
+              id: job.id,
+              name: job.name,
+              data: validation.data,
+              retryCount: job.retryCount,
+            };
+
+            try {
+              const result = await handler(context);
+              results.push(
+                result.ok
+                  ? { id: job.id, status: 'completed' }
+                  : { id: job.id, status: 'failed', output: { message: result.error.message } }
+              );
+            } catch (error) {
+              results.push({
+                id: job.id,
+                status: 'failed',
+                output: {
+                  message: error instanceof Error ? error.message : 'Unknown handler error',
+                },
+              });
+            }
           }
 
-          const context: JobContext<TPayload> = {
-            id: job.id,
-            name: job.name,
-            data: validation.data,
-            retryCount: 0, // pg-boss v12 doesn't expose retry count in Job interface
-          };
-
-          const result = await handler(context);
-
-          if (!result.ok) {
-            // Throwing causes pg-boss to retry the job
-            throw new Error(result.error.message);
-          }
+          return results;
         }
-      });
+      );
 
       return { ok: true, value: undefined };
     } catch (error) {
@@ -174,19 +203,12 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
     scheduleName: string,
     cron: string,
     payload: TPayload
-  ): Promise<Result<void, QueueError>> {
+  ): Promise<Result<void, EnqueueError>> {
     try {
       // Validate payload before scheduling
       const validation = schema.safeParse(payload);
       if (!validation.success) {
-        return {
-          ok: false,
-          error: {
-            key: 'queue_error',
-            message: `Invalid payload: ${validation.error.message}`,
-            queue: name,
-          },
-        };
+        return { ok: false, error: payloadValidationError(validation.error) };
       }
 
       await ensureQueue();

@@ -9,6 +9,10 @@ export interface BossManagerConfig {
   logger: Logger;
   /** Schema name for pg-boss tables (default: 'pgboss') */
   schema?: string;
+  /** Maintenance interval (cleanup, archive, …) in seconds (default: 60) */
+  maintenanceIntervalSeconds?: number;
+  /** Queue-state monitor interval in seconds (default: 60) */
+  monitorIntervalSeconds?: number;
 }
 
 export interface BossManager {
@@ -35,15 +39,19 @@ export interface BossManager {
  * No domain coupling — the logger is injected by the caller.
  */
 export function createBossManager(config: BossManagerConfig): BossManager {
-  const { connectionString, logger, schema = 'pgboss' } = config;
+  const {
+    connectionString,
+    logger,
+    schema = 'pgboss',
+    maintenanceIntervalSeconds = 60,
+    monitorIntervalSeconds = 60,
+  } = config;
 
   const boss = new PgBoss({
     connectionString,
     schema,
-    // Maintenance interval (cleanup, archive, etc.)
-    maintenanceIntervalSeconds: 60,
-    // Monitor interval for queue states
-    monitorIntervalSeconds: 60,
+    maintenanceIntervalSeconds,
+    monitorIntervalSeconds,
   });
 
   // Log pg-boss events
@@ -64,7 +72,7 @@ export function createBossManager(config: BossManagerConfig): BossManager {
   }
 
   async function getJobById(queueName: string, jobId: string): Promise<JobDetails | null> {
-    const job = await boss.getJobById(queueName, jobId);
+    const [job] = await boss.findJobs(queueName, { id: jobId });
     if (!job) {
       return null;
     }
@@ -117,7 +125,12 @@ export function createBossManager(config: BossManagerConfig): BossManager {
     try {
       await boss.cancel(queueName, jobId);
       return true;
-    } catch {
+    } catch (error) {
+      logger.warn('Failed to cancel job', {
+        queue: queueName,
+        jobId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
   }

@@ -83,15 +83,18 @@ describe('createQueueDomain.enqueue', () => {
     );
   });
 
-  it('rejects an invalid payload without touching pg-boss (fail fast)', async () => {
+  it('rejects an invalid payload without touching pg-boss (fail fast, structured issues)', async () => {
     const domain = domainWith(boss);
     // Missing tenantId + bad email
     const result = await domain.enqueue({ to: 'not-an-email' } as unknown as TestJob);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error.key).toBe('queue_error');
+      expect(result.error.key).toBe('payload_validation_error');
       expect(result.error.queue).toBe('email');
+      if (result.error.key === 'payload_validation_error') {
+        expect(result.error.issues?.length).toBeGreaterThan(0);
+      }
     }
     expect(boss.send).not.toHaveBeenCalled();
     expect(boss.createQueue).not.toHaveBeenCalled();
@@ -129,42 +132,50 @@ describe('createQueueDomain.enqueue', () => {
 // createQueueDomain — startWorker
 // ===========================================================================
 
+type BatchHandler = (jobs: unknown[]) => Promise<Array<{ id: string; status: string; output?: unknown }>>;
+
 describe('createQueueDomain.startWorker', () => {
-  it('wires a batch worker and validates each job before invoking the handler', async () => {
+  it('wires a per-job-acking batch worker and validates each job before invoking the handler', async () => {
     const boss = createMockBoss();
     const domain = domainWith(boss);
     const handler = vi.fn().mockResolvedValue({ ok: true, value: undefined });
 
-    const result = await domain.startWorker(handler, { concurrency: 5 });
+    const result = await domain.startWorker(handler, { batchSize: 5 });
     expect(result.ok).toBe(true);
     expect(boss.work).toHaveBeenCalledWith(
       'email',
-      expect.objectContaining({ batchSize: 5 }),
+      expect.objectContaining({ batchSize: 5, perJobResults: true, includeMetadata: true }),
       expect.any(Function)
     );
 
     // Drive the registered batch handler with one valid job
-    const batchHandler = boss.work.mock.calls[0]![2] as (jobs: unknown[]) => Promise<void>;
-    await batchHandler([{ id: 'j1', name: 'email', data: validPayload }]);
+    const batchHandler = boss.work.mock.calls[0]![2] as BatchHandler;
+    const results = await batchHandler([
+      { id: 'j1', name: 'email', data: validPayload, retryCount: 2 },
+    ]);
     expect(handler).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'j1', name: 'email', data: validPayload })
+      expect.objectContaining({ id: 'j1', name: 'email', data: validPayload, retryCount: 2 })
     );
+    expect(results).toEqual([{ id: 'j1', status: 'completed' }]);
   });
 
-  it('throws inside the batch handler on invalid payload (routes to DLQ)', async () => {
+  it('routes an invalid payload straight to the DLQ (deadletter, no retry)', async () => {
     const boss = createMockBoss();
     const domain = domainWith(boss);
     const handler = vi.fn().mockResolvedValue({ ok: true, value: undefined });
     await domain.startWorker(handler);
 
-    const batchHandler = boss.work.mock.calls[0]![2] as (jobs: unknown[]) => Promise<void>;
-    await expect(
-      batchHandler([{ id: 'bad', name: 'email', data: { to: 'nope' } }])
-    ).rejects.toThrow(/validation failed/i);
+    const batchHandler = boss.work.mock.calls[0]![2] as BatchHandler;
+    const results = await batchHandler([
+      { id: 'bad', name: 'email', data: { to: 'nope' }, retryCount: 0 },
+    ]);
+    expect(results).toEqual([
+      expect.objectContaining({ id: 'bad', status: 'deadletter' }),
+    ]);
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('throws inside the batch handler when the handler returns an error Result (triggers retry)', async () => {
+  it('marks a job failed when the handler returns an error Result (triggers retry)', async () => {
     const boss = createMockBoss();
     const domain = domainWith(boss);
     const handler = vi
@@ -172,10 +183,53 @@ describe('createQueueDomain.startWorker', () => {
       .mockResolvedValue({ ok: false, error: { key: 'job_failed', message: 'boom' } });
     await domain.startWorker(handler);
 
-    const batchHandler = boss.work.mock.calls[0]![2] as (jobs: unknown[]) => Promise<void>;
-    await expect(
-      batchHandler([{ id: 'j1', name: 'email', data: validPayload }])
-    ).rejects.toThrow('boom');
+    const batchHandler = boss.work.mock.calls[0]![2] as BatchHandler;
+    const results = await batchHandler([
+      { id: 'j1', name: 'email', data: validPayload, retryCount: 0 },
+    ]);
+    expect(results).toEqual([
+      { id: 'j1', status: 'failed', output: { message: 'boom' } },
+    ]);
+  });
+
+  it('acks each job in a batch individually — one failure does not fail its batch-mates', async () => {
+    const boss = createMockBoss();
+    const domain = domainWith(boss);
+    const handler = vi.fn().mockImplementation(async (job: { data: TestJob }) =>
+      job.data.to === 'fail@b.com'
+        ? { ok: false, error: { key: 'job_failed', message: 'nope' } }
+        : { ok: true, value: undefined }
+    );
+    await domain.startWorker(handler, { batchSize: 3 });
+
+    const batchHandler = boss.work.mock.calls[0]![2] as BatchHandler;
+    const results = await batchHandler([
+      { id: 'j1', name: 'email', data: validPayload, retryCount: 0 },
+      { id: 'j2', name: 'email', data: { ...validPayload, to: 'fail@b.com' }, retryCount: 1 },
+      { id: 'j3', name: 'email', data: validPayload, retryCount: 0 },
+    ]);
+
+    expect(results).toEqual([
+      { id: 'j1', status: 'completed' },
+      { id: 'j2', status: 'failed', output: { message: 'nope' } },
+      { id: 'j3', status: 'completed' },
+    ]);
+    expect(handler).toHaveBeenCalledTimes(3);
+  });
+
+  it('marks a job failed when the handler throws', async () => {
+    const boss = createMockBoss();
+    const domain = domainWith(boss);
+    const handler = vi.fn().mockRejectedValue(new Error('exploded'));
+    await domain.startWorker(handler);
+
+    const batchHandler = boss.work.mock.calls[0]![2] as BatchHandler;
+    const results = await batchHandler([
+      { id: 'j1', name: 'email', data: validPayload, retryCount: 0 },
+    ]);
+    expect(results).toEqual([
+      { id: 'j1', status: 'failed', output: { message: 'exploded' } },
+    ]);
   });
 });
 

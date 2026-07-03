@@ -5,16 +5,24 @@ domain-agnostic foundation on top of [`pg-boss`](https://github.com/timgit/pg-bo
 
 - **`createBossManager`** — a lifecycle + monitoring facade over a single shared
   pg-boss instance (`start` / `stop` / `getJobById` / `getQueues` /
-  `getQueueStats` / `cancelJob`). The logger is injected by the caller.
+  `getQueueStats` / `cancelJob`). The logger is injected by the caller;
+  maintenance/monitor intervals are configurable.
 - **`createQueueDomain`** — a generic queue/worker/DLQ trio with Zod-validated
   payloads. Creates the dead-letter queue first, then the main queue with a
   `deadLetter` reference, and validates payloads on both enqueue and dequeue.
+  Workers ack **per job** (pg-boss `perJobResults`): one failing job in a batch
+  never fails or re-runs its batch-mates, a schema-invalid payload is routed
+  straight to the DLQ (retrying can't fix it), and handlers see the real
+  `retryCount`.
 - Monitoring types + error factories (`JobDetails`, `QueueStats`, `JobState`,
   `createJobNotFoundError`, …).
 
 There is **no domain coupling**: payload types are supplied by the consumer and
 all methods return `Result<T, E>` from
 [`@octabits-io/foundation`](https://github.com/octabits-io/platform/tree/main/packages/foundation).
+Enqueue-side validation failures return a structured
+`PayloadValidationError` (with Zod issues); everything else returns
+`QueueError` — `EnqueueError` is the exported union.
 
 ## Install
 
@@ -22,8 +30,10 @@ all methods return `Result<T, E>` from
 pnpm add @octabits-io/queue pg-boss
 ```
 
-`pg-boss` is a direct runtime dependency; `zod` (v4) is a peer dependency you
-provide.
+`pg-boss` (v12), `@octabits-io/foundation`, and `zod` (v4) are **peer
+dependencies** you provide. pg-boss and foundation types (`PgBoss`, `Result`)
+are part of this package's public API, so your app and this package must share
+a single instance of each.
 
 ## Usage
 
@@ -56,11 +66,15 @@ const emailQueue = createQueueDomain<EmailJob>(
 // 3. Enqueue + process
 await emailQueue.enqueue({ tenantId: 't1', to: 'guest@example.com' });
 
-await emailQueue.startWorker(async (job) => {
-  // job.data is validated + typed as EmailJob
-  await sendEmail(job.data);
-  return { ok: true, value: undefined };
-});
+await emailQueue.startWorker(
+  async (job) => {
+    // job.data is validated + typed as EmailJob; job.retryCount is real
+    await sendEmail(job.data);
+    return { ok: true, value: undefined };
+  },
+  // batchSize: jobs fetched per poll, processed sequentially, acked per job
+  { batchSize: 2, pollingIntervalSeconds: 2 }
+);
 ```
 
 ### Base payload types

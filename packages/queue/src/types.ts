@@ -62,7 +62,7 @@ export interface JobContext<TPayload extends BaseJobPayload> {
   name: string;
   /** Job payload data */
   data: TPayload;
-  /** Number of retry attempts so far */
+  /** Number of retry attempts so far (0 on the first attempt). */
   retryCount: number;
 }
 
@@ -99,14 +99,14 @@ export interface QueueDomainConfig<TPayload extends BaseJobPayload> {
  */
 export interface QueueDomain<TPayload extends BaseJobPayload> {
   /** Enqueue a job for processing */
-  enqueue(payload: TPayload): Promise<Result<QueuedJob, QueueError>>;
+  enqueue(payload: TPayload): Promise<Result<QueuedJob, EnqueueError>>;
   /** Start the worker to process jobs */
   startWorker(
     handler: JobHandler<TPayload>,
     options?: WorkerOptions
   ): Promise<Result<void, QueueError>>;
   /** Schedule a recurring job */
-  schedule(name: string, cron: string, payload: TPayload): Promise<Result<void, QueueError>>;
+  schedule(name: string, cron: string, payload: TPayload): Promise<Result<void, EnqueueError>>;
   /** Stop the worker gracefully */
   stop(): Promise<void>;
 }
@@ -120,8 +120,13 @@ export type JobHandler<TPayload extends BaseJobPayload> = (
 ) => Promise<Result<void, JobFailedError>>;
 
 export interface WorkerOptions {
-  /** Number of concurrent jobs to process */
-  concurrency?: number;
+  /**
+   * Number of jobs fetched per poll (default: 1). Jobs are processed
+   * sequentially within the batch, but each job is acked **individually**
+   * (pg-boss `perJobResults`) — one failing job does not fail or retry its
+   * batch-mates.
+   */
+  batchSize?: number;
   /** How often pg-boss polls for new jobs, in seconds (default: 2) */
   pollingIntervalSeconds?: number;
 }
@@ -170,7 +175,10 @@ export interface JobFailedError extends OctError {
 
 /**
  * Error returned when payload validation fails.
- * Job will be moved to DLQ since retrying won't help.
+ *
+ * On the enqueue/schedule path this is returned to the caller (fail fast, with
+ * structured Zod issues). On the worker path an invalid payload is routed
+ * straight to the DLQ since retrying won't help.
  */
 export interface PayloadValidationError extends OctError {
   key: 'payload_validation_error';
@@ -180,5 +188,8 @@ export interface PayloadValidationError extends OctError {
   /** Queue name */
   queue?: string;
   /** Zod validation issues */
-  issues?: z.ZodIssue[];
+  issues?: z.core.$ZodIssue[];
 }
+
+/** Union returned by the enqueue-side operations (`enqueue` / `schedule`). */
+export type EnqueueError = QueueError | PayloadValidationError;

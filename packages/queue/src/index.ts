@@ -35,6 +35,7 @@ export type {
   QueueError,
   JobFailedError,
   PayloadValidationError,
+  EnqueueError,
 } from './types.ts';
 
 // Monitoring types + error factories

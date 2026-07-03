@@ -199,9 +199,6 @@ importers:
 
   packages/queue:
     dependencies:
-      pg-boss:
-        specifier: ^12.24.1
-        version: 12.24.1
       typescript:
         specifier: ^5 || ^6
         version: 6.0.3
@@ -209,6 +206,15 @@ importers:
       '@octabits-io/foundation':
         specifier: workspace:^
         version: link:../foundation
+      '@testcontainers/postgresql':
+        specifier: ^12.0.4
+        version: 12.0.4
+      pg-boss:
+        specifier: ^12.24.1
+        version: 12.24.1
+      testcontainers:
+        specifier: ^12.0.4
+        version: 12.0.4
       vitest:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@26.1.0)(vite@7.3.1(@types/node@26.1.0)(jiti@2.6.1)(yaml@2.9.0))
