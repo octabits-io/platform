@@ -11,9 +11,17 @@ these transports.
 
 ```bash
 pnpm add @octabits-io/mail
+# plus the SDK for each vendor transport you actually use:
+pnpm add nodemailer      # for @octabits-io/mail/smtp
+pnpm add node-mailjet    # for @octabits-io/mail/mailjet
+pnpm add wretch          # for @octabits-io/mail/brevo
 ```
 
-`@octabits-io/foundation` (`Result`, `Logger`) is a runtime dependency.
+`@octabits-io/foundation` (`Result`, `Logger`) is a runtime dependency. The
+vendor SDKs are **optional peer dependencies**: the root entry (`.`) is
+dependency-free (contract + logger/memory transports), and each vendor
+transport lives behind its own subpath so you only install and load the SDKs
+you use.
 
 ## The contract
 
@@ -35,13 +43,13 @@ optional `attachments` (raw bytes; each transport re-encodes as needed).
 
 ## Transports
 
-| Factory | Package | Notes |
-| --- | --- | --- |
-| `createSmtpTransport({ smtp, logger })` | `nodemailer` | The only transport that honors `returnPath` via the SMTP envelope. |
-| `createMailjetTransport({ mailjet, logger })` | `node-mailjet` | Send v3.1 API; `messageId` is always `null`. |
-| `createBrevoTransport({ brevo, logger })` | `wretch` | Returns a real `messageId` → suitable for delivery/bounce tracking. |
-| `createLoggerTransport({ logger })` | — | Logs instead of sending (dev). Synthesizes a dev Message-ID. |
-| `createMemoryTransport()` | — | Captures messages in memory for tests, with inspection helpers. |
+| Factory | Import from | SDK peer | Notes |
+| --- | --- | --- | --- |
+| `createSmtpTransport({ smtp, logger })` | `@octabits-io/mail/smtp` | `nodemailer` | The only transport that honors `returnPath` via the SMTP envelope. |
+| `createMailjetTransport({ mailjet, logger })` | `@octabits-io/mail/mailjet` | `node-mailjet` | Send v3.1 API; `messageId` is always `null`. |
+| `createBrevoTransport({ brevo, logger })` | `@octabits-io/mail/brevo` | `wretch` | Returns a real `messageId` → suitable for delivery/bounce tracking. |
+| `createLoggerTransport({ logger })` | `@octabits-io/mail` | — | Logs instead of sending (dev). Synthesizes a dev Message-ID. |
+| `createMemoryTransport()` | `@octabits-io/mail` | — | Captures messages in memory for tests, with inspection helpers. |
 
 Each provider also ships a low-level client factory
 (`createSmtpTransporter` / `createMailjetClient` / `createBrevoClient`) and a
@@ -51,7 +59,7 @@ connection verifier (`verifySmtpConnection` / `verifyMailjetConnection` /
 ## Example
 
 ```ts
-import { createSmtpTransport } from '@octabits-io/mail';
+import { createSmtpTransport } from '@octabits-io/mail/smtp';
 
 const transport = createSmtpTransport({
   smtp: { host: 'smtp.example.com', port: 587, auth: { user, pass } },

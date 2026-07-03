@@ -5,6 +5,8 @@ export default defineConfig({
     "db/index": "src/db/index.ts",
     "factory/index": "src/factory/index.ts",
     "migrate/index": "src/migrate/index.ts",
+    "tenant/index": "src/tenant/index.ts",
+    "testing/index": "src/testing/index.ts",
   },
   format: "esm",
   dts: true,

@@ -11,7 +11,7 @@
  *
  * @example
  * ```typescript
- * const service = createBookingService({
+ * const service = createOrderService({
  *   db,
  *   tenantId,
  *   // Not exercised by this test — fail loudly if that ever changes.

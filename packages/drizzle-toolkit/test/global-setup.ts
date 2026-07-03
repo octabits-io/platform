@@ -1,4 +1,4 @@
-import { createGlobalSetup } from '../src/index.ts';
+import { createGlobalSetup } from '../src/testing/index.ts';
 import { resolve } from 'node:path';
 
 const { setup, teardown } = createGlobalSetup({

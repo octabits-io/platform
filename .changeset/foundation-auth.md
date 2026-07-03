@@ -12,4 +12,6 @@ provider-specific (e.g. Zitadel) claim knowledge stays in the consumer. Includes
 production-neutralized auth-bypass path (returns a caller-supplied `bypassToken`),
 `extractBearerToken`, and `validateAuthorizationHeader`. Exports the `JwtValidationService`,
 `JwtValidationServiceConfig`, `JwtValidationError`, `ValidateResult`, `ClaimMapper`, and
-`ClaimMapperResult` types. Adds `jose ^6.2.3` as a runtime dependency.
+`ClaimMapperResult` types. `jose ^6` is an **optional peer dependency** — only consumers
+importing the `./auth` subpath need to install it; the other foundation subpaths stay
+dependency-free.

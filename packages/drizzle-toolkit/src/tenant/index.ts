@@ -1,5 +1,6 @@
 /**
- * @octabits-io/schema — generic multi-tenant Drizzle schema primitives.
+ * @octabits-io/drizzle-toolkit/tenant — generic multi-tenant Drizzle schema
+ * primitives.
  *
  * Provides the three base tables every multi-tenant SaaS needs before its
  * domain tables:
@@ -22,7 +23,7 @@
  *
  *     ```ts
  *     import { pgTable, text, integer } from 'drizzle-orm/pg-core';
- *     import { baseTenantColumns } from '@octabits-io/schema';
+ *     import { baseTenantColumns } from '@octabits-io/drizzle-toolkit/tenant';
  *
  *     export const tenant = pgTable('tenant', {
  *       ...baseTenantColumns,              // id, name, isDisabled, createdAt
@@ -90,6 +91,12 @@ export const baseTenantColumns = {
  * `tenantId` is unique (one active key row per tenant). The foreign key to the
  * tenant table is intentionally *not* part of the column-set (it depends on the
  * concrete tenant table); add it in the table's constraints callback.
+ *
+ * **Pairs with `@octabits-io/pii`**: the column shapes (Age recipient,
+ * master-key-encrypted Age identity, blind-index HMAC key) are specific to that
+ * package's encryption scheme. If your app does not use `@octabits-io/pii`,
+ * skip this column-set (and {@link tenantEncryptionKey}) entirely — the base
+ * `tenant` / `tenant_config` tables do not depend on it.
  */
 export const tenantEncryptionKeyColumns = {
   id: bigserial({ mode: "number" }).primaryKey().notNull(),

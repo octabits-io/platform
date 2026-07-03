@@ -68,7 +68,7 @@ git commit -m "chore: update drizzle-orm to v0.40"
 
 We use [Changesets](https://github.com/changesets/changesets) to manage versions and changelogs.
 
-All four packages are **linked** — when one package bumps to a new version, the others that also have changesets will share the same version number. Packages without changesets are not published.
+The core packages (`foundation`, `drizzle-toolkit`, `pii`, `flow`) are **linked** — when one bumps to a new version, the others that also have changesets share the same version number. `elysia`, `queue`, and `mail` version independently. Packages without changesets are not published.
 
 ### Step 1: Add a changeset
 
@@ -142,9 +142,17 @@ pnpm changeset:publish      # build + publish to npm
 
 | Package | Description | Exports |
 |---------|-------------|---------|
-| `@octabits-io/foundation` | Result types, IoC container, logger, utilities | `./result` `./ioc` `./logger` `./utils` |
-| `@octabits-io/drizzle-toolkit` | Database helpers, DAG workflow engine | `./db` `./workflow` |
-| `@octabits-io/pii` | PII encryption (AES-256-GCM, X25519+ChaCha20) | `.` |
-| `@octabits-io/drizzle-test` | Test utilities with testcontainers for PostgreSQL | `.` |
+| `@octabits-io/foundation` | Result types, IoC container, logger, utilities, config-schema fragments, RBAC, OIDC/JWT auth | `./result` `./ioc` `./logger` `./utils` `./config-schema` `./rbac` `./auth` |
+| `@octabits-io/drizzle-toolkit` | DB error handling, pagination, factory, migrations, multi-tenant schema, test utilities | `./db` `./factory` `./migrate` `./tenant` `./testing` |
+| `@octabits-io/pii` | PII encryption (age/X25519), blind indexes, master key provider | `.` |
+| `@octabits-io/elysia` | Elysia middleware & helpers (security headers, client IP, errors, rate limit) | `.` |
+| `@octabits-io/queue` | pg-boss queue base (BossManager, queue/worker/DLQ trio) | `.` |
+| `@octabits-io/mail` | Mail transport contract + providers | `.` `./smtp` `./mailjet` `./brevo` |
+| `@octabits-io/flow` | Durable DAG workflow engine + AI add-on | `.` `./ai` `./store-pg` `./dispatcher-pgboss` |
 
-Dependency graph: `drizzle-toolkit` → `foundation` (peer), `pii` → `foundation` (peer), `drizzle-test` is standalone.
+Dependency graph: `drizzle-toolkit` → `foundation` (dep), `pii` → `foundation`
+(dep), `queue` → `foundation` (**peer** — `Result` is in its public API),
+`mail` → `foundation` (**peer**, same reason; vendor SDKs are optional peers),
+`foundation` → `jose` (optional peer, `./auth` only), `elysia` and `flow` are
+standalone. The former `schema` and `drizzle-test` packages were merged into
+`drizzle-toolkit` (`./tenant`, `./testing`).

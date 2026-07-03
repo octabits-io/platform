@@ -36,14 +36,15 @@
     "url": "https://github.com/octabits-io/platform/issues"
   },
   "dependencies": {
-    "@octabits-io/foundation": "^0.2.0",
     "pg-boss": "^12.24.1"
   },
   "devDependencies": {
+    "@octabits-io/foundation": "workspace:^",
     "vitest": "^4.1.9",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
+    "@octabits-io/foundation": ">=0.2.0 <1",
     "typescript": "^5 || ^6",
     "zod": "^4"
   }

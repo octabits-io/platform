@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { setupTestDatabase, cleanupTestDatabase, resetDatabase } from './setup.ts';
-import { testSchema, testItems, testTags } from '../test/test-schema.ts';
+import { testSchema, testItems, testTags } from '../../test/test-schema.ts';
 
 let db: NodePgDatabase<typeof testSchema>;
 

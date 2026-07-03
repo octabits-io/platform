@@ -3,13 +3,14 @@
 // ============================================================================
 //
 // Reusable Zod fragments for service-container config schemas. These are the
-// sections that every backend container repeats verbatim — database pool knobs,
-// structured logging / OTLP, and the ALTCHA captcha config — plus the two
-// `nonEmptyString` / `nonEmptyUrl` primitives they are all built from.
+// sections that every backend container repeats verbatim — database pool knobs
+// and structured logging / OTLP — plus the two `nonEmptyString` / `nonEmptyUrl`
+// primitives they are all built from.
 //
-// App-specific sections (storage, auth/OIDC field sets, domain config) stay in
-// each app: they diverge per surface. Compose these fragments into the app's
-// top-level `z.object({...})` and apply `.optional()` / `.extend(...)` as needed.
+// App-specific sections (storage, auth/OIDC field sets, captcha, domain config)
+// stay in each app: they diverge per surface or encode a product choice.
+// Compose these fragments into the app's top-level `z.object({...})` and apply
+// `.optional()` / `.extend(...)` as needed.
 
 import { z } from 'zod';
 
@@ -73,34 +74,4 @@ export const LOGGING_CONFIG_SCHEMA = z.object({
     headers: z.record(z.string(), z.string()).optional(),
   }).optional(),
   consoleOutput: z.coerce.boolean().optional(),
-});
-
-// ----------------------------------------------------------------------------
-// Captcha (ALTCHA)
-// ----------------------------------------------------------------------------
-
-/**
- * ALTCHA proof-of-work captcha config. Self-contained: already `.optional()`
- * and carries the "hmacSecret required when enabled" refinement, so consumers
- * use it directly as `captcha: CAPTCHA_CONFIG_SCHEMA`.
- */
-export const CAPTCHA_CONFIG_SCHEMA = z.object({
-  enabled: z.coerce.boolean().default(false),
-  // Required when enabled. Min 32 chars. Used for both ALTCHA challenge signing
-  // and the minted verified-token HMAC.
-  hmacSecret: z.string().min(32).optional(),
-  // PBKDF2 iteration count.
-  cost: z.coerce.number().positive().optional(),
-  // Challenge validity window in ms.
-  expiresMs: z.coerce.number().positive().optional(),
-  // Verified-token TTL after successful redeem.
-  verifiedTokenTtlMs: z.coerce.number().positive().optional(),
-}).optional().superRefine((data, ctx) => {
-  if (data?.enabled && !data.hmacSecret) {
-    ctx.addIssue({
-      code: 'custom',
-      message: 'captcha.hmacSecret is required when captcha.enabled',
-      path: ['hmacSecret'],
-    });
-  }
 });

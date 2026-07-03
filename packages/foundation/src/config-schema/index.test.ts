@@ -5,7 +5,6 @@ import {
   DATABASE_CONFIG_SCHEMA,
   createRlsSchema,
   LOGGING_CONFIG_SCHEMA,
-  CAPTCHA_CONFIG_SCHEMA,
 } from './index';
 
 describe('nonEmptyString / nonEmptyUrl', () => {
@@ -60,21 +59,5 @@ describe('LOGGING_CONFIG_SCHEMA', () => {
   it('validates the otlp endpoint as a url', () => {
     expect(LOGGING_CONFIG_SCHEMA.safeParse({ otlp: { endpoint: 'nope' } }).success).toBe(false);
     expect(LOGGING_CONFIG_SCHEMA.safeParse({ otlp: { endpoint: 'https://c.io' } }).success).toBe(true);
-  });
-});
-
-describe('CAPTCHA_CONFIG_SCHEMA', () => {
-  it('is optional', () => {
-    expect(CAPTCHA_CONFIG_SCHEMA.safeParse(undefined).success).toBe(true);
-  });
-
-  it('requires hmacSecret (min 32) when enabled', () => {
-    expect(CAPTCHA_CONFIG_SCHEMA.safeParse({ enabled: true }).success).toBe(false);
-    expect(CAPTCHA_CONFIG_SCHEMA.safeParse({ enabled: true, hmacSecret: 'short' }).success).toBe(false);
-    expect(CAPTCHA_CONFIG_SCHEMA.safeParse({ enabled: true, hmacSecret: 'x'.repeat(32) }).success).toBe(true);
-  });
-
-  it('allows disabled with no secret', () => {
-    expect(CAPTCHA_CONFIG_SCHEMA.safeParse({ enabled: false }).success).toBe(true);
   });
 });

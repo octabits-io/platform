@@ -1,6 +1,15 @@
 // ============================================================================
-// @octabits-io/mail — provider-agnostic mail transport contract + transports
+// @octabits-io/mail — provider-agnostic mail transport contract
 // ============================================================================
+//
+// The root entry is dependency-free: the transport contract, the error
+// taxonomy, and the two vendor-less transports (logger for dev, memory for
+// tests). Vendor transports live behind subpath exports so consumers only
+// install and load the SDKs they actually use:
+//
+//   @octabits-io/mail/smtp     — nodemailer   (optional peer: nodemailer)
+//   @octabits-io/mail/mailjet  — node-mailjet (optional peer: node-mailjet)
+//   @octabits-io/mail/brevo    — wretch       (optional peer: wretch)
 
 // --- Base contract ---------------------------------------------------------
 export type {
@@ -19,58 +28,6 @@ export type {
   RenderedEmail,
   RenderMailResult,
 } from './base/errors';
-
-// --- SMTP transport (nodemailer) -------------------------------------------
-export {
-  createSmtpTransport,
-} from './providers/smtp/SmtpTransport';
-export type {
-  SmtpTransport,
-  SmtpTransportCreateConfig,
-} from './providers/smtp/SmtpTransport';
-export {
-  createSmtpTransporter,
-  verifySmtpConnection,
-} from './providers/smtp/smtp-client';
-export type {
-  SmtpTransportConfig,
-} from './providers/smtp/smtp-client';
-
-// --- Mailjet transport (node-mailjet) --------------------------------------
-export {
-  createMailjetTransport,
-} from './providers/mailjet/MailjetTransport';
-export type {
-  MailjetTransport,
-  MailjetTransportCreateConfig,
-} from './providers/mailjet/MailjetTransport';
-export {
-  createMailjetClient,
-  verifyMailjetConnection,
-} from './providers/mailjet/mailjet-client';
-export type {
-  MailjetCredentials,
-} from './providers/mailjet/mailjet-client';
-
-// --- Brevo transport (wretch) ----------------------------------------------
-export {
-  createBrevoTransport,
-} from './providers/brevo/BrevoTransport';
-export type {
-  BrevoTransport,
-  BrevoTransportCreateConfig,
-} from './providers/brevo/BrevoTransport';
-export {
-  createBrevoClient,
-  verifyBrevoConnection,
-  formatBrevoError,
-} from './providers/brevo/brevo-client';
-export type {
-  BrevoClient,
-  BrevoCredentials,
-  BrevoSendEmailPayload,
-  BrevoSendEmailResponse,
-} from './providers/brevo/brevo-client';
 
 // --- Logger transport (dev) ------------------------------------------------
 export {

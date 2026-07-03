@@ -5,6 +5,15 @@
 Add `@octabits-io/mail`: a provider-agnostic mail transport contract plus a set
 of deliberately-dumb outbound transports.
 
+The root entry (`.`) is dependency-free — contract, error taxonomy, and the
+logger/memory transports. Vendor transports live behind subpath exports
+(`./smtp`, `./mailjet`, `./brevo`), with their SDKs (`nodemailer`,
+`node-mailjet`, `wretch`) declared as **optional peer dependencies** so
+consumers only install and load the ones they use.
+`@octabits-io/foundation` is a required **peer dependency** (static range
+`>=0.2.0 <1`): its `Result` types are part of the `send()` contract, so the
+consumer must share a single foundation instance.
+
 - Base contract — `MailTransport` (`{ type, send(message) }`), the
   provider-agnostic `MailMessage`/`MailAttachment` shapes, and the mail error
   types (`MailConfigurationError`/`MailDeliveryError`/`MailTemplateError`/

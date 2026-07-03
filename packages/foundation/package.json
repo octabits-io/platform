@@ -65,14 +65,18 @@
   "bugs": {
     "url": "https://github.com/octabits-io/platform/issues"
   },
-  "dependencies": {
-    "jose": "^6.2.3"
-  },
   "devDependencies": {
+    "jose": "^6.2.3",
     "vitest": "^4.1.9"
   },
   "peerDependencies": {
+    "jose": "^6",
     "typescript": "^5 || ^6",
     "zod": "^4"
+  },
+  "peerDependenciesMeta": {
+    "jose": {
+      "optional": true
+    }
   }
 }
