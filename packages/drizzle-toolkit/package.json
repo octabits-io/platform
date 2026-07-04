@@ -7,23 +7,28 @@
   "exports": {
     "./db": {
       "import": "./dist/db/index.js",
-      "types": "./dist/db/index.d.ts"
+      "types": "./dist/db/index.d.ts",
+      "default": "./dist/db/index.js"
     },
     "./factory": {
       "import": "./dist/factory/index.js",
-      "types": "./dist/factory/index.d.ts"
+      "types": "./dist/factory/index.d.ts",
+      "default": "./dist/factory/index.js"
     },
     "./migrate": {
       "import": "./dist/migrate/index.js",
-      "types": "./dist/migrate/index.d.ts"
+      "types": "./dist/migrate/index.d.ts",
+      "default": "./dist/migrate/index.js"
     },
     "./tenant": {
       "import": "./dist/tenant/index.js",
-      "types": "./dist/tenant/index.d.ts"
+      "types": "./dist/tenant/index.d.ts",
+      "default": "./dist/tenant/index.js"
     },
     "./testing": {
       "import": "./dist/testing/index.js",
-      "types": "./dist/testing/index.d.ts"
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
     }
   },
   "scripts": {
