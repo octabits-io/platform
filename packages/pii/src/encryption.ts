@@ -50,7 +50,9 @@ export function decryptSymmetric(encrypted: Buffer, symmetricKey: Buffer): Resul
     const iv = encrypted.subarray(0, IV_SIZE);
     const tag = encrypted.subarray(IV_SIZE, IV_SIZE + AUTH_TAG_SIZE);
     const encData = encrypted.subarray(IV_SIZE + AUTH_TAG_SIZE);
-    const decipher = crypto.createDecipheriv(ALGORITHM, symmetricKey, iv);
+    const decipher = crypto.createDecipheriv(ALGORITHM, symmetricKey, iv, {
+      authTagLength: AUTH_TAG_SIZE,
+    });
     decipher.setAuthTag(tag);
     let decryptedData = decipher.update(encData);
     decryptedData = Buffer.concat([decryptedData, decipher.final()]);

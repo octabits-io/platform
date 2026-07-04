@@ -3,7 +3,7 @@ export { createPiiEncryptionService, createPiiEncryptionOnlyService } from './pi
 export type { PiiEncryptionService, PiiEncryptionOnlyService, PiiEncryptionServiceDeps, PiiEncryptionOnlyServiceDeps } from './pii-service.ts';
 
 // Master key
-export { createEnvVarMasterKeyProvider } from './master-key.ts';
+export { createEnvVarMasterKeyProvider, MIN_MASTER_KEY_SOURCE_LENGTH } from './master-key.ts';
 export type { MasterKeyProvider, MasterKeyError } from './master-key.ts';
 
 // Blind index

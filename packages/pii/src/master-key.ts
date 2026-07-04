@@ -23,15 +23,33 @@ export interface MasterKeyProvider {
 const DEFAULT_MASTER_KEY_INFO = 'oct-master-key-v1';
 
 /**
+ * Minimum length for the master key source. 32 characters of a base64- or
+ * hex-encoded random value; HKDF only reshapes key material, it does not add
+ * entropy or stretch weak inputs.
+ */
+export const MIN_MASTER_KEY_SOURCE_LENGTH = 32;
+
+/**
  * Create a MasterKeyProvider using an environment variable as the master key source.
  *
  * The master key is derived using HKDF-SHA256 to ensure it's exactly 32 bytes
  * regardless of the input key length.
  *
- * @param masterKeySource - The source key material (e.g., from environment variable)
+ * @param masterKeySource - The source key material (e.g., from environment variable).
+ *   Must be cryptographically random, not a human-chosen passphrase — HKDF does no
+ *   password stretching, so a guessable source is brute-forceable regardless of the
+ *   derived key size. Generate with `openssl rand -base64 32`. Minimum 32 characters.
  * @param info - Optional HKDF info parameter (default: 'oct-master-key-v1')
+ * @throws {Error} if `masterKeySource` is shorter than 32 characters (misconfiguration —
+ *   fail fast at startup rather than encrypt under a weak key)
  */
 export function createEnvVarMasterKeyProvider(masterKeySource: string, info = DEFAULT_MASTER_KEY_INFO): MasterKeyProvider {
+  if (masterKeySource.length < MIN_MASTER_KEY_SOURCE_LENGTH) {
+    throw new Error(
+      `Master key source must be at least ${MIN_MASTER_KEY_SOURCE_LENGTH} characters of cryptographically random material (got ${masterKeySource.length}). Generate one with: openssl rand -base64 32`,
+    );
+  }
+
   // Derive a 32-byte key from the source using HKDF
   const derivedKey = crypto.hkdfSync('sha256', masterKeySource, '', info, 32);
   const key = Buffer.from(derivedKey);

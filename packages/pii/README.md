@@ -56,6 +56,14 @@ const wrapped = await masterKey.encrypt(dataKeyBuffer);
 const unwrapped = await masterKey.decrypt(wrapped.value);
 ```
 
+`MASTER_KEY` must be **cryptographically random material, not a passphrase** — HKDF derives a fixed-size key but does no password stretching, so a human-chosen value is brute-forceable no matter how it's derived. Generate one with:
+
+```bash
+openssl rand -base64 32
+```
+
+`createEnvVarMasterKeyProvider` throws at startup if the source is shorter than 32 characters. Note this is a length check only — it cannot detect a long-but-guessable passphrase, so always use a generated value.
+
 ## Low-Level Primitives
 
 ```ts

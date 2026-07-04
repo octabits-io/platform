@@ -1,8 +1,8 @@
 import { assert, describe, expect, test } from 'vitest';
-import { createEnvVarMasterKeyProvider } from './master-key.ts';
+import { createEnvVarMasterKeyProvider, MIN_MASTER_KEY_SOURCE_LENGTH } from './master-key.ts';
 
 describe('createEnvVarMasterKeyProvider', () => {
-  const provider = createEnvVarMasterKeyProvider('test-master-key-source');
+  const provider = createEnvVarMasterKeyProvider('test-master-key-source-0123456789abcdef');
 
   test('encrypt returns a buffer', async () => {
     const plaintext = Buffer.from('secret-data-key');
@@ -42,7 +42,7 @@ describe('createEnvVarMasterKeyProvider', () => {
   });
 
   test('decrypt with wrong key returns error', async () => {
-    const provider2 = createEnvVarMasterKeyProvider('different-key');
+    const provider2 = createEnvVarMasterKeyProvider('different-key-fedcba9876543210fedcba98');
     const plaintext = Buffer.from('secret');
 
     const encrypted = await provider.encrypt(plaintext);
@@ -65,8 +65,9 @@ describe('createEnvVarMasterKeyProvider', () => {
   });
 
   test('custom info parameter produces different keys', async () => {
-    const providerA = createEnvVarMasterKeyProvider('same-source', 'info-a');
-    const providerB = createEnvVarMasterKeyProvider('same-source', 'info-b');
+    const source = 'same-source-0123456789abcdef0123456789';
+    const providerA = createEnvVarMasterKeyProvider(source, 'info-a');
+    const providerB = createEnvVarMasterKeyProvider(source, 'info-b');
     const plaintext = Buffer.from('test');
 
     const encrypted = await providerA.encrypt(plaintext);
@@ -84,6 +85,16 @@ describe('createEnvVarMasterKeyProvider', () => {
     const decrypted = await provider.decrypt(encrypted.value);
     assert(decrypted.ok);
     expect(decrypted.value).toEqual(plaintext);
+  });
+
+  test('rejects a key source shorter than the minimum length', () => {
+    const short = 'x'.repeat(MIN_MASTER_KEY_SOURCE_LENGTH - 1);
+    expect(() => createEnvVarMasterKeyProvider(short)).toThrow(/at least 32 characters/);
+  });
+
+  test('accepts a key source at exactly the minimum length', () => {
+    const exact = 'x'.repeat(MIN_MASTER_KEY_SOURCE_LENGTH);
+    expect(() => createEnvVarMasterKeyProvider(exact)).not.toThrow();
   });
 
   test('handles large payloads', async () => {
