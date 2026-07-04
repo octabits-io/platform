@@ -13,3 +13,4 @@ export * from './rate-limit';
 export * from './responses';
 export * from './errors';
 export * from './config';
+export * from './create-app';
