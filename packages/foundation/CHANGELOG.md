@@ -1,5 +1,50 @@
 # @octabits-io/foundation
 
+## 0.3.0
+
+### Minor Changes
+
+- [`f538ade`](https://github.com/octabits-io/platform/commit/f538ade424900afb3ba4c5ab3719648c9bd73574) - Add the `@octabits-io/foundation/auth` subpath: generic OIDC/JWT validation.
+  `createJwtValidationService<TToken>({ issuerUrl, audience, logger, claimMapper,
+authBypassSecret?, bypassToken? })` performs lazy OIDC discovery (with a 30s
+  discovery-failure cooldown), JWKS-backed signature verification via `jose`
+  (`createRemoteJWKSet` + `jwtVerify`, issuer/audience checked), and hands the verified
+  payload to an injected `claimMapper(payload) => ClaimMapperResult<TToken>` so all
+  provider-specific (e.g. Zitadel) claim knowledge stays in the consumer. Includes the
+  production-neutralized auth-bypass path (returns a caller-supplied `bypassToken`),
+  `extractBearerToken`, and `validateAuthorizationHeader`. Exports the `JwtValidationService`,
+  `JwtValidationServiceConfig`, `JwtValidationError`, `ValidateResult`, `ClaimMapper`, and
+  `ClaimMapperResult` types. `jose ^6` is an **optional peer dependency** — only consumers
+  importing the `./auth` subpath need to install it; the other foundation subpaths stay
+  dependency-free.
+
+- [`d457103`](https://github.com/octabits-io/platform/commit/d457103625196712bc963f7d49a29ecbbcd42492) - New subpath **`@octabits-io/foundation/config-schema`** — reusable Zod fragments for backend service-container config schemas, extracted from the triplicated sections that every container repeated verbatim:
+
+  - `nonEmptyString` / `nonEmptyUrl` — the two string primitives every config is built from.
+  - `DATABASE_CONFIG_SCHEMA` — connection URL + pool knobs (`poolMaxConnections`, idle/connection/statement timeouts). RLS is deliberately excluded (surface-specific defaults) and composed via `createRlsSchema(defaultEnabled)` + `.extend(...)`.
+  - `LOGGING_CONFIG_SCHEMA` — log level + optional OTLP export config.
+
+  App-specific sections (storage, auth/OIDC field sets, captcha, domain config) intentionally stay in each app — captcha in particular is a product choice (ALTCHA), not foundation.
+
+- [`f538ade`](https://github.com/octabits-io/platform/commit/f538ade424900afb3ba4c5ab3719648c9bd73574) - Add the `@octabits-io/foundation/rbac` subpath: a small, dependency-free RBAC engine.
+  Exports `createRole(permissions)` → `{ permissions, authorize(requested) }` (pure
+  resource/action subset check) and `checkLocalPermission(roles, roleName, permissions)`
+  against a caller-supplied role registry. Generic over a caller-supplied permission
+  `Statement` type — the concrete statement matrix, named roles, and derived
+  permission-request types stay in the consuming application. Also exports the
+  `Statement`, `RolePermissions`, `Role`, and `AuthorizeResult` types.
+
+- [`f538ade`](https://github.com/octabits-io/platform/commit/f538ade424900afb3ba4c5ab3719648c9bd73574) - Extend the `@octabits-io/foundation/utils` subpath with three widely-used platform
+  utilities:
+
+  - `createDateProvider()` / `DateProvider` — the `{ now(): Date }` clock-injection seam.
+  - `createLruCacheService({ dateProvider })` → `.createCache<K, V>({ maxSize, ttlMs })` —
+    a generic LRU + TTL cache over a `Map`, depending only on `DateProvider`. Also exports
+    `LruCache`, `LruCacheOptions`, `LruCacheService`, `LruCacheServiceDeps`.
+  - `withRetry()` — exponential-backoff-with-jitter retry helper. Its `Logger` dependency
+    is a structural/injected type (from `@octabits-io/foundation/logger`), so it does not
+    hard-depend on any concrete logger. Also exports `RetryConfig` / `RetryOptions`.
+
 ## 0.2.0
 
 ### Minor Changes

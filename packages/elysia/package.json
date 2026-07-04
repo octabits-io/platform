@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/elysia",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Reusable Elysia middleware & helpers: security headers, trusted-proxy client IP, error mapping, and response schemas",
   "license": "MIT",
   "type": "module",

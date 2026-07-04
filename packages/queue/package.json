@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/queue",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "pg-boss-backed queue base: lifecycle/monitoring facade plus a generic queue/worker/DLQ trio with Zod-validated payloads",
   "license": "MIT",
   "type": "module",

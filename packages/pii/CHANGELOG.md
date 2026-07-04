@@ -1,5 +1,13 @@
 # @octabits-io/pii
 
+## 0.3.0
+
+### Minor Changes
+
+- [`39e0203`](https://github.com/octabits-io/platform/commit/39e0203b8d27e34e0b623d30aa656ee490cd9c7d) - `createEnvVarMasterKeyProvider` now throws at startup if the master key source is shorter than 32 characters (exported as `MIN_MASTER_KEY_SOURCE_LENGTH`). HKDF does no password stretching, so a short or human-chosen source undermines the derived AES-256 key; the provider now fails fast on misconfiguration instead of silently encrypting under weak key material. Docs updated with generation guidance (`openssl rand -base64 32`). Also fixed a Node `DEP0182` deprecation warning by passing `authTagLength` to `createDecipheriv` in `decryptSymmetric` (no behavioral change).
+
+- [`9650ad6`](https://github.com/octabits-io/platform/commit/9650ad6f7077edbfcff5e956887be9b350f78548) - New **`createTenantKeyService`** — per-tenant Age keypair + blind-index HMAC key management: lazy auto-generation (unique-constraint race-safe), master-key-encrypted storage, cached decryption, `getKeys` / `hasKeys` / `destroyKeys` / cache invalidation. Generic over the storage table (pass the tenant-encryption-key Drizzle table + its `db.query` key — pairs with `@octabits-io/drizzle-toolkit/tenant`) with a structural injected cache. Foundation dep switched from `workspace:^` to `^0.2.0` so the package is consumable via `file:` deps.
+
 ## 0.2.0
 
 ### Minor Changes

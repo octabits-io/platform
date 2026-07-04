@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/drizzle-toolkit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Drizzle ORM toolkit: database error handling, pagination, factory, migrations, multi-tenant schema primitives, and testcontainers test utilities",
   "license": "MIT",
   "type": "module",
@@ -68,7 +68,7 @@
     "url": "https://github.com/octabits-io/platform/issues"
   },
   "dependencies": {
-    "@octabits-io/foundation": "^0.2.0",
+    "@octabits-io/foundation": "^0.3.0",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.22.0"
   },
