@@ -151,8 +151,10 @@ pnpm changeset:publish      # build + publish to npm
 | `@octabits-io/flow` | Durable DAG workflow engine + AI add-on | `.` `./ai` `./store-pg` `./dispatcher-pgboss` |
 
 Dependency graph: `drizzle-toolkit` → `foundation` (dep), `pii` → `foundation`
-(dep), `queue` → `foundation` (**peer** — `Result` is in its public API),
-`mail` → `foundation` (**peer**, same reason; vendor SDKs are optional peers),
-`foundation` → `jose` (optional peer, `./auth` only), `elysia` and `flow` are
-standalone. The former `schema` and `drizzle-test` packages were merged into
-`drizzle-toolkit` (`./tenant`, `./testing`).
+(dep), `queue` → `foundation` + `pg-boss` (**peers** — `Result`/`PgBoss` are in
+its public API), `mail` → `foundation` (**peer**, same reason; vendor SDKs are
+optional peers), `elysia` → `foundation` (**peer** — errors are `OctError`),
+`foundation` → `jose` (optional peer, `./auth` only). `flow` is deliberately
+standalone (zero deps, structural `Result`/`Logger`) — it is the one package
+with standalone-OSS posture. The former `schema` and `drizzle-test` packages
+were merged into `drizzle-toolkit` (`./tenant`, `./testing`).

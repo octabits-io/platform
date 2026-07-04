@@ -1,8 +1,12 @@
 # @octabits-io/elysia
 
 Reusable [Elysia](https://elysiajs.com) middleware and helpers, extracted from
-production APIs. Domain-agnostic — keyed errors are just `{ key, message }`, and
-any domain-specific key→status rules are injected via `statusOverrides`.
+production APIs. Domain-agnostic — errors are
+[`@octabits-io/foundation`](../foundation)'s `OctError` (`{ key, message }`;
+`KeyedError` is kept as an alias), the error handler takes foundation's
+`Logger`, and any domain-specific key→status rules are injected via
+`statusOverrides`. Foundation is a **peer dependency** — this package is part
+of the octabits stack, not a standalone kit.
 
 ## Contents
 

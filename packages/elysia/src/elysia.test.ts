@@ -134,7 +134,13 @@ describe('client-ip plugin', () => {
 });
 
 describe('createErrorHandler', () => {
-  const silentLogger = { error: () => {} };
+  const silentLogger: import('@octabits-io/foundation/logger').Logger = {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    child: () => silentLogger,
+  };
 
   it('maps ApiError to its status + body', async () => {
     const app = new Elysia()

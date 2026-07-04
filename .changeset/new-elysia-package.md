@@ -9,3 +9,5 @@ New package **`@octabits-io/elysia`** — reusable Elysia middleware & helpers e
 - Error mapping: `getStatusCodeForError` / `statusErrorWithSet` / `mapResultError` (with injectable `statusOverrides`), the `ApiError` class family, `isDbConnectionError`, and the `createErrorHandler` global plugin.
 - Response schemas: `SCHEMA_ERROR_RESPONSE` / `SCHEMA_VALIDATION_ERROR` / `SCHEMA_SUCCESS_RESPONSE`, the `CommonErrorResponses` superset, and the `errorResponses(...codes)` selector.
 - Config helpers: typed `process.env` accessors (`getEnv` / `getEnvOptional` / `getEnvNumber` / `getEnvNumberOptional` / `getEnvBoolean` / `isProduction`) plus `parseCsv` (trusted proxies / skip-CIDRs) and `parseCorsOrigins`.
+
+`@octabits-io/foundation` is a **peer dependency** (static range `>=0.2.0 <1`): errors are foundation's `OctError` (`KeyedError` remains as an alias) and `createErrorHandler` takes foundation's `Logger`. This package is part of the octabits stack, not a standalone kit — consumers already have foundation.

@@ -3,21 +3,19 @@
  * `statusErrorWithSet` route helper, the `ApiError` class family,
  * DB-connection detection, and the `createErrorHandler` global plugin.
  *
- * Generic: a keyed error is just `{ key, message }`. Domain-specific key→status
- * rules (e.g. `tenant_not_found → 403`) are supplied via `statusOverrides`.
+ * Errors are foundation's `OctError` (`{ key, message }`). Domain-specific
+ * key→status rules (e.g. `tenant_not_found → 403`) are supplied via
+ * `statusOverrides`.
  */
 import { Elysia } from 'elysia';
+import type { OctError } from '@octabits-io/foundation/result';
+import type { Logger } from '@octabits-io/foundation/logger';
 
-/** Minimal shape of a domain error carrying a stable `key` and a `message`. */
-export interface KeyedError {
-  key: string;
-  message: string;
-}
-
-/** Minimal structural logger — satisfied by any logger with an `error(message, error?)` method. */
-export interface ErrorLogger {
-  error(message: string, error?: Error): void;
-}
+/**
+ * A domain error carrying a stable `key` and a `message`.
+ * Alias of foundation's `OctError` — kept as the historical elysia-local name.
+ */
+export type KeyedError = OctError;
 
 /** Per-key HTTP status overrides, checked before the generic key conventions. */
 export type ErrorStatusOverrides = Record<string, number>;
@@ -195,7 +193,7 @@ export interface ErrorHandlerOptions {
  * `{ key, message[, fields] }` body. In production, unexpected error messages are
  * not exposed to clients.
  */
-export const createErrorHandler = (logger: ErrorLogger, options: ErrorHandlerOptions = {}) => {
+export const createErrorHandler = (logger: Logger, options: ErrorHandlerOptions = {}) => {
   const isProduction = options.production ?? process.env.NODE_ENV === 'production';
 
   return new Elysia({ name: 'error-handler' })
