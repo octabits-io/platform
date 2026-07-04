@@ -25,6 +25,11 @@
       "types": "./dist/tenant/index.d.ts",
       "default": "./dist/tenant/index.js"
     },
+    "./idempotency": {
+      "import": "./dist/idempotency/index.js",
+      "types": "./dist/idempotency/index.d.ts",
+      "default": "./dist/idempotency/index.js"
+    },
     "./testing": {
       "import": "./dist/testing/index.js",
       "types": "./dist/testing/index.d.ts",
@@ -68,7 +73,7 @@
     "url": "https://github.com/octabits-io/platform/issues"
   },
   "dependencies": {
-    "@octabits-io/foundation": "^0.3.0",
+    "@octabits-io/foundation": "workspace:^",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.22.0"
   },
