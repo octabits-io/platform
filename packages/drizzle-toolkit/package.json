@@ -29,6 +29,11 @@
       "import": "./dist/testing/index.js",
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
+    },
+    "./crud": {
+      "import": "./dist/crud/index.js",
+      "types": "./dist/crud/index.d.ts",
+      "default": "./dist/crud/index.js"
     }
   },
   "scripts": {
