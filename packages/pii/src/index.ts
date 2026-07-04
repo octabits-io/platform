@@ -19,3 +19,15 @@ export type { SymmetricEncryptionError, HybridEncryptionError, HybridDecryptionE
 
 // Age encryption primitives
 export { Encrypter, Decrypter, generateIdentity, identityToRecipient } from './typage/index.ts';
+
+export { createTenantKeyService } from './tenant-key-service.ts';
+export type {
+  TenantKeyService,
+  TenantKeyServiceDeps,
+  TenantKeys,
+  TenantKeyCache,
+  TenantKeyDb,
+  TenantKeyError,
+  TenantKeyNotFoundError,
+  TenantKeyGenerationError,
+} from './tenant-key-service.ts';
