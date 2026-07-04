@@ -60,7 +60,12 @@ built on the `ObjectFileServer` contract — `createGenericHandler`,
 (directory-traversal guards included). They emit ETag / `Last-Modified` /
 `Cache-Control` headers and honor `If-None-Match` (304).
 
-## Example
+## Examples
+
+Every provider satisfies the same `ObjectStorageService` contract, so callers
+are provider-agnostic — only the factory (and its config) differs.
+
+### S3-compatible (`@octabits-io/storage/s3`)
 
 ```ts
 import { createAWSObjectStorageService } from '@octabits-io/storage/s3';
@@ -69,15 +74,78 @@ const storage = createAWSObjectStorageService({
   bucket: 'app-blobs',
   publicEndpoint: 'https://cdn.example.com',
   region: 'eu-central',
-  endpoint: 'https://<project>.your-objectstorage.com',
+  endpoint: 'https://<project>.your-objectstorage.com', // e.g. Hetzner Object Storage
   accessKeyId,
   secretAccessKey,
   logger,
 });
 
 await storage.uploadObject({ tenant: 't1', key: 'a/b.jpg', body: bytes });
+
+const list = await storage.listObjects({ tenant: 't1', prefix: 'a/', includeHead: false });
+if (list.ok) console.log(list.value.objects); // keys have the tenant prefix stripped
+
 const url = storage.getPublicUrl({ tenant: 't1', key: 'a/b.jpg' });
+// → https://cdn.example.com/tenant/t1/a/b.jpg
 ```
+
+### Postgres blob store (`@octabits-io/storage/postgres`)
+
+```ts
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { createPostgresObjectStorageService } from '@octabits-io/storage/postgres';
+
+const db = drizzle(pool); // any standard drizzle-orm Postgres db
+
+const storage = createPostgresObjectStorageService({
+  drizzle: db, // typed as StorageDrizzle = PgDatabase<any, any, any>
+  // build the public URL your app serves blobs from (see serve handler below)
+  createPublicUrl: (tenant, key) => `https://app.example.com/api/storage/${tenant}/${key}`,
+});
+
+// The `object_storage` table is created on first use (CREATE TABLE IF NOT EXISTS).
+await storage.uploadObject({ tenant: 't1', key: 'docs/f.pdf', body: bytes });
+
+const obj = await storage.getObjectData({ tenant: 't1', key: 'docs/f.pdf' });
+if (obj.ok) console.log(obj.value.contentType, obj.value.size);
+```
+
+Serve stored blobs over HTTP with a framework-agnostic handler (ETag / 304 /
+`Cache-Control` included):
+
+```ts
+import { createWebResponse, sanitizeObjectKey } from '@octabits-io/storage/postgres';
+
+// e.g. inside a Web-standard route handler
+const key = sanitizeObjectKey(pathAfterTenant); // directory-traversal guard
+return createWebResponse(storage, { tenant: 't1', key }, request.headers);
+```
+
+### Picsum (dev/mock, `@octabits-io/storage`)
+
+```ts
+import { createPicsumObjectStorageService } from '@octabits-io/storage';
+
+// In-memory, no external SDK — deterministic picsum.photos URLs, ideal for dev/tests.
+const storage = createPicsumObjectStorageService({
+  baseUrl: 'https://picsum.photos',
+  defaultDimensions: { width: 800, height: 600 },
+});
+
+await storage.uploadObject({
+  tenant: 't1',
+  key: 'hero.jpg',
+  body: new Uint8Array([1, 2, 3]),
+  metadata: { width: '1920', height: '1080' },
+});
+
+const url = storage.getPublicUrl({ tenant: 't1', key: 'hero.jpg' });
+// → https://picsum.photos/seed/<key-hash>/1920/1080  (metadata dimensions win)
+```
+
+For a URL-only surface (no read/write), each provider also ships a lighter
+factory — e.g. `createPicsumObjectStorageUrlProvider({ baseUrl })` exposing just
+`getPublicUrl`.
 
 ## Testing
 
