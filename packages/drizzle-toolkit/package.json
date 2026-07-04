@@ -34,6 +34,11 @@
       "import": "./dist/crud/index.js",
       "types": "./dist/crud/index.d.ts",
       "default": "./dist/crud/index.js"
+    },
+    "./rls": {
+      "import": "./dist/rls/index.js",
+      "types": "./dist/rls/index.d.ts",
+      "default": "./dist/rls/index.js"
     }
   },
   "scripts": {

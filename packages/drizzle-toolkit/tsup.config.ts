@@ -8,6 +8,7 @@ export default defineConfig({
     "tenant/index": "src/tenant/index.ts",
     "testing/index": "src/testing/index.ts",
     "crud/index": "src/crud/index.ts",
+    "rls/index": "src/rls/index.ts",
   },
   format: "esm",
   dts: true,
