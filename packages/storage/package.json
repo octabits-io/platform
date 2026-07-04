@@ -1,0 +1,71 @@
+{
+  "name": "@octabits-io/storage",
+  "version": "0.1.0",
+  "description": "Tenant-namespaced blob storage contract with S3-compatible, Postgres, and picsum providers",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsup"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./s3": {
+      "types": "./dist/s3.d.ts",
+      "import": "./dist/s3.js",
+      "default": "./dist/s3.js"
+    },
+    "./postgres": {
+      "types": "./dist/postgres.d.ts",
+      "import": "./dist/postgres.js",
+      "default": "./dist/postgres.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/octabits-io/platform.git",
+    "directory": "packages/storage"
+  },
+  "homepage": "https://github.com/octabits-io/platform/tree/main/packages/storage",
+  "bugs": {
+    "url": "https://github.com/octabits-io/platform/issues"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1077.0",
+    "@octabits-io/foundation": "workspace:^",
+    "@types/bun": "^1.3.14",
+    "drizzle-orm": "^0.45.2",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "peerDependencies": {
+    "@aws-sdk/client-s3": "^3",
+    "@octabits-io/foundation": ">=0.2.0 <1",
+    "drizzle-orm": "^0.45",
+    "typescript": "^5 || ^6"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-s3": {
+      "optional": true
+    },
+    "drizzle-orm": {
+      "optional": true
+    }
+  }
+}
