@@ -12,4 +12,5 @@ export type {
   AWSClientObjectStorageConfig,
   AWSObjectStorageUrlProvider,
   AWSObjectStorageUrlProviderConfig,
+  NamespacePrefixFn,
 } from './providers/aws/AWSObjectStorageService';

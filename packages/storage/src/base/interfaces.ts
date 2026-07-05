@@ -7,13 +7,15 @@ import type { ListObjectsResponse, ObjectData } from './types';
  * Used by handler functions that only need to read object data.
  */
 export interface ObjectFileServer {
-  readonly getObjectData: (params: { tenant: string; key: string }) => Promise<Result<ObjectData, ObjectStorageError>>;
+  readonly getObjectData: (params: { namespace?: string; key: string }) => Promise<Result<ObjectData, ObjectStorageError>>;
 }
 
 /**
  * URL provider for object storage.
  *
- * Takes `tenant` as a method parameter to identify the tenant namespace.
+ * `namespace` is an optional logical partition for objects (e.g. a tenant id,
+ * an environment name, or nothing at all). When omitted, objects live in the
+ * root namespace.
  *
  * Implementations should add a `type` discriminator for type narrowing:
  * @example
@@ -25,14 +27,17 @@ export interface ObjectFileServer {
  */
 export interface ObjectStorageUrlProvider {
   readonly type?: string;
-  readonly getPublicUrl: (params: { tenant: string; key: string }) => string;
+  readonly getPublicUrl: (params: { namespace?: string; key: string }) => string;
 }
 
 /**
  * Object storage service interface.
  *
  * Extends ObjectStorageUrlProvider to provide full storage capabilities.
- * All methods take `tenant` as a parameter to identify the tenant namespace.
+ * All methods accept an optional `namespace` that partitions objects; how it
+ * is realized (key prefix, table column, ...) is provider-specific. Omitting
+ * it addresses the root namespace, so single-partition consumers never have
+ * to invent a namespace value.
  *
  * Implementations should add a `type` discriminator for type narrowing:
  * @example
@@ -44,17 +49,17 @@ export interface ObjectStorageUrlProvider {
  */
 export interface ObjectStorageService extends ObjectStorageUrlProvider {
   readonly listObjects: <T extends boolean>(params: {
-    tenant: string;
+    namespace?: string;
     prefix?: string;
     includeHead: T;
   }) => Promise<Result<ListObjectsResponse<T>, ObjectStorageError>>;
   readonly uploadObject: (params: {
-    tenant: string;
+    namespace?: string;
     key: string;
     metadata?: { readonly [key: string]: string };
     body: Uint8Array | ReadableStream<Uint8Array>;
   }) => Promise<Result<void, ObjectStorageError>>;
-  readonly deleteObject: (params: { tenant: string; key: string }) => Promise<Result<void, ObjectStorageError>>;
-  readonly deleteObjectsByPrefix: (params: { tenant: string; prefix?: string }) => Promise<Result<{ deleted: number }, ObjectStorageError>>;
-  readonly getObjectData: (params: { tenant: string; key: string }) => Promise<Result<ObjectData, ObjectStorageError>>;
+  readonly deleteObject: (params: { namespace?: string; key: string }) => Promise<Result<void, ObjectStorageError>>;
+  readonly deleteObjectsByPrefix: (params: { namespace?: string; prefix?: string }) => Promise<Result<{ deleted: number }, ObjectStorageError>>;
+  readonly getObjectData: (params: { namespace?: string; key: string }) => Promise<Result<ObjectData, ObjectStorageError>>;
 }

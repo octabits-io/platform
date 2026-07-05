@@ -10,9 +10,14 @@
  *
  * The auth differences (operator superadmin-grant synthesis vs. the simpler
  * customer flow) are the injected `resolveScope` seam: it receives the parsed
- * `tenantId` + request context and returns either a staged `{ scope }` or an
+ * `scopeKey` + request context and returns either a staged `{ scope }` or an
  * early `{ response }` (e.g. a `jsonRpcError`). Tool registration is the
  * injected `registerTools(server, getContainer)` seam.
+ *
+ * How the scope key is extracted from the URL is itself a seam
+ * (`parseScopeKey`): the default is the `/tenant/:tenantId/` path convention
+ * ({@link parseTenantId}), but consumers can supply any extractor — a
+ * different path shape, a header, a constant for single-scope deployments.
  *
  * `elysia-mcp` and `@modelcontextprotocol/sdk` are OPTIONAL peers — only pulled
  * in by consumers of this `./mcp` subpath, keeping the root export free of them.
@@ -23,13 +28,23 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ServerCapabilities } from '@modelcontextprotocol/sdk/types.js';
 import type { Logger } from '@octabits-io/foundation/logger';
 
-/** Tenant-id path segment convention: alphanumeric, hyphens, underscores. */
-export const TENANT_ID_PATTERN = /^[a-zA-Z0-9-_]+$/;
+/** Scope-key path segment convention: alphanumeric, hyphens, underscores. */
+export const SCOPE_KEY_PATTERN = /^[a-zA-Z0-9-_]+$/;
+
+/** @deprecated Use {@link SCOPE_KEY_PATTERN}. */
+export const TENANT_ID_PATTERN = SCOPE_KEY_PATTERN;
 
 /**
- * Extract the tenant id from an MCP request URL of the shape
- * `.../tenant/:tenantId/...`. Returns `null` when the `tenant` segment is
- * absent or the following segment is missing / fails {@link TENANT_ID_PATTERN}.
+ * Extracts the scope key from a request URL. Return `null` to reject the
+ * request with the invalid-scope response.
+ */
+export type ParseScopeKey = (url: string) => string | null;
+
+/**
+ * Default {@link ParseScopeKey}: extract the tenant id from an MCP request URL
+ * of the shape `.../tenant/:tenantId/...`. Returns `null` when the `tenant`
+ * segment is absent or the following segment is missing / fails
+ * {@link SCOPE_KEY_PATTERN}.
  */
 export function parseTenantId(url: string): string | null {
   const pathname = new URL(url).pathname;
@@ -37,7 +52,7 @@ export function parseTenantId(url: string): string | null {
   const idx = segments.indexOf('tenant');
   if (idx < 0) return null;
   const candidate = segments[idx + 1];
-  if (!candidate || !TENANT_ID_PATTERN.test(candidate)) return null;
+  if (!candidate || !SCOPE_KEY_PATTERN.test(candidate)) return null;
   return candidate;
 }
 
@@ -64,11 +79,17 @@ export type ResolveScopeResult<S extends DisposableScope> =
 
 export interface CreateMcpRoutesOptions<S extends DisposableScope> {
   /**
-   * Auth + scope seam. Receives the parsed `tenantId` and the MCP request
-   * context; returns a staged `{ scope }` (the harness disposes it after the
-   * response / on error) or an early `{ response }` (e.g. `jsonRpcError(...)`).
+   * Auth + scope seam. Receives the parsed `scopeKey` (also as the deprecated
+   * `tenantId` alias) and the MCP request context; returns a staged `{ scope }`
+   * (the harness disposes it after the response / on error) or an early
+   * `{ response }` (e.g. `jsonRpcError(...)`).
    */
-  resolveScope: (args: { tenantId: string; context: McpContext }) => Promise<ResolveScopeResult<S>>;
+  resolveScope: (args: {
+    scopeKey: string;
+    /** @deprecated Alias of `scopeKey`, kept for tenant-convention consumers. */
+    tenantId: string;
+    context: McpContext;
+  }) => Promise<ResolveScopeResult<S>>;
   /**
    * Register the domain tools/resources on the per-request server. `getContainer`
    * returns the scope staged by `resolveScope` for this request.
@@ -76,13 +97,21 @@ export interface CreateMcpRoutesOptions<S extends DisposableScope> {
   registerTools: (server: McpServer, getContainer: () => S) => void | Promise<void>;
   /** MCP server identity advertised to clients. */
   serverInfo: { name: string; version: string };
+  /**
+   * Extracts the scope key from the request URL; return `null` to reject.
+   * Default {@link parseTenantId} (the `/tenant/:tenantId/` path convention).
+   * Single-scope deployments can pass `() => 'default'`.
+   */
+  parseScopeKey?: ParseScopeKey;
   /** Elysia route prefix. Default `/mcp`. */
   prefix?: string;
   /** `elysia-mcp` base path within the prefix. Default `/`. */
   basePath?: string;
   /** MCP capabilities advertised to clients. Default `{ tools: {} }`. */
   capabilities?: ServerCapabilities;
-  /** Response returned when the URL has no valid tenant id. Default `jsonRpcError(400, -32600, 'Invalid tenantId')`. */
+  /** Response returned when `parseScopeKey` yields no scope key. Default `jsonRpcError(400, -32600, 'Invalid scope key')`. */
+  invalidScopeResponse?: () => Response;
+  /** @deprecated Use `invalidScopeResponse`. */
   invalidTenantResponse?: () => Response;
   /** Reserved for future diagnostics; currently unused by the harness itself. */
   logger?: Logger;
@@ -98,10 +127,11 @@ export const createMcpRoutes = <S extends DisposableScope>(options: CreateMcpRou
     resolveScope,
     registerTools,
     serverInfo,
+    parseScopeKey = parseTenantId,
     prefix = '/mcp',
     basePath = '/',
     capabilities = { tools: {} },
-    invalidTenantResponse = () => jsonRpcError(400, -32600, 'Invalid tenantId'),
+    invalidScopeResponse = options.invalidTenantResponse ?? (() => jsonRpcError(400, -32600, 'Invalid scope key')),
   } = options;
 
   // Keyed by the per-request McpServer instance — carries the scope from
@@ -127,12 +157,12 @@ export const createMcpRoutes = <S extends DisposableScope>(options: CreateMcpRou
       serverInfo,
       capabilities,
       authentication: async (context: McpContext) => {
-        const tenantId = parseTenantId(context.request.url);
-        if (!tenantId) {
-          return { response: invalidTenantResponse() };
+        const scopeKey = parseScopeKey(context.request.url);
+        if (!scopeKey) {
+          return { response: invalidScopeResponse() };
         }
 
-        const result = await resolveScope({ tenantId, context });
+        const result = await resolveScope({ scopeKey, tenantId: scopeKey, context });
         if (result.response) {
           return { response: result.response };
         }

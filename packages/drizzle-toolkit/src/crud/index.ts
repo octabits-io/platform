@@ -1,18 +1,26 @@
 /**
- * Base Tenant-Scoped CRUD Service Factory (#37)
+ * Base CRUD Service Factory (#37)
  *
- * A generic factory for tenant-scoped CRUD services over any Drizzle table
- * with `id` + `tenantId` columns: `list` (paginated + total), `getById`,
- * `create`, `update`, `delete` — every query auto-ANDed with
- * `eq(table.tenantId, tenantId)` so tenant isolation holds by construction.
- * `tenantId` is a construction-time dependency (per-request IoC scope), never
- * a method argument.
+ * Generic factories for CRUD services over any Drizzle table with an `id`
+ * column: `list` (paginated + total), `getById`, `create`, `update`,
+ * `delete` — with consistent errors, pagination, and audit stamping.
+ *
+ * Three entry points, from generic to specific:
+ * - `createBaseCrudService` — no scoping; works on any table with `id`.
+ * - `createScopedCrudService` — every query auto-ANDed with
+ *   `eq(table[scope.column], scope.value)` and `create()` force-injects the
+ *   scope column, so row isolation holds by construction. The scope is a
+ *   construction-time dependency (e.g. a per-request IoC scope), never a
+ *   method argument.
+ * - `createBaseTenantScopedCrudService` — the multi-tenant preset: a scoped
+ *   service with `scope = { column: 'tenantId', value: tenantId }`.
  *
  * **Type Assertion Notes:** `as any` casts are used where Drizzle's type
- * system can't express the constraint (`(table as any).id` / `.tenantId`,
- * dynamic `db.query[tableName]`). They are safe by convention: consuming
- * tables carry `id` + `tenantId`, and `tableName` must be a valid `db.query`
- * key. Call-site type safety comes from `$inferInsert`/`$inferSelect`.
+ * system can't express the constraint (`(table as any).id` / dynamic scope
+ * column, dynamic `db.query[tableName]`). They are safe by convention:
+ * consuming tables carry `id` (+ the scope column when scoped), and
+ * `tableName` must be a valid `db.query` key. Call-site type safety comes
+ * from `$inferInsert`/`$inferSelect`.
  */
 import { eq, and, sql, type SQL } from 'drizzle-orm';
 import type { PgTable } from 'drizzle-orm/pg-core';
@@ -46,9 +54,9 @@ export interface CrudDatabase {
   query: Record<string, any>;
 }
 
-/** Generic not-found error for tenant-scoped resources. */
+/** Generic not-found error for CRUD resources. */
 export interface ResourceNotFoundError extends OctError {
-  key: string; // e.g. 'amenity_not_found'
+  key: string; // e.g. 'article_not_found'
   message: string;
 }
 
@@ -66,15 +74,26 @@ export interface PaginatedListResult<T> {
   total: number;
 }
 
-/** Configuration for the base tenant-scoped CRUD service. */
-export interface BaseTenantScopedCrudConfig<
+/**
+ * Row scope applied to every query of a scoped CRUD service: each statement
+ * is ANDed with `eq(table[column], value)` and `create()` injects
+ * `{ [column]: value }`. `column` is the **TypeScript property name** on the
+ * Drizzle table (e.g. `'tenantId'`, `'workspaceId'`, `'ownerId'`), not the
+ * SQL column name.
+ */
+export interface CrudScope<TScopeKey extends string = string> {
+  column: TScopeKey;
+  value: string;
+}
+
+/** Configuration shared by all CRUD service factories. */
+export interface BaseCrudConfig<
   TTable extends PgTable,
   TEntity,
   TSelectColumns extends Record<string, boolean> = Record<string, boolean>
 > {
   db: CrudDatabase;
   dateProvider: DateProvider;
-  tenantId: string;
   /**
    * Opaque actor id (e.g. the IdP user id), or `undefined` for
    * system/background scopes. When provided, stamped into `created_by` on
@@ -84,7 +103,7 @@ export interface BaseTenantScopedCrudConfig<
   actorId?: string | undefined;
   table: TTable;
   tableName: string; // must match a key in db.query
-  resourceName: string; // e.g. 'amenity' — used in not-found error keys
+  resourceName: string; // e.g. 'article' — used in not-found error keys
   /**
    * Optional columns to select for list/getById queries (all columns when
    * omitted). Keys must be table columns.
@@ -96,37 +115,61 @@ export interface BaseTenantScopedCrudConfig<
   listWhereConditions?: () => SQL[];
 }
 
-/**
- * Base service interface for tenant-scoped CRUD operations. Create/update
- * parameter types are inferred from the table via `$inferInsert`.
- */
-export interface BaseTenantScopedCrudService<
+/** Configuration for a scoped CRUD service (base config + row scope). */
+export interface ScopedCrudConfig<
   TTable extends PgTable,
-  TEntity
-> {
-  list(params?: ListPaginationParams): Promise<Result<PaginatedListResult<TEntity>, never>>;
-  getById(params: { id: string }): Promise<Result<TEntity, ResourceNotFoundError>>;
-  create(params: Omit<TTable['$inferInsert'], 'tenantId'>): Promise<Result<void, OctDatabaseError>>;
-  update(params: { id: string } & Partial<Omit<TTable['$inferInsert'], 'id' | 'tenantId'>>): Promise<Result<void, ResourceNotFoundError | OctDatabaseError>>;
-  delete(params: { id: string }): Promise<Result<void, ResourceNotFoundError | OctDatabaseError>>;
+  TEntity,
+  TScopeKey extends string = string,
+  TSelectColumns extends Record<string, boolean> = Record<string, boolean>
+> extends BaseCrudConfig<TTable, TEntity, TSelectColumns> {
+  scope: CrudScope<TScopeKey>;
 }
 
-/**
- * Create a tenant-scoped CRUD service over a Drizzle table with
- * `id` + `tenantId` columns. Eliminates the per-resource boilerplate for
- * simple admin CRUD (consistent errors, pagination, audit stamping).
- */
-export function createBaseTenantScopedCrudService<
+/** Configuration for the tenant-scoped preset. */
+export interface BaseTenantScopedCrudConfig<
   TTable extends PgTable,
   TEntity,
   TSelectColumns extends Record<string, boolean> = Record<string, boolean>
+> extends BaseCrudConfig<TTable, TEntity, TSelectColumns> {
+  tenantId: string;
+}
+
+/**
+ * Base service interface for CRUD operations. Create/update parameter types
+ * are inferred from the table via `$inferInsert`; `TOmitKey` removes the
+ * scope column (injected by the service) from the caller-facing types.
+ */
+export interface BaseCrudService<
+  TTable extends PgTable,
+  TEntity,
+  TOmitKey extends string = never
+> {
+  list(params?: ListPaginationParams): Promise<Result<PaginatedListResult<TEntity>, never>>;
+  getById(params: { id: string }): Promise<Result<TEntity, ResourceNotFoundError>>;
+  create(params: Omit<TTable['$inferInsert'], TOmitKey>): Promise<Result<void, OctDatabaseError>>;
+  update(params: { id: string } & Partial<Omit<TTable['$inferInsert'], 'id' | TOmitKey>>): Promise<Result<void, ResourceNotFoundError | OctDatabaseError>>;
+  delete(params: { id: string }): Promise<Result<void, ResourceNotFoundError | OctDatabaseError>>;
+}
+
+/** Tenant-scoped service alias — `tenantId` is injected, never caller-supplied. */
+export type BaseTenantScopedCrudService<
+  TTable extends PgTable,
+  TEntity
+> = BaseCrudService<TTable, TEntity, 'tenantId'>;
+
+/** Shared implementation behind the three public factories. */
+function buildCrudService<
+  TTable extends PgTable,
+  TEntity,
+  TSelectColumns extends Record<string, boolean>
 >(
-  config: BaseTenantScopedCrudConfig<TTable, TEntity, TSelectColumns>
-): BaseTenantScopedCrudService<TTable, TEntity> {
+  config: BaseCrudConfig<TTable, TEntity, TSelectColumns>,
+  scope: CrudScope | undefined,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): BaseCrudService<TTable, TEntity, any> {
   const {
     db,
     dateProvider,
-    tenantId,
     actorId,
     table,
     tableName,
@@ -135,6 +178,10 @@ export function createBaseTenantScopedCrudService<
     selectColumns,
     listWhereConditions,
   } = config;
+
+  const scopeCondition = (): SQL[] =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    scope ? [eq((table as any)[scope.column], scope.value)] : [];
 
   function notFound(id: string): ResourceNotFoundError {
     return {
@@ -150,21 +197,23 @@ export function createBaseTenantScopedCrudService<
     const normalizedLimit = normalizePaginationLimit(limit);
 
     const whereConditions = [
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      eq((table as any).tenantId, tenantId),
+      ...scopeCondition(),
       ...(listWhereConditions?.() ?? []),
     ];
-    const whereClause = whereConditions.length === 1 ? whereConditions[0] : and(...whereConditions);
+    const whereClause = whereConditions.length === 0
+      ? undefined
+      : whereConditions.length === 1 ? whereConditions[0] : and(...whereConditions);
 
-    const countResult = await db
+    const countQuery = db
       .select({ count: sql<number>`count(*)::int` })
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .from(table as any)
-      .where(whereClause);
+      .from(table as any);
+    const countResult = whereClause ? await countQuery.where(whereClause) : await countQuery;
     const total = countResult[0]?.count ?? 0;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const queryOptions: any = { where: whereClause, limit: normalizedLimit, offset };
+    const queryOptions: any = { limit: normalizedLimit, offset };
+    if (whereClause) queryOptions.where = whereClause;
     if (selectColumns) queryOptions.columns = selectColumns;
 
     const results = await db.query[tableName]!.findMany(queryOptions);
@@ -176,8 +225,7 @@ export function createBaseTenantScopedCrudService<
     const whereClause = and(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       eq((table as any).id, params.id),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      eq((table as any).tenantId, tenantId),
+      ...scopeCondition(),
     );
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -189,13 +237,14 @@ export function createBaseTenantScopedCrudService<
     return { ok: true, value: mapToEntity(result) };
   }
 
-  async function create(params: Omit<TTable['$inferInsert'], 'tenantId'>): Promise<Result<void, OctDatabaseError>> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function create(params: any): Promise<Result<void, OctDatabaseError>> {
     return withDbErrorHandling(async () => {
-      // Inject tenantId + audit columns; createdBy/updatedBy only when the
-      // calling scope has an actor (no-op for system writes).
+      // Inject the scope column + audit columns; createdBy/updatedBy only when
+      // the calling scope has an actor (no-op for system writes).
       const dbValues = {
         ...params,
-        tenantId,
+        ...(scope ? { [scope.column]: scope.value } : {}),
         ...(actorId ? { createdBy: actorId, updatedBy: actorId } : {}),
       } as TTable['$inferInsert'];
 
@@ -204,7 +253,8 @@ export function createBaseTenantScopedCrudService<
     });
   }
 
-  async function update(params: { id: string } & Partial<Omit<TTable['$inferInsert'], 'id' | 'tenantId'>>): Promise<Result<void, ResourceNotFoundError | OctDatabaseError>> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async function update(params: any): Promise<Result<void, ResourceNotFoundError | OctDatabaseError>> {
     return withDbErrorHandling(async () => {
       const { id, ...updateData } = params;
 
@@ -219,8 +269,7 @@ export function createBaseTenantScopedCrudService<
           and(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             eq((table as any).id, id),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            eq((table as any).tenantId, tenantId),
+            ...scopeCondition(),
           )
         )
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -238,8 +287,7 @@ export function createBaseTenantScopedCrudService<
           and(
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             eq((table as any).id, params.id),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            eq((table as any).tenantId, tenantId),
+            ...scopeCondition(),
           )
         )
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -251,4 +299,57 @@ export function createBaseTenantScopedCrudService<
   }
 
   return { list, getById, create, update, delete: deleteResource };
+}
+
+/**
+ * Create an unscoped CRUD service over a Drizzle table with an `id` column.
+ * All rows in the table are visible; use `createScopedCrudService` when rows
+ * must be partitioned by a column.
+ */
+export function createBaseCrudService<
+  TTable extends PgTable,
+  TEntity,
+  TSelectColumns extends Record<string, boolean> = Record<string, boolean>
+>(
+  config: BaseCrudConfig<TTable, TEntity, TSelectColumns>
+): BaseCrudService<TTable, TEntity> {
+  return buildCrudService(config, undefined);
+}
+
+/**
+ * Create a scoped CRUD service: every query is ANDed with
+ * `eq(table[scope.column], scope.value)` and `create()` injects the scope
+ * column, so isolation holds by construction. The scope column is removed
+ * from the caller-facing create/update types.
+ */
+export function createScopedCrudService<
+  TTable extends PgTable,
+  TEntity,
+  TScopeKey extends string,
+  TSelectColumns extends Record<string, boolean> = Record<string, boolean>
+>(
+  config: ScopedCrudConfig<TTable, TEntity, TScopeKey, TSelectColumns>
+): BaseCrudService<TTable, TEntity, TScopeKey> {
+  const { scope, ...base } = config;
+  return buildCrudService(base, scope);
+}
+
+/**
+ * Create a tenant-scoped CRUD service over a Drizzle table with
+ * `id` + `tenantId` columns — the multi-tenant preset of
+ * `createScopedCrudService`. Eliminates the per-resource boilerplate for
+ * simple admin CRUD (consistent errors, pagination, audit stamping).
+ */
+export function createBaseTenantScopedCrudService<
+  TTable extends PgTable,
+  TEntity,
+  TSelectColumns extends Record<string, boolean> = Record<string, boolean>
+>(
+  config: BaseTenantScopedCrudConfig<TTable, TEntity, TSelectColumns>
+): BaseTenantScopedCrudService<TTable, TEntity> {
+  const { tenantId, ...base } = config;
+  return createScopedCrudService({
+    ...base,
+    scope: { column: 'tenantId', value: tenantId },
+  });
 }

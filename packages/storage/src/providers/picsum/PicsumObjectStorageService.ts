@@ -3,7 +3,7 @@ import type { ListObjectsResponse } from '../../base/types';
 import type { ObjectStorageError } from '../../base/errors';
 
 /**
- * Configuration for Picsum URL provider (simple, non-tenant-aware version)
+ * Configuration for Picsum URL provider (simple, non-namespace-aware version)
  */
 export interface PicsumObjectStorageUrlProviderConfig {
   /**
@@ -42,12 +42,12 @@ const generateSeedFromKey = (key: string): string => {
 /**
  * Creates a URL provider for Picsum placeholder images.
  * This is a simple factory function similar to createAWSObjectStorageUrlProvider,
- * useful for client mode with static tenant configuration.
+ * useful for client mode with static configuration.
  *
  * Features:
  * - Generates consistent placeholder URLs based on key
  * - Uses picsum.photos seed-based URLs for deterministic images
- * - Tenant parameter is accepted but ignored (picsum uses key-based seeds)
+ * - Namespace parameter is accepted but ignored (picsum uses key-based seeds)
  *
  * @param config - Picsum URL provider configuration
  * @returns ObjectStorageUrlProvider implementation using picsum.photos
@@ -58,7 +58,7 @@ export const createPicsumObjectStorageUrlProvider = (config: PicsumObjectStorage
 
   return {
     type: 'picsum' as const,
-    getPublicUrl: ({ tenant: _tenant, key }: { tenant: string; key: string }) => {
+    getPublicUrl: ({ namespace: _namespace, key }: { namespace?: string; key: string }) => {
       const seed = generateSeedFromKey(key);
       // Format: https://picsum.photos/seed/{SEED}/{WIDTH}/{HEIGHT}
       return `${baseUrl}/seed/${seed}/${defaultDimensions.width}/${defaultDimensions.height}`;
@@ -89,7 +89,7 @@ export interface PicsumObjectStorageServiceConfig {
   };
   /**
    * Default search query for random images (not used with picsum.photos)
-   * @default 'property,real-estate,house,apartment'
+   * @default 'nature,landscape,city,architecture'
    */
   readonly defaultQuery?: string;
 }
@@ -117,8 +117,8 @@ export interface PicsumObjectStorageService extends ObjectStorageService {
  * Uses picsum.photos for reliable placeholder images.
  *
  * Features:
- * - Generates consistent placeholder URLs based on key/tenant combinations
- * - Simulates tenant and object management in-memory
+ * - Generates consistent placeholder URLs based on key/namespace combinations
+ * - Simulates namespace and object management in-memory
  * - Supports all ObjectStorageService operations
  * - Returns realistic image URLs from picsum.photos
  *
@@ -129,8 +129,9 @@ export const createPicsumObjectStorageService = (config: PicsumObjectStorageServ
   const baseUrl = config.baseUrl || 'https://picsum.photos';
   const defaultDimensions = config.defaultDimensions || { width: 800, height: 600 };
 
-  // In-memory storage for buckets and their objects
+  // In-memory storage: one mock bucket per namespace ('' = root namespace)
   const buckets = new Map<string, MockBucket>();
+  const bucketKey = (namespace: string | undefined) => namespace ?? '';
 
   /**
    * Gets or creates a bucket
@@ -147,8 +148,8 @@ export const createPicsumObjectStorageService = (config: PicsumObjectStorageServ
     return bucketData;
   };
 
-  const getPublicUrl: ObjectStorageService['getPublicUrl'] = ({ tenant, key }) => {
-    const bucketData = buckets.get(tenant);
+  const getPublicUrl: ObjectStorageService['getPublicUrl'] = ({ namespace, key }) => {
+    const bucketData = buckets.get(bucketKey(namespace));
     const obj = bucketData?.objects.get(key);
 
     let width = defaultDimensions.width;
@@ -163,19 +164,19 @@ export const createPicsumObjectStorageService = (config: PicsumObjectStorageServ
     return `${baseUrl}/seed/${seed}/${width}/${height}`;
   };
 
-  const listObjects: ObjectStorageService['listObjects'] = async <T extends boolean>({ tenant, prefix, includeHead }: {
-    tenant: string;
+  const listObjects: ObjectStorageService['listObjects'] = async <T extends boolean>({ namespace, prefix, includeHead }: {
+    namespace?: string;
     prefix?: string;
     includeHead: T;
   }) => {
-    const bucketData = buckets.get(tenant);
+    const bucketData = buckets.get(bucketKey(namespace));
 
     if (!bucketData) {
       return {
         ok: false,
         error: {
           key: 'not_found_bucket',
-          message: `Tenant storage '${tenant}' not found`,
+          message: `Storage namespace '${namespace ?? '(root)'}' not found`,
         } as ObjectStorageError,
       };
     }
@@ -218,13 +219,13 @@ export const createPicsumObjectStorageService = (config: PicsumObjectStorageServ
     };
   };
 
-  const uploadObject: ObjectStorageService['uploadObject'] = async ({ tenant, key, metadata, body }: {
-    tenant: string;
+  const uploadObject: ObjectStorageService['uploadObject'] = async ({ namespace, key, metadata, body }: {
+    namespace?: string;
     key: string;
     metadata?: { readonly [key: string]: string };
     body: Uint8Array | ReadableStream<Uint8Array>;
   }) => {
-    const bucketData = getOrCreateBucket(tenant);
+    const bucketData = getOrCreateBucket(bucketKey(namespace));
 
     // Calculate approximate size from body
     let size = 0;
@@ -249,11 +250,11 @@ export const createPicsumObjectStorageService = (config: PicsumObjectStorageServ
     return { ok: true, value: undefined };
   };
 
-  const deleteObject: ObjectStorageService['deleteObject'] = async ({ tenant, key }: { tenant: string; key: string }) => {
-    const bucketData = buckets.get(tenant);
+  const deleteObject: ObjectStorageService['deleteObject'] = async ({ namespace, key }: { namespace?: string; key: string }) => {
+    const bucketData = buckets.get(bucketKey(namespace));
 
     if (!bucketData) {
-      // Idempotent delete - treat missing tenant storage as success
+      // Idempotent delete - treat missing namespace storage as success
       return { ok: true, value: undefined };
     }
 
@@ -261,18 +262,18 @@ export const createPicsumObjectStorageService = (config: PicsumObjectStorageServ
     return { ok: true, value: undefined };
   };
 
-  const getObjectData: ObjectStorageService['getObjectData'] = async ({ tenant, key }: { tenant: string; key: string }) => {
+  const getObjectData: ObjectStorageService['getObjectData'] = async ({ namespace, key }: { namespace?: string; key: string }) => {
     return {
       ok: false,
       error: {
         key: 'internal_error',
-        message: `getObjectData is not implemented for Picsum storage service. Tenant: ${tenant}, Key: ${key}`,
+        message: `getObjectData is not implemented for Picsum storage service. Namespace: ${namespace ?? '(root)'}, Key: ${key}`,
       },
     };
   };
 
-  const deleteObjectsByPrefix: ObjectStorageService['deleteObjectsByPrefix'] = async ({ tenant, prefix }: { tenant: string; prefix?: string }) => {
-    const bucketData = buckets.get(tenant);
+  const deleteObjectsByPrefix: ObjectStorageService['deleteObjectsByPrefix'] = async ({ namespace, prefix }: { namespace?: string; prefix?: string }) => {
+    const bucketData = buckets.get(bucketKey(namespace));
     if (!bucketData) {
       return { ok: true, value: { deleted: 0 } };
     }

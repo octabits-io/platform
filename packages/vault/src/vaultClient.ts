@@ -70,7 +70,7 @@ export interface ReadKvV2Options {
   namespace?: string;
   token: string;
   /**
-   * Vault KV-v2 path including the `data/` segment, e.g. `secret/data/reynt/api`.
+   * Vault KV-v2 path including the `data/` segment, e.g. `secret/data/myapp/api`.
    * The caller is responsible for the engine prefix and the `data/` segment —
    * this client passes the path through verbatim.
    */

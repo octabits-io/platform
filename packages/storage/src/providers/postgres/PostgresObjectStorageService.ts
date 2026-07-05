@@ -31,10 +31,12 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   },
 });
 
-// Schema definition for object storage
+// Schema definition for object storage. `namespace` is the optional logical
+// partition from the ObjectStorageService contract; the root namespace is
+// stored as '' (empty string) so the (namespace, key) unique constraint holds.
 export const objectStorageTable = pgTable('object_storage', {
   id: bigint({ mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-  tenantId: text('tenant_id').notNull(),
+  namespace: text('namespace').notNull().default(''),
   key: text('key').notNull(),
   data: bytea('data').notNull(),
   size: bigint('size', { mode: 'number' }).notNull(),
@@ -43,19 +45,22 @@ export const objectStorageTable = pgTable('object_storage', {
   createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
 }, (table) => [
-  index('object_storage_tenant_id_key_idx').on(table.tenantId, table.key),
-  index('object_storage_tenant_id_idx').on(table.tenantId),
+  index('object_storage_namespace_key_idx').on(table.namespace, table.key),
+  index('object_storage_namespace_idx').on(table.namespace),
 ]);
+
+/** Root-namespace sentinel used only inside the table — never exposed to callers. */
+const namespaceColumnValue = (namespace: string | undefined) => namespace ?? '';
 
 // Configuration
 export interface PostgresObjectStorageConfig {
   readonly drizzle: StorageDrizzle;
-  createPublicUrl: (tenantId: string, key: string) => string;
+  createPublicUrl: (namespace: string | undefined, key: string) => string;
 }
 
 // URL provider config
 export interface PostgresObjectStorageUrlProviderConfig {
-  createPublicUrl: (tenantId: string, key: string) => string;
+  createPublicUrl: (namespace: string | undefined, key: string) => string;
   db: StorageDrizzle;
 }
 
@@ -85,7 +90,7 @@ const createTableInitializer = (db: StorageDrizzle) => {
         await tx.execute(sql`
           CREATE TABLE IF NOT EXISTS object_storage (
             id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-            tenant_id TEXT NOT NULL,
+            namespace TEXT NOT NULL DEFAULT '',
             key TEXT NOT NULL,
             data BYTEA NOT NULL,
             size BIGINT NOT NULL,
@@ -96,14 +101,36 @@ const createTableInitializer = (db: StorageDrizzle) => {
           )
         `);
 
+        // Migrate tables created before the namespace rename (column was
+        // tenant_id); data is preserved, only identifiers change.
         await tx.execute(sql`
-          CREATE INDEX IF NOT EXISTS object_storage_tenant_id_key_idx
-          ON object_storage (tenant_id, key)
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1 FROM information_schema.columns
+              WHERE table_name = 'object_storage' AND column_name = 'tenant_id'
+            ) THEN
+              ALTER TABLE object_storage RENAME COLUMN tenant_id TO namespace;
+              ALTER TABLE object_storage ALTER COLUMN namespace SET DEFAULT '';
+              ALTER INDEX IF EXISTS object_storage_tenant_id_key_idx RENAME TO object_storage_namespace_key_idx;
+              ALTER INDEX IF EXISTS object_storage_tenant_id_idx RENAME TO object_storage_namespace_idx;
+              IF EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'object_storage_tenant_id_key_unique'
+              ) THEN
+                ALTER TABLE object_storage RENAME CONSTRAINT object_storage_tenant_id_key_unique TO object_storage_namespace_key_unique;
+              END IF;
+            END IF;
+          END $$;
         `);
 
         await tx.execute(sql`
-          CREATE INDEX IF NOT EXISTS object_storage_tenant_id_idx
-          ON object_storage (tenant_id)
+          CREATE INDEX IF NOT EXISTS object_storage_namespace_key_idx
+          ON object_storage (namespace, key)
+        `);
+
+        await tx.execute(sql`
+          CREATE INDEX IF NOT EXISTS object_storage_namespace_idx
+          ON object_storage (namespace)
         `);
 
         await tx.execute(sql`
@@ -111,11 +138,11 @@ const createTableInitializer = (db: StorageDrizzle) => {
           BEGIN
             IF NOT EXISTS (
               SELECT 1 FROM pg_constraint
-              WHERE conname = 'object_storage_tenant_id_key_unique'
+              WHERE conname = 'object_storage_namespace_key_unique'
             ) THEN
               ALTER TABLE object_storage
-              ADD CONSTRAINT object_storage_tenant_id_key_unique
-              UNIQUE (tenant_id, key);
+              ADD CONSTRAINT object_storage_namespace_key_unique
+              UNIQUE (namespace, key);
             END IF;
           END $$;
         `);
@@ -140,7 +167,7 @@ const createTableInitializer = (db: StorageDrizzle) => {
  * Creates getObjectData implementation for a drizzle instance.
  */
 const createGetObjectData = (db: StorageDrizzle, ensureTableExists: () => Promise<Result<void, ObjectStorageError>>): ObjectStorageService['getObjectData'] => {
-  return async ({ tenant, key }: { tenant: string; key: string }) => {
+  return async ({ namespace, key }: { namespace?: string; key: string }) => {
     const initResult = await ensureTableExists();
     if (!initResult.ok) {
       return initResult;
@@ -158,7 +185,7 @@ const createGetObjectData = (db: StorageDrizzle, ensureTableExists: () => Promis
         .from(objectStorageTable)
         .where(
           and(
-            eq(objectStorageTable.tenantId, tenant),
+            eq(objectStorageTable.namespace, namespaceColumnValue(namespace)),
             eq(objectStorageTable.key, key)
           )
         )
@@ -202,8 +229,8 @@ const createGetObjectData = (db: StorageDrizzle, ensureTableExists: () => Promis
 export const createPostgresObjectStorageUrlProvider = (config: PostgresObjectStorageUrlProviderConfig): PostgresObjectStorageUrlProvider => {
   const base = {
     type: 'postgres' as const,
-    getPublicUrl: ({ tenant, key }: { tenant: string; key: string }) => {
-      return config.createPublicUrl(tenant, key);
+    getPublicUrl: ({ namespace, key }: { namespace?: string; key: string }) => {
+      return config.createPublicUrl(namespace, key);
     },
   };
 
@@ -250,12 +277,12 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
   // Use shared table initializer
   const ensureTableExists = createTableInitializer(db);
 
-  const getPublicUrl: ObjectStorageService['getPublicUrl'] = ({ tenant, key }) => {
-    return createPublicUrl(tenant, key);
+  const getPublicUrl: ObjectStorageService['getPublicUrl'] = ({ namespace, key }) => {
+    return createPublicUrl(namespace, key);
   };
 
-  const listObjects: ObjectStorageService['listObjects'] = async <T extends boolean>({ tenant, prefix, includeHead }: {
-    tenant: string;
+  const listObjects: ObjectStorageService['listObjects'] = async <T extends boolean>({ namespace, prefix, includeHead }: {
+    namespace?: string;
     prefix?: string;
     includeHead: T;
   }) => {
@@ -266,7 +293,7 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
 
     try {
       // Build query conditions
-      const conditions = [eq(objectStorageTable.tenantId, tenant)];
+      const conditions = [eq(objectStorageTable.namespace, namespaceColumnValue(namespace))];
 
       if (prefix) {
         conditions.push(like(objectStorageTable.key, `${prefix}%`));
@@ -325,8 +352,8 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
     }
   };
 
-  const uploadObject: ObjectStorageService['uploadObject'] = async ({ tenant, key, metadata: inputMetadata, body }: {
-    tenant: string;
+  const uploadObject: ObjectStorageService['uploadObject'] = async ({ namespace, key, metadata: inputMetadata, body }: {
+    namespace?: string;
     key: string;
     metadata?: { readonly [key: string]: string };
     body: Uint8Array | ReadableStream<Uint8Array>;
@@ -357,7 +384,7 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
         .from(objectStorageTable)
         .where(
           and(
-            eq(objectStorageTable.tenantId, tenant),
+            eq(objectStorageTable.namespace, namespaceColumnValue(namespace)),
             eq(objectStorageTable.key, key)
           )
         )
@@ -376,14 +403,14 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
           })
           .where(
             and(
-              eq(objectStorageTable.tenantId, tenant),
+              eq(objectStorageTable.namespace, namespaceColumnValue(namespace)),
               eq(objectStorageTable.key, key)
             )
           );
       } else {
         // Insert new
         await db.insert(objectStorageTable).values({
-          tenantId: tenant,
+          namespace: namespaceColumnValue(namespace),
           key,
           data: buffer,
           size,
@@ -405,7 +432,7 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
     }
   };
 
-  const deleteObject: ObjectStorageService['deleteObject'] = async ({ tenant, key }: { tenant: string; key: string }) => {
+  const deleteObject: ObjectStorageService['deleteObject'] = async ({ namespace, key }: { namespace?: string; key: string }) => {
     const initResult = await ensureTableExists();
     if (!initResult.ok) {
       return initResult;
@@ -416,7 +443,7 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
         .delete(objectStorageTable)
         .where(
           and(
-            eq(objectStorageTable.tenantId, tenant),
+            eq(objectStorageTable.namespace, namespaceColumnValue(namespace)),
             eq(objectStorageTable.key, key)
           )
         );
@@ -435,16 +462,17 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
     }
   };
 
-  const deleteObjectsByPrefix: ObjectStorageService['deleteObjectsByPrefix'] = async ({ tenant, prefix }: { tenant: string; prefix?: string }) => {
+  const deleteObjectsByPrefix: ObjectStorageService['deleteObjectsByPrefix'] = async ({ namespace, prefix }: { namespace?: string; prefix?: string }) => {
     const initResult = await ensureTableExists();
     if (!initResult.ok) {
       return initResult;
     }
 
     try {
+      const namespaceCondition = eq(objectStorageTable.namespace, namespaceColumnValue(namespace));
       const whereClause = prefix
-        ? and(eq(objectStorageTable.tenantId, tenant), like(objectStorageTable.key, `${prefix}%`))
-        : eq(objectStorageTable.tenantId, tenant);
+        ? and(namespaceCondition, like(objectStorageTable.key, `${prefix}%`))
+        : namespaceCondition;
 
       const result = await db
         .delete(objectStorageTable)
@@ -458,7 +486,7 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
         ok: false,
         error: {
           key: 'internal_error',
-          message: `Failed to delete objects for tenant '${tenant}': ${octError.message}`,
+          message: `Failed to delete objects in namespace '${namespace ?? '(root)'}': ${octError.message}`,
         },
       };
     }

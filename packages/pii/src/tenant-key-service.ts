@@ -24,6 +24,24 @@ export interface TenantKeyNotFoundError extends OctError {
 export interface TenantKeyGenerationError extends OctError {
   key: 'tenant_key_generation_error';
   message: string;
+  /**
+   * True when generation lost a concurrent unique-constraint race — the row
+   * already exists, so re-fetching the keys is the correct recovery.
+   */
+  conflict?: boolean;
+}
+
+/**
+ * Postgres unique-violation detection (SQLSTATE 23505), walking the `cause`
+ * chain so driver/ORM wrappers (e.g. DrizzleQueryError) don't hide the code.
+ */
+function isUniqueViolation(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; current != null && depth < 10; depth++) {
+    if (typeof current === 'object' && (current as { code?: unknown }).code === '23505') return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
 }
 
 export type TenantKeyError = TenantKeyNotFoundError | TenantKeyGenerationError | MasterKeyError;
@@ -132,6 +150,7 @@ export function createTenantKeyService({ db, tenantId, masterKeyProvider, table,
         error: {
           key: 'tenant_key_generation_error',
           message: `Failed to generate keys for tenant ${tenantId}: ${error instanceof Error ? error.message : String(error)}`,
+          conflict: isUniqueViolation(error),
         },
       };
     }
@@ -156,8 +175,7 @@ export function createTenantKeyService({ db, tenantId, masterKeyProvider, table,
       const genResult = await generateKeyPair();
       if (!genResult.ok) {
         // Unique-constraint violation = concurrent generation → retry fetch
-        if (genResult.error.key === 'tenant_key_generation_error' &&
-            genResult.error.message.includes('unique')) {
+        if (genResult.error.key === 'tenant_key_generation_error' && genResult.error.conflict) {
           return getKeys();
         }
         return genResult;

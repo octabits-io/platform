@@ -9,7 +9,7 @@ import { type Result } from '@octabits-io/foundation/result';
 import type { ObjectFileServer } from '../../base/interfaces';
 
 export interface ServeObjectParams {
-  readonly tenant: string;
+  readonly namespace?: string;
   readonly key: string;
 }
 
@@ -36,7 +36,7 @@ export async function getObjectData(
   fileServer: ObjectFileServer,
   params: ServeObjectParams
 ): Promise<Result<ServeObjectResult, ServeObjectError>> {
-  const result = await fileServer.getObjectData({ tenant: params.tenant, key: params.key });
+  const result = await fileServer.getObjectData({ namespace: params.namespace, key: params.key });
 
   if (!result.ok) {
     const statusCode = result.error.key === 'not_found' ? 404 : 500;
@@ -88,7 +88,7 @@ export interface ExpressLikeResponse {
   end(): this;
 }
 
-export function createExpressHandler(fileServer: ObjectFileServer, tenant: string) {
+export function createExpressHandler(fileServer: ObjectFileServer, namespace?: string) {
   return async (
     req: ExpressLikeRequest,
     res: ExpressLikeResponse
@@ -100,7 +100,7 @@ export function createExpressHandler(fileServer: ObjectFileServer, tenant: strin
       return;
     }
 
-    const result = await getObjectData(fileServer, { tenant, key });
+    const result = await getObjectData(fileServer, { namespace, key });
 
     if (!result.ok) {
       res.status(result.error.statusCode).send(result.error.message);
@@ -157,7 +157,7 @@ export interface NitroEvent {
   };
 }
 
-export function createNitroHandler(fileServer: ObjectFileServer, tenant: string) {
+export function createNitroHandler(fileServer: ObjectFileServer, namespace?: string) {
   return async (event: NitroEvent, key?: string): Promise<Buffer | string> => {
     const _key = key || event.context.params?.key || event.context.params?.['0'];
 
@@ -166,7 +166,7 @@ export function createNitroHandler(fileServer: ObjectFileServer, tenant: string)
       return 'Missing key parameter';
     }
 
-    const result = await getObjectData(fileServer, { tenant, key: _key });
+    const result = await getObjectData(fileServer, { namespace, key: _key });
 
     if (!result.ok) {
       event.node.res.statusCode = result.error.statusCode;
@@ -266,7 +266,7 @@ export async function createWebResponse(
  * Useful for custom integrations
  */
 export interface GenericRequest {
-  tenant: string;
+  namespace?: string;
   key: string;
   headers?: Record<string, string | undefined>;
 }
@@ -280,7 +280,7 @@ export interface GenericResponse {
 export function createGenericHandler(fileServer: ObjectFileServer) {
   return async (req: GenericRequest): Promise<GenericResponse> => {
     const result = await getObjectData(fileServer, {
-      tenant: req.tenant,
+      namespace: req.namespace,
       key: req.key,
     });
 

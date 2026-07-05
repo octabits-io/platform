@@ -1,6 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { pgTable, text, timestamp } from 'drizzle-orm/pg-core';
-import { createBaseTenantScopedCrudService, type CrudDatabase } from './index.ts';
+import {
+  createBaseCrudService,
+  createScopedCrudService,
+  createBaseTenantScopedCrudService,
+  type CrudDatabase,
+} from './index.ts';
 
 const amenity = pgTable('amenity', {
   id: text().primaryKey().notNull(),
@@ -15,14 +20,27 @@ function makeDb(rows: Array<Record<string, unknown>>) {
   const insertValues = vi.fn(async () => {});
   const updateReturning = vi.fn(async () => rows.length ? [{ id: rows[0]!.id }] : []);
   const setArgs: unknown[] = [];
+  const whereArgs: unknown[] = [];
+  const findManyArgs: unknown[] = [];
+  // The count query is awaited directly when unscoped (no .where chained), so
+  // from() returns a promise that also carries a .where.
+  const countRows = [{ count: rows.length }];
+  const fromResult = () => Object.assign(Promise.resolve(countRows), {
+    where: async (w: unknown) => { whereArgs.push(w); return countRows; },
+  });
   const db: CrudDatabase = {
-    select: () => ({ from: () => ({ where: async () => [{ count: rows.length }] }) }),
+    select: () => ({ from: fromResult }),
     insert: () => ({ values: insertValues }),
     update: () => ({ set: (v: unknown) => { setArgs.push(v); return { where: () => ({ returning: updateReturning }) }; } }),
     delete: () => ({ where: () => ({ returning: updateReturning }) }),
-    query: { amenity: { findMany: async () => rows, findFirst: async () => rows[0] } },
+    query: {
+      amenity: {
+        findMany: async (opts: unknown) => { findManyArgs.push(opts); return rows; },
+        findFirst: async () => rows[0],
+      },
+    },
   };
-  return { db, insertValues, setArgs };
+  return { db, insertValues, setArgs, whereArgs, findManyArgs };
 }
 
 const dateProvider = { now: () => new Date('2026-01-01T00:00:00Z') };
@@ -74,5 +92,45 @@ describe('createBaseTenantScopedCrudService', () => {
     expect(ok.ok).toBe(true);
     const miss = await makeService([]).service.delete({ id: 'x' });
     expect(!miss.ok && miss.error.key).toBe('amenity_not_found');
+  });
+});
+
+describe('createBaseCrudService (unscoped)', () => {
+  it('list queries without any where clause and create injects no scope column', async () => {
+    const { db, insertValues, findManyArgs } = makeDb([{ id: 'wifi', name: 'WiFi' }]);
+    const service = createBaseCrudService({
+      db, dateProvider,
+      table: amenity, tableName: 'amenity', resourceName: 'amenity',
+      mapToEntity: (r) => ({ id: r.id, name: r.name }),
+    });
+
+    const r = await service.list();
+    expect(r.ok && r.value).toEqual({ items: [{ id: 'wifi', name: 'WiFi' }], total: 1 });
+    expect(findManyArgs[0]).not.toHaveProperty('where');
+
+    const c = await service.create({ id: 'wifi', tenantId: 'explicit', name: 'WiFi' });
+    expect(c.ok).toBe(true);
+    // Unscoped: caller-supplied values pass through untouched, nothing injected.
+    expect(insertValues).toHaveBeenCalledWith({ id: 'wifi', tenantId: 'explicit', name: 'WiFi' });
+  });
+});
+
+describe('createScopedCrudService (generic scope column)', () => {
+  it('scopes queries by the configured column and injects it on create', async () => {
+    const { db, insertValues, findManyArgs } = makeDb([{ id: 'wifi', name: 'WiFi' }]);
+    const service = createScopedCrudService({
+      db, dateProvider,
+      scope: { column: 'tenantId', value: 'ws-7' },
+      table: amenity, tableName: 'amenity', resourceName: 'amenity',
+      mapToEntity: (r) => ({ id: r.id, name: r.name }),
+    });
+
+    const r = await service.list();
+    expect(r.ok && r.value.total).toBe(1);
+    expect(findManyArgs[0]).toHaveProperty('where');
+
+    const c = await service.create({ id: 'wifi', name: 'WiFi' });
+    expect(c.ok).toBe(true);
+    expect(insertValues).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'ws-7' }));
   });
 });

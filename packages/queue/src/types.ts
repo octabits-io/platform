@@ -24,8 +24,27 @@ export type BaseJobPayload = Record<string, unknown>;
 export const SCHEMA_BASE_JOB_PAYLOAD = z.record(z.string(), z.unknown());
 
 // ============================================================================
-// Recommended Multi-Tenant Base (opt-in)
+// Recommended Payload Bases (opt-in)
 // ============================================================================
+
+/**
+ * Recommended base payload for system/global jobs — jobs that are not scoped
+ * to any tenant (cron sweeps, reconciliation, cross-tenant maintenance).
+ *
+ * NOT required by the queue base. Use this instead of forcing a sentinel
+ * tenant id (e.g. `'__system__'`) through a tenant-shaped payload: a job that
+ * iterates all tenants simply has no `tenantId`. Compose it with
+ * `.extend(...)` to build concrete payload schemas.
+ *
+ * @example
+ * const SCHEMA_RECONCILE_JOB = SCHEMA_SYSTEM_JOB_PAYLOAD.extend({ since: z.string() });
+ */
+export const SCHEMA_SYSTEM_JOB_PAYLOAD = z.object({
+  /** Optional correlation ID for tracing */
+  correlationId: z.string().optional(),
+});
+
+export type SystemJobPayload = z.infer<typeof SCHEMA_SYSTEM_JOB_PAYLOAD>;
 
 /**
  * Recommended base payload for multi-tenant consumers.
@@ -33,16 +52,16 @@ export const SCHEMA_BASE_JOB_PAYLOAD = z.record(z.string(), z.unknown());
  * NOT required by the queue base — provided as a convenience so multi-tenant
  * callers (e.g. per-request tenant isolation) can extend a shared shape rather
  * than re-declaring `tenantId`/`correlationId` on every queue. Compose it with
- * `.extend(...)` to build concrete payload schemas.
+ * `.extend(...)` to build concrete payload schemas. For jobs that are global
+ * by nature, extend {@link SCHEMA_SYSTEM_JOB_PAYLOAD} instead of inventing a
+ * sentinel tenant id.
  *
  * @example
  * const SCHEMA_EMAIL_JOB = SCHEMA_TENANT_JOB_PAYLOAD.extend({ to: z.string().email() });
  */
-export const SCHEMA_TENANT_JOB_PAYLOAD = z.object({
+export const SCHEMA_TENANT_JOB_PAYLOAD = SCHEMA_SYSTEM_JOB_PAYLOAD.extend({
   /** Tenant ID for multi-tenant isolation */
   tenantId: z.string().min(1),
-  /** Optional correlation ID for tracing */
-  correlationId: z.string().optional(),
 });
 
 export type TenantJobPayload = z.infer<typeof SCHEMA_TENANT_JOB_PAYLOAD>;

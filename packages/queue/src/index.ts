@@ -7,7 +7,8 @@
  *
  * Domain-agnostic — the logger is injected and payload types are supplied by
  * the consumer. Multi-tenant callers can build on the recommended
- * `SCHEMA_TENANT_JOB_PAYLOAD`.
+ * `SCHEMA_TENANT_JOB_PAYLOAD`; global/cron jobs on `SCHEMA_SYSTEM_JOB_PAYLOAD`
+ * (no sentinel tenant ids).
  */
 
 // Lifecycle / monitoring facade
@@ -21,10 +22,12 @@ export type { CreateQueueDomainDeps } from './createQueueDomain.ts';
 // Payload + domain types
 export {
   SCHEMA_BASE_JOB_PAYLOAD,
+  SCHEMA_SYSTEM_JOB_PAYLOAD,
   SCHEMA_TENANT_JOB_PAYLOAD,
 } from './types.ts';
 export type {
   BaseJobPayload,
+  SystemJobPayload,
   TenantJobPayload,
   JobContext,
   QueueDomainConfig,

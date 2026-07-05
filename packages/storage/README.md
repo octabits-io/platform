@@ -1,10 +1,16 @@
 # @octabits-io/storage
 
-Tenant-namespaced blob storage: a small `ObjectStorageService` contract plus a
-set of interchangeable providers. Pure blobs — every method takes `tenant` as a
-parameter, and there is no listing/booking/domain coupling. Higher-level
+Namespaced blob storage: a small `ObjectStorageService` contract plus a set of
+interchangeable providers. Pure blobs — every method takes an optional
+`namespace`, and there is no listing/booking/domain coupling. Higher-level
 concerns (SHA-256 audit rows, moderation status, CMS media) belong in an
 asset/audit service that sits *above* these providers.
+
+`namespace` is an optional logical partition for objects — a tenant id, an
+environment name, or nothing at all. How it is realized is provider-specific (an
+S3 key prefix, a Postgres column, an in-memory bucket). **Omit it** and you
+address the *root* namespace, so single-tenant consumers never have to invent a
+namespace value.
 
 ## Install
 
@@ -28,14 +34,17 @@ import type { ObjectStorageService } from '@octabits-io/storage';
 
 interface ObjectStorageService {
   readonly type?: string;
-  getPublicUrl(p: { tenant: string; key: string }): string;
-  listObjects<T extends boolean>(p: { tenant: string; prefix?: string; includeHead: T }): Promise<Result<ListObjectsResponse<T>, ObjectStorageError>>;
-  uploadObject(p: { tenant: string; key: string; metadata?: Record<string, string>; body: Uint8Array | ReadableStream<Uint8Array> }): Promise<Result<void, ObjectStorageError>>;
-  deleteObject(p: { tenant: string; key: string }): Promise<Result<void, ObjectStorageError>>;
-  deleteObjectsByPrefix(p: { tenant: string; prefix?: string }): Promise<Result<{ deleted: number }, ObjectStorageError>>;
-  getObjectData(p: { tenant: string; key: string }): Promise<Result<ObjectData, ObjectStorageError>>;
+  getPublicUrl(p: { namespace?: string; key: string }): string;
+  listObjects<T extends boolean>(p: { namespace?: string; prefix?: string; includeHead: T }): Promise<Result<ListObjectsResponse<T>, ObjectStorageError>>;
+  uploadObject(p: { namespace?: string; key: string; metadata?: Record<string, string>; body: Uint8Array | ReadableStream<Uint8Array> }): Promise<Result<void, ObjectStorageError>>;
+  deleteObject(p: { namespace?: string; key: string }): Promise<Result<void, ObjectStorageError>>;
+  deleteObjectsByPrefix(p: { namespace?: string; prefix?: string }): Promise<Result<{ deleted: number }, ObjectStorageError>>;
+  getObjectData(p: { namespace?: string; key: string }): Promise<Result<ObjectData, ObjectStorageError>>;
 }
 ```
+
+Every `namespace` is optional. Pass one to partition objects (multi-tenant); omit
+it to use the single root namespace (single-tenant).
 
 `ObjectStorageError` is an `OctErrorWithKey<'network_error' | 'not_found' | 'not_found_bucket' | 'access_denied' | 'internal_error'>`.
 
@@ -43,7 +52,7 @@ interface ObjectStorageService {
 
 | Factory | Import from | SDK peer | Notes |
 | --- | --- | --- | --- |
-| `createAWSObjectStorageService(config)` | `@octabits-io/storage/s3` | `@aws-sdk/client-s3` | `type: 's3'`. **S3-compatible**, not AWS-bound — explicit `endpoint` + `forcePathStyle` (production: Hetzner Object Storage, EU). Keys are tenant-prefixed (`tenant/<tenant>/<key>`); transient failures are retried with backoff. |
+| `createAWSObjectStorageService(config)` | `@octabits-io/storage/s3` | `@aws-sdk/client-s3` | `type: 's3'`. **S3-compatible**, not AWS-bound — explicit `endpoint` + `forcePathStyle` (production: Hetzner Object Storage, EU). Keys are namespace-prefixed (`<namespace>/<key>` by default, unprefixed when the namespace is omitted); customize the prefix with `namespacePrefix`. Transient failures are retried with backoff. |
 | `createPostgresObjectStorageService(config)` | `@octabits-io/storage/postgres` | `drizzle-orm` | `type: 'postgres'`. Stores blobs in a self-creating `object_storage` table. Accepts any standard drizzle-orm Postgres db (`StorageDrizzle = PgDatabase<any, any, any>`). |
 | `createPicsumObjectStorageService(config)` | `@octabits-io/storage` | — | `type: 'picsum'`. In-memory dev/mock store returning deterministic picsum.photos URLs. |
 
@@ -80,14 +89,29 @@ const storage = createAWSObjectStorageService({
   logger,
 });
 
-await storage.uploadObject({ tenant: 't1', key: 'a/b.jpg', body: bytes });
+await storage.uploadObject({ namespace: 't1', key: 'a/b.jpg', body: bytes });
 
-const list = await storage.listObjects({ tenant: 't1', prefix: 'a/', includeHead: false });
-if (list.ok) console.log(list.value.objects); // keys have the tenant prefix stripped
+const list = await storage.listObjects({ namespace: 't1', prefix: 'a/', includeHead: false });
+if (list.ok) console.log(list.value.objects); // keys have the namespace prefix stripped
 
-const url = storage.getPublicUrl({ tenant: 't1', key: 'a/b.jpg' });
+const url = storage.getPublicUrl({ namespace: 't1', key: 'a/b.jpg' });
+// → https://cdn.example.com/t1/a/b.jpg
+
+// Single-tenant? Omit the namespace entirely — objects live in the root namespace,
+// keys are stored unprefixed, and getPublicUrl returns https://cdn.example.com/a/b.jpg
+await storage.uploadObject({ key: 'a/b.jpg', body: bytes });
+
+// Migrating off the previous `tenant/<ns>/` layout? Reproduce it with namespacePrefix:
+const legacy = createAWSObjectStorageService({
+  /* ...config... */
+  namespacePrefix: (ns) => `tenant/${ns}/`,
+});
+legacy.getPublicUrl({ namespace: 't1', key: 'a/b.jpg' });
 // → https://cdn.example.com/tenant/t1/a/b.jpg
 ```
+
+`namespacePrefix` is available on both `AWSClientObjectStorageConfig` and
+`AWSObjectStorageUrlProviderConfig`.
 
 ### Postgres blob store (`@octabits-io/storage/postgres`)
 
@@ -99,15 +123,21 @@ const db = drizzle(pool); // any standard drizzle-orm Postgres db
 
 const storage = createPostgresObjectStorageService({
   drizzle: db, // typed as StorageDrizzle = PgDatabase<any, any, any>
-  // build the public URL your app serves blobs from (see serve handler below)
-  createPublicUrl: (tenant, key) => `https://app.example.com/api/storage/${tenant}/${key}`,
+  // build the public URL your app serves blobs from (see serve handler below).
+  // `namespace` is `string | undefined` — undefined = root namespace (stored as '').
+  createPublicUrl: (namespace, key) =>
+    `https://app.example.com/api/storage/${namespace ?? '_'}/${key}`,
 });
 
-// The `object_storage` table is created on first use (CREATE TABLE IF NOT EXISTS).
-await storage.uploadObject({ tenant: 't1', key: 'docs/f.pdf', body: bytes });
+// The `object_storage` table is created on first use (CREATE TABLE IF NOT EXISTS);
+// a legacy `tenant_id` column is migrated to `namespace` automatically.
+await storage.uploadObject({ namespace: 't1', key: 'docs/f.pdf', body: bytes });
 
-const obj = await storage.getObjectData({ tenant: 't1', key: 'docs/f.pdf' });
+const obj = await storage.getObjectData({ namespace: 't1', key: 'docs/f.pdf' });
 if (obj.ok) console.log(obj.value.contentType, obj.value.size);
+
+// Single-tenant: omit the namespace (stored under the '' root namespace).
+await storage.uploadObject({ key: 'docs/f.pdf', body: bytes });
 ```
 
 Serve stored blobs over HTTP with a framework-agnostic handler (ETag / 304 /
@@ -117,8 +147,9 @@ Serve stored blobs over HTTP with a framework-agnostic handler (ETag / 304 /
 import { createWebResponse, sanitizeObjectKey } from '@octabits-io/storage/postgres';
 
 // e.g. inside a Web-standard route handler
-const key = sanitizeObjectKey(pathAfterTenant); // directory-traversal guard
-return createWebResponse(storage, { tenant: 't1', key }, request.headers);
+const key = sanitizeObjectKey(pathAfterPrefix); // directory-traversal guard
+return createWebResponse(storage, { namespace: 't1', key }, request.headers);
+// single-tenant: return createWebResponse(storage, { key }, request.headers);
 ```
 
 ### Picsum (dev/mock, `@octabits-io/storage`)
@@ -133,13 +164,13 @@ const storage = createPicsumObjectStorageService({
 });
 
 await storage.uploadObject({
-  tenant: 't1',
+  namespace: 't1',
   key: 'hero.jpg',
   body: new Uint8Array([1, 2, 3]),
   metadata: { width: '1920', height: '1080' },
 });
 
-const url = storage.getPublicUrl({ tenant: 't1', key: 'hero.jpg' });
+const url = storage.getPublicUrl({ namespace: 't1', key: 'hero.jpg' });
 // → https://picsum.photos/seed/<key-hash>/1920/1080  (metadata dimensions win)
 ```
 

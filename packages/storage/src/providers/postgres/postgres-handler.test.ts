@@ -11,8 +11,8 @@ import type { ObjectData } from '../../base/types';
 import type { ObjectStorageError } from '../../base/errors';
 import type { Result } from '@octabits-io/foundation/result';
 
-const TENANT_ID = 't-pg-handler';
-const OTHER_TENANT_ID = 't-pg-handler-2';
+const NAMESPACE = 'n-pg-handler';
+const OTHER_NAMESPACE = 'n-pg-handler-2';
 
 /**
  * In-memory ObjectFileServer — exercises the HTTP handler mechanics (ETag, 304,
@@ -23,17 +23,18 @@ const OTHER_TENANT_ID = 't-pg-handler-2';
  */
 const createMemoryFileServer = () => {
   const store = new Map<string, ObjectData>();
-  const compositeKey = (tenant: string, key: string) => `${tenant}::${key}`;
+  // `undefined` namespace addresses the root namespace ('').
+  const compositeKey = (namespace: string | undefined, key: string) => `${namespace ?? ''}::${key}`;
 
   const upload = (params: {
-    tenant: string;
+    namespace?: string;
     key: string;
     body: Buffer;
     metadata?: Record<string, string>;
   }) => {
     const metadata = params.metadata ?? {};
     const contentType = metadata['content-type'] || metadata['contentType'] || 'application/octet-stream';
-    store.set(compositeKey(params.tenant, params.key), {
+    store.set(compositeKey(params.namespace, params.key), {
       data: params.body,
       size: params.body.length,
       contentType,
@@ -43,8 +44,8 @@ const createMemoryFileServer = () => {
   };
 
   const fileServer: ObjectFileServer = {
-    getObjectData: async ({ tenant, key }): Promise<Result<ObjectData, ObjectStorageError>> => {
-      const obj = store.get(compositeKey(tenant, key));
+    getObjectData: async ({ namespace, key }): Promise<Result<ObjectData, ObjectStorageError>> => {
+      const obj = store.get(compositeKey(namespace, key));
       if (!obj) {
         return { ok: false, error: { key: 'not_found', message: `Object not found: ${key}` } };
       }
@@ -67,7 +68,7 @@ describe('ObjectStorageService.postgres.handler', () => {
     test('should retrieve object data', async () => {
       const testData = Buffer.from('Hello, World!');
       upload({
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'test/file.txt',
         body: testData,
         metadata: {
@@ -77,7 +78,7 @@ describe('ObjectStorageService.postgres.handler', () => {
       });
 
       const result = await getObjectData(fileServer, {
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'test/file.txt',
       });
 
@@ -95,7 +96,7 @@ describe('ObjectStorageService.postgres.handler', () => {
 
     test('should return not_found error for non-existent object', async () => {
       const result = await getObjectData(fileServer, {
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'non-existent.txt',
       });
 
@@ -109,18 +110,18 @@ describe('ObjectStorageService.postgres.handler', () => {
     test('should generate consistent ETags', async () => {
       const testData = Buffer.from('Test data');
       upload({
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'test.txt',
         body: testData,
       });
 
       const result1 = await getObjectData(fileServer, {
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'test.txt',
       });
 
       const result2 = await getObjectData(fileServer, {
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'test.txt',
       });
 
@@ -135,7 +136,7 @@ describe('ObjectStorageService.postgres.handler', () => {
     beforeEach(() => {
       const testData = Buffer.from('Generic handler test');
       upload({
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'handler/test.txt',
         body: testData,
         metadata: { 'content-type': 'text/plain' },
@@ -145,7 +146,7 @@ describe('ObjectStorageService.postgres.handler', () => {
     test('should serve object with correct headers', async () => {
       const handler = createGenericHandler(fileServer);
       const response = await handler({
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'handler/test.txt',
       });
 
@@ -160,7 +161,7 @@ describe('ObjectStorageService.postgres.handler', () => {
     test('should return 404 for non-existent object', async () => {
       const handler = createGenericHandler(fileServer);
       const response = await handler({
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'non-existent.txt',
       });
 
@@ -173,7 +174,7 @@ describe('ObjectStorageService.postgres.handler', () => {
 
       // First request to get ETag
       const firstResponse = await handler({
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'handler/test.txt',
       });
 
@@ -182,7 +183,7 @@ describe('ObjectStorageService.postgres.handler', () => {
 
       // Second request with If-None-Match
       const secondResponse = await handler({
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'handler/test.txt',
         headers: {
           'if-none-match': etag,
@@ -267,34 +268,34 @@ describe('ObjectStorageService.postgres.handler', () => {
     });
   });
 
-  describe('multi-tenant isolation', () => {
-    test('should only return objects for the specified tenant', async () => {
-      const data1 = Buffer.from('Tenant 1 data');
-      const data2 = Buffer.from('Tenant 2 data');
+  describe('namespace isolation', () => {
+    test('should only return objects for the specified namespace', async () => {
+      const data1 = Buffer.from('Namespace 1 data');
+      const data2 = Buffer.from('Namespace 2 data');
 
-      upload({ tenant: TENANT_ID, key: 'shared-key.txt', body: data1 });
-      upload({ tenant: OTHER_TENANT_ID, key: 'shared-key.txt', body: data2 });
+      upload({ namespace: NAMESPACE, key: 'shared-key.txt', body: data1 });
+      upload({ namespace: OTHER_NAMESPACE, key: 'shared-key.txt', body: data2 });
 
       const result1 = await getObjectData(fileServer, {
-        tenant: TENANT_ID,
+        namespace: NAMESPACE,
         key: 'shared-key.txt',
       });
 
       const result2 = await getObjectData(fileServer, {
-        tenant: OTHER_TENANT_ID,
+        namespace: OTHER_NAMESPACE,
         key: 'shared-key.txt',
       });
 
       expect(result1.ok && result2.ok).toBe(true);
       if (result1.ok && result2.ok) {
-        expect(result1.value.data?.toString()).toBe('Tenant 1 data');
-        expect(result2.value.data?.toString()).toBe('Tenant 2 data');
+        expect(result1.value.data?.toString()).toBe('Namespace 1 data');
+        expect(result2.value.data?.toString()).toBe('Namespace 2 data');
       }
     });
 
-    test('should not find objects from other tenants', async () => {
+    test('should not find objects from other namespaces', async () => {
       const result = await getObjectData(fileServer, {
-        tenant: 'nonexistent-tenant',
+        namespace: 'nonexistent-namespace',
         key: 'non-existent-key.txt',
       });
 
@@ -302,6 +303,33 @@ describe('ObjectStorageService.postgres.handler', () => {
       if (!result.ok) {
         expect(result.error.key).toBe('not_found');
       }
+    });
+
+    test('should serve objects from the root namespace when namespace is omitted', async () => {
+      const rootData = Buffer.from('Root namespace data');
+      const nsData = Buffer.from('Named namespace data');
+
+      upload({ key: 'shared-key.txt', body: rootData });
+      upload({ namespace: NAMESPACE, key: 'shared-key.txt', body: nsData });
+
+      const rootResult = await getObjectData(fileServer, { key: 'shared-key.txt' });
+      const nsResult = await getObjectData(fileServer, { namespace: NAMESPACE, key: 'shared-key.txt' });
+
+      expect(rootResult.ok && nsResult.ok).toBe(true);
+      if (rootResult.ok && nsResult.ok) {
+        expect(rootResult.value.data?.toString()).toBe('Root namespace data');
+        expect(nsResult.value.data?.toString()).toBe('Named namespace data');
+      }
+    });
+
+    test('generic handler defaults to the root namespace when constructed without one', async () => {
+      upload({ key: 'root/file.txt', body: Buffer.from('root blob'), metadata: { 'content-type': 'text/plain' } });
+
+      const handler = createGenericHandler(fileServer);
+      const response = await handler({ key: 'root/file.txt' });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body.toString()).toBe('root blob');
     });
   });
 });

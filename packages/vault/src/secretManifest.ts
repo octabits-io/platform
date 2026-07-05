@@ -8,7 +8,7 @@
  * Example:
  *   [
  *     {
- *       "path": "secret/data/reynt/api",
+ *       "path": "secret/data/myapp/api",
  *       "map": { "db_url": "DATABASE_URL", "stripe": "STRIPE_SECRET_KEY" }
  *     }
  *   ]

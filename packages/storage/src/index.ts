@@ -1,5 +1,5 @@
 // ============================================================================
-// @octabits-io/storage — tenant-namespaced blob storage contract + providers
+// @octabits-io/storage — namespaced blob storage contract + providers
 // ============================================================================
 //
 // The root entry is dependency-light: the `ObjectStorageService` contract, the
@@ -10,8 +10,10 @@
 //   @octabits-io/storage/s3        — S3-compatible provider (optional peer: @aws-sdk/client-s3)
 //   @octabits-io/storage/postgres  — Postgres blob provider + HTTP handlers (optional peer: drizzle-orm)
 //
-// All methods take `tenant` as a parameter — tenant namespacing is the only
-// multi-tenant concept; there is no listing/booking coupling.
+// All methods accept an optional `namespace` that partitions objects (key
+// prefix on S3, column on Postgres). Multi-tenant consumers pass a tenant id
+// as the namespace; single-tenant consumers simply omit it. There is no other
+// domain coupling.
 
 // --- Base contract ---------------------------------------------------------
 export type {

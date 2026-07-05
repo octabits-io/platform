@@ -86,7 +86,7 @@ describe('createMcpRoutes scope lifecycle', () => {
     expect(scope.dispose).toHaveBeenCalledTimes(1);
   });
 
-  it('returns the invalid-tenant response and never acquires a scope', async () => {
+  it('returns the invalid-scope response and never acquires a scope', async () => {
     const resolveScope = vi.fn();
     const app = createMcpRoutes({
       prefix: '',
@@ -102,10 +102,34 @@ describe('createMcpRoutes scope lifecycle', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({
       jsonrpc: '2.0',
-      error: { code: -32600, message: 'Invalid tenantId' },
+      error: { code: -32600, message: 'Invalid scope key' },
       id: null,
     });
     expect(resolveScope).not.toHaveBeenCalled();
+  });
+
+  it('uses a custom parseScopeKey and passes scopeKey (with tenantId alias) to resolveScope', async () => {
+    const scope = makeScope();
+    const seen: Array<{ scopeKey: string; tenantId: string }> = [];
+
+    const app = createMcpRoutes({
+      prefix: '',
+      serverInfo: { name: 'test', version: '1.0.0' },
+      parseScopeKey: () => 'default',
+      resolveScope: async ({ scopeKey, tenantId }) => {
+        seen.push({ scopeKey, tenantId });
+        return { scope };
+      },
+      registerTools: () => {},
+    });
+
+    // No /tenant/ segment in the URL — the custom extractor supplies the key.
+    const res = await app.handle(
+      new Request('http://localhost/anything/', { method: 'POST', body: '{}' }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([{ scopeKey: 'default', tenantId: 'default' }]);
   });
 
   it('returns the resolveScope rejection response without staging a scope', async () => {

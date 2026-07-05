@@ -54,8 +54,13 @@ export interface DisposableServiceResolver<T> extends ServiceResolver<T> {
   dispose(opts?: DisposeOptions): Promise<void>;
 }
 
-/** Factory that creates a disposable, tenant-scoped system scope for background jobs. */
-export type SystemScopeFactory<T> = (tenantId: string) => Promise<DisposableServiceResolver<T>>;
+/**
+ * Factory that creates a disposable system scope for background jobs.
+ * `scopeKey` is an optional partition identifier (e.g. a tenant id) for
+ * consumers whose system scopes are partition-bound; global background work
+ * omits it.
+ */
+export type SystemScopeFactory<T> = (scopeKey?: string) => Promise<DisposableServiceResolver<T>>;
 
 /**
  * Simple Inversion of Control container with support for singleton, scoped, and transient services.
