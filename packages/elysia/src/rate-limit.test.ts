@@ -69,6 +69,25 @@ describe('createRateLimit', () => {
     expect(second.status).toBe(200);
   });
 
+  it('scoping: scoped limits only the route group it is mounted in', async () => {
+    const guarded = new Elysia({ prefix: '/guarded' })
+      .use(createRateLimit({ max: 1, scoping: 'scoped', errorKey: 'guarded_limited' }))
+      .get('/', () => 'guarded');
+    const app = new Elysia().use(guarded).get('/open', () => 'open');
+
+    const first = await app.handle(new Request('http://localhost/guarded/'));
+    expect(first.status).toBe(200);
+    const second = await app.handle(new Request('http://localhost/guarded/'));
+    expect(second.status).toBe(429);
+    expect(await second.json()).toMatchObject({ key: 'guarded_limited' });
+
+    // The sibling route outside the group is not limited.
+    const open1 = await app.handle(new Request('http://localhost/open'));
+    const open2 = await app.handle(new Request('http://localhost/open'));
+    expect(open1.status).toBe(200);
+    expect(open2.status).toBe(200);
+  });
+
   it('still limits client IPs outside the trusted CIDR prefixes', async () => {
     const app = new Elysia()
       .use(createClientIpPlugin(['*']))

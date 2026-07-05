@@ -50,6 +50,13 @@ export interface RateLimitOptions {
   errorKey?: string;
   /** `message` field of the 429 JSON body. Defaults to a generic notice. */
   errorMessage?: string;
+  /**
+   * Plugin scope (elysia-rate-limit `scoping`). The default `'global'` applies the
+   * limiter app-wide — the app skeleton's usage. Pass `'scoped'` for a per-route
+   * limiter mounted inside a route group: it then guards only that group, with its
+   * own counter, and can be tighter than (and stacks with) the app-wide limit.
+   */
+  scoping?: 'global' | 'scoped';
 }
 
 const DEFAULT_WINDOW_MS = 60_000;
@@ -67,11 +74,13 @@ export function createRateLimit(options: RateLimitOptions) {
     keyByClientIp = true,
     errorKey = DEFAULT_ERROR_KEY,
     errorMessage = DEFAULT_ERROR_MESSAGE,
+    scoping,
   } = options;
 
   const config: Partial<Options> = {
     max,
     duration: windowMs,
+    ...(scoping ? { scoping } : {}),
     skip: (req, key) => {
       // Internal server-to-server callers (e.g. SSR) bypass via a shared secret.
       if (internalSecret && req.headers.get(internalSecretHeader) === internalSecret) {
