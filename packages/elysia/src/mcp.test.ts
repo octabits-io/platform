@@ -23,7 +23,7 @@ vi.mock('elysia-mcp', () => ({
   },
 }));
 
-const { createMcpRoutes, parseTenantId, jsonRpcError, TENANT_ID_PATTERN } = await import('./mcp');
+const { createMcpRoutes, parseTenantId, jsonRpcError, SCOPE_KEY_PATTERN } = await import('./mcp');
 
 describe('parseTenantId', () => {
   it('extracts the tenant id following the /tenant/ segment', () => {
@@ -38,9 +38,9 @@ describe('parseTenantId', () => {
     expect(parseTenantId('http://localhost/api/tenant/bad.id/mcp')).toBeNull();
   });
 
-  it('exposes the url-friendly id pattern', () => {
-    expect(TENANT_ID_PATTERN.test('a-b_C9')).toBe(true);
-    expect(TENANT_ID_PATTERN.test('a/b')).toBe(false);
+  it('exposes the url-friendly key pattern', () => {
+    expect(SCOPE_KEY_PATTERN.test('a-b_C9')).toBe(true);
+    expect(SCOPE_KEY_PATTERN.test('a/b')).toBe(false);
   });
 });
 
@@ -63,8 +63,8 @@ describe('createMcpRoutes scope lifecycle', () => {
     const app = createMcpRoutes({
       prefix: '',
       serverInfo: { name: 'test', version: '1.0.0' },
-      resolveScope: async ({ tenantId }) => {
-        expect(tenantId).toBe('acme');
+      resolveScope: async ({ scopeKey }) => {
+        expect(scopeKey).toBe('acme');
         return { scope };
       },
       registerTools: (_server, getContainer) => {
@@ -108,16 +108,16 @@ describe('createMcpRoutes scope lifecycle', () => {
     expect(resolveScope).not.toHaveBeenCalled();
   });
 
-  it('uses a custom parseScopeKey and passes scopeKey (with tenantId alias) to resolveScope', async () => {
+  it('uses a custom parseScopeKey and passes scopeKey to resolveScope', async () => {
     const scope = makeScope();
-    const seen: Array<{ scopeKey: string; tenantId: string }> = [];
+    const seen: string[] = [];
 
     const app = createMcpRoutes({
       prefix: '',
       serverInfo: { name: 'test', version: '1.0.0' },
       parseScopeKey: () => 'default',
-      resolveScope: async ({ scopeKey, tenantId }) => {
-        seen.push({ scopeKey, tenantId });
+      resolveScope: async ({ scopeKey }) => {
+        seen.push(scopeKey);
         return { scope };
       },
       registerTools: () => {},
@@ -129,7 +129,7 @@ describe('createMcpRoutes scope lifecycle', () => {
     );
 
     expect(res.status).toBe(200);
-    expect(seen).toEqual([{ scopeKey: 'default', tenantId: 'default' }]);
+    expect(seen).toEqual(['default']);
   });
 
   it('returns the resolveScope rejection response without staging a scope', async () => {

@@ -75,6 +75,10 @@ await emailQueue.startWorker(
   // batchSize: jobs fetched per poll, processed sequentially, acked per job
   { batchSize: 2, pollingIntervalSeconds: 2 }
 );
+
+// 4. Recurring jobs (payload validated like enqueue) + graceful shutdown
+await emailQueue.schedule('email-digest', '0 8 * * *', { tenantId: 't1', to: 'digest@example.com' });
+await emailQueue.stop();
 ```
 
 ### Base payload types
@@ -82,7 +86,9 @@ await emailQueue.startWorker(
 `createQueueDomain<TPayload>` constrains `TPayload` only to
 `BaseJobPayload` (`Record<string, unknown>`) — the base is not tied to
 multi-tenancy. Multi-tenant consumers can opt in to the recommended
-`SCHEMA_TENANT_JOB_PAYLOAD` (`{ tenantId, correlationId? }`) and extend it, as
+`SCHEMA_SYSTEM_JOB_PAYLOAD` (`{ correlationId? }` — global/cron jobs, no sentinel
+tenant ids) or the multi-tenant `SCHEMA_TENANT_JOB_PAYLOAD` (`{ tenantId, correlationId? }`,
+which extends it) and extend those, as
 shown above.
 
 ## License

@@ -1,6 +1,6 @@
 # @octabits-io/foundation
 
-Shared foundation library providing core primitives used across the platform: error handling, dependency injection, structured logging, and common utilities.
+Shared foundation library providing core primitives used across the platform: error handling, dependency injection, structured logging, common utilities, Zod config fragments, an RBAC engine, and OIDC/JWT validation.
 
 ## Modules
 
@@ -116,4 +116,83 @@ const decoded = tryDecodeBase64('aGVsbG8='); // Result<string>
 normalizeQueryParamToStringOrUndefined(['foo', 'bar']); // 'foo'
 normalizeQueryParamToIntOrUndefined('42'); // 42
 normalizeQueryParamToArrayOrUndefined('single'); // ['single']
+```
+
+Also exported: `createDateProvider` / `DateProvider` (clock-injection seam),
+`createLruCacheService` (bounded LRU cache), `withRetry` (backoff retries,
+`RetryConfig` / `RetryOptions`), and `URL_FRIENDLY_REGEX`.
+
+---
+
+### `@octabits-io/foundation/config-schema`
+
+Reusable Zod config fragments — compose them into your app's config schema.
+
+```ts
+import {
+  nonEmptyString,
+  nonEmptyUrl,
+  DATABASE_CONFIG_SCHEMA,
+  createRlsSchema,
+  LOGGING_CONFIG_SCHEMA,
+} from '@octabits-io/foundation/config-schema';
+
+const CONFIG_SCHEMA = z.object({
+  database: DATABASE_CONFIG_SCHEMA,
+  rls: createRlsSchema(true), // default-enabled RLS toggle
+  logging: LOGGING_CONFIG_SCHEMA,
+  apiUrl: nonEmptyUrl(),
+});
+```
+
+---
+
+### `@octabits-io/foundation/rbac`
+
+Self-contained, dependency-free RBAC engine: pure resource/action subset
+checking, generic over a caller-supplied permission statement. The concrete
+statement matrix and named roles live in the consuming application.
+
+```ts
+import { createRole, checkLocalPermission } from '@octabits-io/foundation/rbac';
+
+const statement = {
+  article: ['read', 'write', 'delete'],
+  settings: ['read', 'write'],
+} as const;
+
+const editor = createRole<typeof statement>({
+  article: ['read', 'write'],
+  settings: ['read'],
+});
+
+editor.authorize({ article: ['write'] }); // { success: true }
+checkLocalPermission(editor, { settings: ['write'] }); // false
+```
+
+---
+
+### `@octabits-io/foundation/auth`
+
+Generic OIDC/JWT validation (optional peer: `jose`). Lazily discovers the JWKS
+URI from the issuer's OIDC discovery document, verifies signatures via
+`createRemoteJWKSet` (cached, rotation-aware), and hands verified payloads to a
+caller-supplied `claimMapper` that produces your domain token shape.
+
+```ts
+import { createJwtValidationService } from '@octabits-io/foundation/auth';
+
+const jwtService = createJwtValidationService<MyToken>({
+  issuerUrl: 'https://auth.example.com',
+  audience: 'my-api',
+  logger,
+  claimMapper: (payload) => ({ ok: true, value: { userId: payload.sub! } }),
+  // optional E2E bypass (neutralized in production):
+  // authBypassSecret, bypassToken
+});
+
+const result = await jwtService.validateAuthorizationHeader(req.headers.authorization);
+if (result.ok) console.log(result.value.userId);
+
+jwtService.extractBearerToken('Bearer abc'); // 'abc'
 ```

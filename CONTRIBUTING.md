@@ -28,8 +28,11 @@ pnpm --filter @octabits-io/foundation build
 pnpm --filter @octabits-io/foundation test
 
 # Single test file (from package directory)
-cd drizzle-toolkit && npx vitest run --project unit
-cd drizzle-toolkit && npx vitest run --project integration   # requires Docker
+cd packages/foundation && npx vitest run src/result/types.test.ts
+
+# flow and queue split unit vs integration (integration requires Docker)
+cd packages/flow && npx vitest run --project unit
+cd packages/flow && npx vitest run --project integration
 ```
 
 ### Commit conventions
@@ -68,7 +71,7 @@ git commit -m "chore: update drizzle-orm to v0.40"
 
 We use [Changesets](https://github.com/changesets/changesets) to manage versions and changelogs.
 
-The core packages (`foundation`, `drizzle-toolkit`, `pii`, `flow`) are **linked** — when one bumps to a new version, the others that also have changesets share the same version number. `elysia`, `queue`, and `mail` version independently. Packages without changesets are not published.
+The core packages (`foundation`, `drizzle-toolkit`, `pii`, `flow`) are **linked** — when one bumps to a new version, the others that also have changesets share the same version number. The rest (`elysia`, `queue`, `storage`, `mail`, `captcha`, `vault`) version independently. Packages without changesets are not published.
 
 ### Step 1: Add a changeset
 
@@ -143,10 +146,13 @@ pnpm changeset:publish      # build + publish to npm
 | Package | Description | Exports |
 |---------|-------------|---------|
 | `@octabits-io/foundation` | Result types, IoC container, logger, utilities, config-schema fragments, RBAC, OIDC/JWT auth | `./result` `./ioc` `./logger` `./utils` `./config-schema` `./rbac` `./auth` |
-| `@octabits-io/drizzle-toolkit` | DB error handling, pagination, factory, migrations, multi-tenant schema, test utilities | `./db` `./factory` `./migrate` `./tenant` `./testing` |
+| `@octabits-io/drizzle-toolkit` | DB error handling, pagination, factory, migrations, scoped CRUD, RLS scoping, idempotency, tenant schema primitives | `./db` `./factory` `./migrate` `./tenant` `./crud` `./rls` `./idempotency` |
 | `@octabits-io/pii` | PII encryption (age/X25519), blind indexes, master key provider | `.` |
-| `@octabits-io/elysia` | Elysia middleware & helpers (security headers, client IP, errors, rate limit) | `.` |
-| `@octabits-io/queue` | pg-boss queue base (BossManager, queue/worker/DLQ trio) | `.` |
+| `@octabits-io/elysia` | Elysia middleware & helpers (security headers, client IP, errors, rate limit, app skeleton + graceful shutdown, health routes, env-config helpers) | `.` `./mcp` |
+| `@octabits-io/queue` | pg-boss queue base (BossManager, queue/worker/DLQ trio; system + tenant payload bases) | `.` |
+| `@octabits-io/storage` | Namespace-partitioned blob storage contract + S3-compatible/Postgres providers | `.` `./s3` `./postgres` |
+| `@octabits-io/vault` | HashiCorp Vault boot-time secret loader (KV-v2, k8s SA-JWT / token auth) | `.` |
+| `@octabits-io/captcha` | Provider-agnostic captcha contract + noop + config schema; Altcha provider | `.` `./altcha` |
 | `@octabits-io/mail` | Mail transport contract + providers | `.` `./smtp` `./mailjet` `./brevo` |
 | `@octabits-io/flow` | Durable DAG workflow engine + AI add-on | `.` `./ai` `./store-pg` `./dispatcher-pgboss` |
 
@@ -156,5 +162,6 @@ its public API), `mail` → `foundation` (**peer**, same reason; vendor SDKs are
 optional peers), `elysia` → `foundation` (**peer** — errors are `OctError`),
 `foundation` → `jose` (optional peer, `./auth` only). `flow` is deliberately
 standalone (zero deps, structural `Result`/`Logger`) — it is the one package
-with standalone-OSS posture. The former `schema` and `drizzle-test` packages
-were merged into `drizzle-toolkit` (`./tenant`, `./testing`).
+with standalone-OSS posture. The former `schema` package was merged into
+`drizzle-toolkit` (`./tenant`); the former `drizzle-test` package (briefly
+`drizzle-toolkit/testing`) was removed — no consumers.

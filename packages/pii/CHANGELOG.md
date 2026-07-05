@@ -1,5 +1,11 @@
 # @octabits-io/pii
 
+## 0.5.0
+
+### Minor Changes
+
+- Split the encryption-key service into a generic core + tenant preset: new `createScopedKeyService` is generic over the scope column (`scope: { column, value }`), and `createTenantKeyService` is now a thin preset over it (`{ column: 'tenantId', value: tenantId }`) with an unchanged deps signature. Breaking: error `key` strings are renamed (`tenant_key_generation_error` → `scoped_key_generation_error`, `tenant_keys_not_found` → `scoped_keys_not_found`) and the not-found error carries `scope` instead of `tenantId`. The old `Tenant*` type names remain as deprecated aliases of the new `Scoped*` types.
+
 ## 0.4.0
 
 ### Minor Changes

@@ -20,14 +20,21 @@ export type { SymmetricEncryptionError, HybridEncryptionError, HybridDecryptionE
 // Age encryption primitives
 export { Encrypter, Decrypter, generateIdentity, identityToRecipient } from './typage/index.ts';
 
+// Scoped encryption-key management (generic core + tenant preset)
+export { createScopedKeyService } from './scoped-key-service.ts';
+export type {
+  ScopedKeyService,
+  ScopedKeyServiceDeps,
+  KeyScope,
+  ScopedKeys,
+  ScopedKeyCache,
+  ScopedKeyDb,
+  ScopedKeyError,
+  ScopedKeyNotFoundError,
+  ScopedKeyGenerationError,
+} from './scoped-key-service.ts';
 export { createTenantKeyService } from './tenant-key-service.ts';
 export type {
   TenantKeyService,
   TenantKeyServiceDeps,
-  TenantKeys,
-  TenantKeyCache,
-  TenantKeyDb,
-  TenantKeyError,
-  TenantKeyNotFoundError,
-  TenantKeyGenerationError,
 } from './tenant-key-service.ts';

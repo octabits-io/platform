@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createTenantKeyService, type TenantKeyCache, type TenantKeyDb, type TenantKeys } from './tenant-key-service.ts';
+import { createTenantKeyService } from './tenant-key-service.ts';
+import type { ScopedKeyCache, ScopedKeyDb, ScopedKeys } from './scoped-key-service.ts';
 import type { MasterKeyProvider } from './master-key.ts';
 
 const masterKeyProvider: MasterKeyProvider = {
@@ -7,8 +8,8 @@ const masterKeyProvider: MasterKeyProvider = {
   decrypt: async (data: Buffer) => ({ ok: true, value: data }),
 } as MasterKeyProvider;
 
-function makeCache(): TenantKeyCache {
-  const map = new Map<string, TenantKeys>();
+function makeCache(): ScopedKeyCache {
+  const map = new Map<string, ScopedKeys>();
   return {
     get: (k) => map.get(k),
     set: (k, v) => { map.set(k, v); },
@@ -20,61 +21,27 @@ function makeCache(): TenantKeyCache {
 
 const table = { tenantId: {} };
 
-describe('createTenantKeyService — concurrent generation race', () => {
-  it('retries the fetch when insert loses a unique race (SQLSTATE 23505 via cause chain)', async () => {
-    const storedRow = {
-      recipient: 'age1recipient',
-      identityEncrypted: Buffer.from('AGE-SECRET-KEY-1X'),
-      blindIndexKeyEncrypted: Buffer.from('deadbeef'),
-      keyVersion: 1,
-    };
-
-    // First lookup: no row (triggers lazy generation). Insert then fails with
-    // a wrapped unique violation (the concurrent request won). Second lookup
-    // sees the winner's row.
-    const findFirst = vi.fn()
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(storedRow);
-    const uniqueViolation = new Error('duplicate key value violates constraint', {
-      cause: Object.assign(new Error('driver error'), { code: '23505' }),
-    });
-    const db: TenantKeyDb = {
-      insert: () => ({ values: async () => { throw uniqueViolation; } }),
+describe('createTenantKeyService — tenant preset', () => {
+  it('accepts the tenantId deps signature and stamps the tenantId column on insert', async () => {
+    const inserted: Record<string, unknown>[] = [];
+    const db: ScopedKeyDb = {
+      insert: () => ({ values: async (v) => { inserted.push(v); } }),
       delete: () => ({ where: async () => {} }),
-      query: { tenantEncryptionKey: { findFirst } },
+      query: { tenantEncryptionKey: { findFirst: vi.fn().mockResolvedValue(undefined) } },
     };
+    const cache = makeCache();
 
     const service = createTenantKeyService({
-      db, tenantId: 't1', masterKeyProvider, table, tableName: 'tenantEncryptionKey', cache: makeCache(),
+      db, tenantId: 't1', masterKeyProvider, table, tableName: 'tenantEncryptionKey', cache,
     });
 
-    const result = await service.getKeys();
+    const result = await service.generateKeyPair();
     expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value.recipient).toBe('age1recipient');
-      expect(result.value.identity).toBe('AGE-SECRET-KEY-1X');
-    }
-    expect(findFirst).toHaveBeenCalledTimes(2);
-  });
+    expect(inserted[0]).toMatchObject({ tenantId: 't1' });
+    expect(cache.has('t1')).toBe(true);
 
-  it('surfaces non-conflict generation failures without retrying', async () => {
-    const findFirst = vi.fn().mockResolvedValue(undefined);
-    const db: TenantKeyDb = {
-      insert: () => ({ values: async () => { throw new Error('connection refused'); } }),
-      delete: () => ({ where: async () => {} }),
-      query: { tenantEncryptionKey: { findFirst } },
-    };
-
-    const service = createTenantKeyService({
-      db, tenantId: 't1', masterKeyProvider, table, tableName: 'tenantEncryptionKey', cache: makeCache(),
-    });
-
-    const result = await service.getKeys();
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.key).toBe('tenant_key_generation_error');
-      expect('conflict' in result.error && result.error.conflict).toBe(false);
-    }
-    expect(findFirst).toHaveBeenCalledTimes(1);
+    const keys = await service.getKeys();
+    expect(keys.ok).toBe(true);
+    expect(await service.hasKeys()).toBe(true);
   });
 });

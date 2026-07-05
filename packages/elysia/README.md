@@ -20,6 +20,18 @@ of the octabits stack, not a standalone kit.
   `mapResultError`, the `ApiError` class family (`NotFoundError`,
   `ForbiddenError`, …), `isDbConnectionError`, and the `createErrorHandler`
   global plugin.
+- **`createRateLimit(options)`** — app-level rate limiting with skip-by-internal-secret
+  and skip-by-CIDR seams.
+- **`createElysiaApp(routes, options)`** — the standard app skeleton
+  (`securityHeaders → clientIp → rateLimit → [cors/swagger] → errorHandler → routes`),
+  preserving the routes' type for Eden Treaty; plus **`registerGracefulShutdown`**.
+- **`createHealthRoutes({ checkReady })`** — `/health` + `/live` + `/ready` with the
+  readiness-failure → 503 mapping.
+- **`@octabits-io/elysia/mcp`** — `createMcpRoutes({ resolveScope, registerTools, … })`:
+  stateless `elysia-mcp` harness with per-request scope staging/dispose; scope-key
+  extraction pluggable via `parseScopeKey` (default: the `/tenant/:tenantId/` convention).
+  `elysia-mcp` + `@modelcontextprotocol/sdk` are optional peers.
+- **Env-config helpers** — `getEnv*`, `isProduction`, `parseCsv`, `parseCorsOrigins`.
 - **Response schemas** — `SCHEMA_ERROR_RESPONSE`, `SCHEMA_VALIDATION_ERROR`,
   `SCHEMA_SUCCESS_RESPONSE`, the `CommonErrorResponses` superset, and the
   `errorResponses(...codes)` selector.

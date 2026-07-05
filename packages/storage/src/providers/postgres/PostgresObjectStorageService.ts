@@ -13,8 +13,8 @@ import { eq, and, like, sql } from 'drizzle-orm';
  * references its own in-package `objectStorageTable` — it never touches a
  * host-application schema or the relational (`db.query.*`) API. Using
  * `PgDatabase<any, any, any>` keeps full query-builder type inference while
- * dropping any coupling to a specific app's augmented Drizzle instance (e.g.
- * reynt's `ReyntDrizzle` / `AppDatabase`), both of which are assignable here.
+ * dropping any coupling to a specific app's augmented Drizzle instance —
+ * schema-typed and wrapped host instances are assignable here.
  */
 export type StorageDrizzle = PgDatabase<any, any, any>;
 

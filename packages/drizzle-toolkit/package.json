@@ -1,7 +1,7 @@
 {
   "name": "@octabits-io/drizzle-toolkit",
   "version": "0.4.0",
-  "description": "Drizzle ORM toolkit: database error handling, pagination, factory, migrations, multi-tenant schema primitives, and testcontainers test utilities",
+  "description": "Drizzle ORM toolkit: database error handling, pagination, factory, migrations, scoped CRUD, RLS scoping, idempotency, and multi-tenant schema primitives",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -30,11 +30,6 @@
       "types": "./dist/idempotency/index.d.ts",
       "default": "./dist/idempotency/index.js"
     },
-    "./testing": {
-      "import": "./dist/testing/index.js",
-      "types": "./dist/testing/index.d.ts",
-      "default": "./dist/testing/index.js"
-    },
     "./crud": {
       "import": "./dist/crud/index.js",
       "types": "./dist/crud/index.d.ts",
@@ -50,8 +45,6 @@
     "build": "tsup",
     "clean": "rm -rf dist",
     "test": "vitest run",
-    "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "tsup"
   },
@@ -78,26 +71,10 @@
     "pg": "^8.22.0"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "^12.0.4",
     "@types/pg": "^8.20.0",
-    "testcontainers": "^12.0.4",
     "vitest": "^4.1.9"
   },
   "peerDependencies": {
-    "@testcontainers/postgresql": "^11 || ^12",
-    "testcontainers": "^11 || ^12",
-    "typescript": "^5 || ^6",
-    "vitest": "^3 || ^4"
-  },
-  "peerDependenciesMeta": {
-    "@testcontainers/postgresql": {
-      "optional": true
-    },
-    "testcontainers": {
-      "optional": true
-    },
-    "vitest": {
-      "optional": true
-    }
+    "typescript": "^5 || ^6"
   }
 }

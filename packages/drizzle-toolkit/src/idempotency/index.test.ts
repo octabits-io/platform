@@ -21,7 +21,7 @@ import {
   type IdempotencyDatabase,
 } from "./index.ts";
 
-// A concrete table built from the shipped column-set, mirroring reynt's
+// A concrete table built from the shipped column-set, mirroring a typical
 // multi-tenant `idempotency_key` (composite PK + FK + expiry index).
 const tenant = pgTable("tenant", { id: text().primaryKey().notNull() });
 const idempotencyKey = pgTable(
@@ -81,7 +81,7 @@ const FUTURE = "2026-01-02T00:00:00Z"; // after dateProvider.now()
 const PAST = "2025-12-31T00:00:00Z"; // before dateProvider.now()
 
 describe("idempotencyKeyColumns", () => {
-  it("matches reynt's idempotency_key column set (ts key → sql name)", () => {
+  it("matches the reference idempotency_key column set (ts key → sql name)", () => {
     const cols = getTableColumns(idempotencyKey);
     const map = Object.fromEntries(
       Object.entries(cols).map(([k, c]) => [k, (c as { name: string }).name]),

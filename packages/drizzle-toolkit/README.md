@@ -1,8 +1,8 @@
 # @octabits-io/drizzle-toolkit
 
 Shared Drizzle ORM utilities for PostgreSQL: database error handling, pagination,
-a drizzle factory, a migration runner, generic multi-tenant schema primitives,
-and testcontainers-backed test utilities.
+a drizzle factory, a migration runner, generic CRUD service factories, RLS
+scoping, an idempotency-key store, and generic multi-tenant schema primitives.
 
 ## Modules
 
@@ -41,14 +41,21 @@ const dbLimit = normalizePaginationLimit(params.limit);
 
 ### `@octabits-io/drizzle-toolkit/factory`
 
-Drizzle instance factory with pool configuration and schema augmentation
-(`db.tables.*`).
+Drizzle instance factory over a pre-built `pg.Pool`, with schema augmentation
+(`db.tables.*` / `db.schema.*`) and a `.transaction()` whose callback receives
+an equally-augmented instance.
 
 ```ts
+import { Pool } from 'pg';
 import { createDrizzle } from '@octabits-io/drizzle-toolkit/factory';
 
-const db = createDrizzle({ url, schema, poolMax: 20 });
+const pool = new Pool({ connectionString, max: 20 });
+const db = createDrizzle(schema, { pool }); // optional: logger
 ```
+
+Also exported: `createDrizzleFromClient` (single `PoolClient` — for
+request-scoped connections carrying session vars, e.g. RLS) and
+`augmentDrizzle` (wrap an existing instance).
 
 ### `@octabits-io/drizzle-toolkit/migrate`
 
@@ -57,26 +64,28 @@ Migration runner for Drizzle SQL migrations.
 ```ts
 import { runMigrations } from '@octabits-io/drizzle-toolkit/migrate';
 
-await runMigrations({ databaseUrl, migrationsFolder });
+await runMigrations({ connectionString, migrationsFolder });
+// optional: ssl, logger, sessionVars (GUCs set before migrate — e.g. RLS system mode)
 ```
 
 ### `@octabits-io/drizzle-toolkit/tenant`
 
-Generic multi-tenant schema primitives — the three base tables a multi-tenant
-SaaS needs before its domain tables:
+Generic multi-tenant schema primitives — **column-sets** for the three base
+tables a multi-tenant SaaS needs before its domain tables:
 
-| Table                  | Purpose                                                            |
-| ---------------------- | ----------------------------------------------------------------- |
-| `tenant`               | The tenant root — generic columns only (`id`, `name`, `isDisabled`, `createdAt`). |
-| `tenantEncryptionKey`  | Per-tenant PII encryption material (Age recipient + encrypted identity + blind-index key). Pairs with [`@octabits-io/pii`](../pii) — skip it if you don't use that package. |
-| `tenantConfig`         | Per-tenant `(tenantId, key) → jsonb value` config store.          |
+| Column-set                   | Purpose                                                            |
+| ---------------------------- | ----------------------------------------------------------------- |
+| `baseTenantColumns`          | The tenant root — generic columns only (`id`, `name`, `isDisabled`, `createdAt`). |
+| `tenantEncryptionKeyColumns` | Per-tenant PII encryption material (Age recipient + encrypted identity + blind-index key). Pairs with [`@octabits-io/pii`](../pii) — skip it if you don't use that package. |
+| `tenantConfigColumns`        | Per-tenant `(tenantId, key) → jsonb value` config store.          |
 
 Only `drizzle-orm/pg-core` primitives are used — no framework or app imports.
 
-Two ways to consume — ready-built tables, or **column-sets** you spread into
-your own `pgTable(...)` (the documented Drizzle
+Spread a column-set into your own `pgTable(...)` (the documented Drizzle
 ["reuse common column definitions"](https://orm.drizzle.team/docs/sql-schema-declaration#advanced)
-pattern) to extend the base with domain columns:
+pattern) to extend the base with domain columns. The tables, constraints, and
+relations stay in *your* schema — the module ships no `pgTable` instances, so
+your migrations never depend on a library-defined table:
 
 ```ts
 import { pgTable, text, integer, foreignKey } from "drizzle-orm/pg-core";
@@ -100,79 +109,45 @@ export const tenantConfig = pgTable(
 );
 ```
 
-Exports: `bytea` (custom `bytea ↔ Buffer` column type), the three column-sets
-(`baseTenantColumns`, `tenantEncryptionKeyColumns`, `tenantConfigColumns`), the
-ready-built tables (`tenant`, `tenantEncryptionKey`, `tenantConfig`), and their
-Drizzle relations.
+Exports: `bytea` (custom `bytea ↔ Buffer` column type) and the three
+column-sets (`baseTenantColumns`, `tenantEncryptionKeyColumns`,
+`tenantConfigColumns`).
 
-### `@octabits-io/drizzle-toolkit/testing`
+### `@octabits-io/drizzle-toolkit/crud`
 
-Integration test utilities: spins up a real Postgres container via
-Testcontainers, runs migrations, and provides per-test isolation. Requires the
-optional peers `testcontainers`, `@testcontainers/postgresql`, and `vitest`
-(dev-only — install them in your app's devDependencies).
+Generic CRUD service factories over any Drizzle table with an `id` column —
+paginated `list` (+total), `getById`, `create`, `update`, `delete`, with
+consistent keyed errors and optional `created_by`/`updated_by` audit stamping:
 
-**`vitest.config.ts`:**
+- `createBaseCrudService` — no scoping.
+- `createScopedCrudService` — every query auto-ANDed with
+  `eq(table[scope.column], scope.value)`; `create()` injects the scope column.
+  Row isolation holds by construction (`scope: { column, value }`).
+- `createBaseTenantScopedCrudService` — the multi-tenant preset
+  (`scope: { column: 'tenantId', value: tenantId }`).
 
-```ts
-import { defineConfig } from 'vitest/config';
+### `@octabits-io/drizzle-toolkit/rls`
 
-export default defineConfig({
-  test: {
-    globalSetup: './test/global-setup.ts',
-  },
-});
-```
+Postgres row-level-security scoping, generic over the GUC key set:
+`createTenantDb(rawDb, gucs)` (per-call-transaction proxy — every top-level
+operation runs inside a short transaction that applies transaction-local
+`set_config(name, value, true)` first; PgBouncer-safe), `runWithGucs`,
+`withSystemMode`, the pinned-connection `acquireScopedClient` /
+`releaseScopedClient`, and `endPoolGracefully`. Policies and concrete GUC
+values stay in the consumer.
 
-**`global-setup.ts`:**
+### `@octabits-io/drizzle-toolkit/idempotency`
 
-```ts
-import { createGlobalSetup } from '@octabits-io/drizzle-toolkit/testing';
+Stripe-style `X-Idempotency-Key` store: `createIdempotencyService` —
+`begin()` → cached / fresh (`.commit(status, body)`) / conflict, TTL expiry,
+request-hash matching, race-safe unique-violation handling, opportunistic
+cleanup. Scoping is optional (`tenantId?`); ships a spreadable
+`idempotencyKeyColumns` column-set.
 
-const { setup, teardown } = createGlobalSetup({
-  migrationsFolder: './drizzle/migrations',
-  image: 'postgres:17-alpine', // optional, default
-});
-
-export { setup, teardown };
-```
-
-**Test file:**
-
-```ts
-import {
-  setupTestDatabase,
-  cleanupTestDatabase,
-  resetDatabase,
-  unusedService,
-} from '@octabits-io/drizzle-toolkit/testing';
-import * as schema from './schema';
-
-let db: Awaited<ReturnType<typeof setupTestDatabase<typeof schema>>>;
-
-beforeAll(async () => {
-  db = await setupTestDatabase({ schema });
-});
-
-afterAll(async () => {
-  await cleanupTestDatabase();
-});
-
-beforeEach(async () => {
-  await resetDatabase(db, [schema.users, schema.posts]); // truncate with CASCADE
-});
-```
-
-| Function | Description |
-|---|---|
-| `createGlobalSetup(opts)` | Creates Vitest `setup`/`teardown` hooks that start a Postgres container and run Drizzle migrations |
-| `setupTestDatabase(opts)` | Connects to the container and returns a typed `NodePgDatabase<TSchema>` |
-| `cleanupTestDatabase()` | Closes the connection pool |
-| `resetDatabase(db, tables)` | Truncates tables with `RESTART IDENTITY CASCADE` |
-| `unusedService<T>(name)` | Typed throwing-proxy stub for constructor deps a test never exercises |
-
-> **Note:** `./tenant` and `./testing` absorbed the former standalone
-> `@octabits-io/schema` and `@octabits-io/drizzle-test` packages.
+> **Note:** `./tenant` absorbed the former standalone `@octabits-io/schema`
+> package. The former `./testing` module (testcontainers helpers, ex
+> `@octabits-io/drizzle-test`) was removed — it had no consumers; copy it from
+> git history if you need it.
 > The former `./workflow` module (DAG workflow engine) has been superseded by
 > [`@octabits-io/flow`](../flow) — a standalone durable workflow engine with a
 > Postgres store and pg-boss dispatcher. Use that package instead.

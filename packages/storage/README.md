@@ -23,9 +23,8 @@ pnpm add drizzle-orm          # for @octabits-io/storage/postgres
 
 `@octabits-io/foundation` (`Result`, `OctError`, `Logger`) is a runtime peer.
 The vendor SDKs are **optional peer dependencies**: the root entry (`.`) is
-dependency-light (contract + picsum dev/mock provider), and each vendor-backed
-provider lives behind its own subpath so you only install and load the SDKs you
-use.
+dependency-free (contract + types only), and each provider lives behind its own
+subpath so you only install and load the SDKs you use.
 
 ## The contract
 
@@ -54,11 +53,10 @@ it to use the single root namespace (single-tenant).
 | --- | --- | --- | --- |
 | `createAWSObjectStorageService(config)` | `@octabits-io/storage/s3` | `@aws-sdk/client-s3` | `type: 's3'`. **S3-compatible**, not AWS-bound — explicit `endpoint` + `forcePathStyle` (production: Hetzner Object Storage, EU). Keys are namespace-prefixed (`<namespace>/<key>` by default, unprefixed when the namespace is omitted); customize the prefix with `namespacePrefix`. Transient failures are retried with backoff. |
 | `createPostgresObjectStorageService(config)` | `@octabits-io/storage/postgres` | `drizzle-orm` | `type: 'postgres'`. Stores blobs in a self-creating `object_storage` table. Accepts any standard drizzle-orm Postgres db (`StorageDrizzle = PgDatabase<any, any, any>`). |
-| `createPicsumObjectStorageService(config)` | `@octabits-io/storage` | — | `type: 'picsum'`. In-memory dev/mock store returning deterministic picsum.photos URLs. |
 
 Each also ships a lighter URL-only provider factory
-(`createAWSObjectStorageUrlProvider` / `createPostgresObjectStorageUrlProvider` /
-`createPicsumObjectStorageUrlProvider`) exposing just `getPublicUrl`.
+(`createAWSObjectStorageUrlProvider` / `createPostgresObjectStorageUrlProvider`)
+exposing just `getPublicUrl`.
 
 ### Serving Postgres-stored blobs over HTTP
 
@@ -152,37 +150,11 @@ return createWebResponse(storage, { namespace: 't1', key }, request.headers);
 // single-tenant: return createWebResponse(storage, { key }, request.headers);
 ```
 
-### Picsum (dev/mock, `@octabits-io/storage`)
-
-```ts
-import { createPicsumObjectStorageService } from '@octabits-io/storage';
-
-// In-memory, no external SDK — deterministic picsum.photos URLs, ideal for dev/tests.
-const storage = createPicsumObjectStorageService({
-  baseUrl: 'https://picsum.photos',
-  defaultDimensions: { width: 800, height: 600 },
-});
-
-await storage.uploadObject({
-  namespace: 't1',
-  key: 'hero.jpg',
-  body: new Uint8Array([1, 2, 3]),
-  metadata: { width: '1920', height: '1080' },
-});
-
-const url = storage.getPublicUrl({ namespace: 't1', key: 'hero.jpg' });
-// → https://picsum.photos/seed/<key-hash>/1920/1080  (metadata dimensions win)
-```
-
-For a URL-only surface (no read/write), each provider also ships a lighter
-factory — e.g. `createPicsumObjectStorageUrlProvider({ baseUrl })` exposing just
-`getPublicUrl`.
-
 ## Testing
 
-Use the picsum provider for a network-free in-memory store, or the
-`ObjectFileServer` contract to stand in for the Postgres provider when testing
-serve handlers.
+The `ObjectStorageService` contract is small enough to fake with a `Map`-backed
+in-memory implementation in your test utilities, and the `ObjectFileServer`
+contract can stand in for the Postgres provider when testing serve handlers.
 
 ## License
 

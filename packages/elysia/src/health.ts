@@ -4,10 +4,10 @@
  * failures to a `503`.
  *
  * The readiness probe is generalized as an injected `checkReady: () => Promise<void>`
- * callback (reynt passes a `SELECT 1`-via-Drizzle closure) — no db/container
- * coupling in the package. Response bodies are byte-equivalent to the four reynt
- * `health.ts` routes: `{ status: 'ok' }` for liveness, `{ status: 'ok', db:
- * 'connected' }` for readiness, `{ status: 'error', message }` for the 503.
+ * callback (e.g. a `SELECT 1`-via-Drizzle closure) — no db/container
+ * coupling in the package. Response bodies: `{ status: 'ok' }` for liveness,
+ * `{ status: 'ok', db: 'connected' }` for readiness, `{ status: 'error',
+ * message }` for the 503.
  */
 import { Elysia } from 'elysia';
 import { z } from 'zod';
@@ -27,7 +27,7 @@ export const SCHEMA_HEALTH_READY_RESPONSE = z.object({
 export interface CreateHealthRoutesOptions {
   /**
    * Readiness probe. Resolve if the API can serve requests; reject/throw to
-   * signal not-ready (→ `503`). Reynt passes a `SELECT 1`-via-Drizzle closure.
+   * signal not-ready (→ `503`). E.g. a `SELECT 1`-via-Drizzle closure.
    */
   checkReady: () => Promise<void>;
   /** Logger for readiness failures. Optional — pass an already-childed logger. */

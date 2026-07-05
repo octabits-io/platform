@@ -7,7 +7,6 @@ export default defineConfig({
     "migrate/index": "src/migrate/index.ts",
     "tenant/index": "src/tenant/index.ts",
     "idempotency/index": "src/idempotency/index.ts",
-    "testing/index": "src/testing/index.ts",
     "crud/index": "src/crud/index.ts",
     "rls/index": "src/rls/index.ts",
   },

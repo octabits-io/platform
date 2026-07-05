@@ -16,7 +16,7 @@ import {
 // ---------------------------------------------------------------------------
 
 const SCHEMA_TEST_JOB = SCHEMA_TENANT_JOB_PAYLOAD.extend({
-  to: z.string().email(),
+  to: z.email(),
 });
 type TestJob = z.infer<typeof SCHEMA_TEST_JOB>;
 

@@ -64,6 +64,42 @@ openssl rand -base64 32
 
 `createEnvVarMasterKeyProvider` throws at startup if the source is shorter than 32 characters. Note this is a length check only — it cannot detect a long-but-guessable passphrase, so always use a generated value.
 
+## Scoped Key Service
+
+Per-scope key management: lazily generates an Age keypair + blind-index HMAC
+key per scope, stores them master-key-encrypted in a Drizzle table (column
+shapes per [`@octabits-io/drizzle-toolkit/tenant`](../drizzle-toolkit)'s
+`tenantEncryptionKeyColumns`), and serves decrypted keys through a cache.
+Generic over the scope column; `createTenantKeyService` is the multi-tenant
+preset (`scope: { column: 'tenantId', value: tenantId }`).
+
+```ts
+import { createScopedKeyService, createTenantKeyService } from '@octabits-io/pii';
+import { createLruCacheService } from '@octabits-io/foundation/utils';
+
+const keyService = createScopedKeyService({
+  db,                                        // structural: insert/delete + db.query
+  scope: { column: 'orgId', value: orgId },  // or use the tenant preset below
+  masterKeyProvider,
+  table: schema.orgEncryptionKey,            // your encryption-key table
+  tableName: 'orgEncryptionKey',             // its key in db.query
+  cache,                                     // e.g. LRU with ~5-minute TTL
+});
+
+// Multi-tenant preset — same service, scope bound to the tenantId column:
+const tenantKeys = createTenantKeyService({ db, tenantId, masterKeyProvider, table, tableName, cache });
+
+const keys = await keyService.getKeys();     // lazy-generates on first use
+// keys.value: { recipient, identity, blindIndexKey, keyVersion }
+
+await keyService.generateKeyPair();          // explicit generation (e.g. at scope creation, in a tx)
+await keyService.hasKeys();
+await keyService.destroyKeys();              // crypto-shredding: delete key row + drop cache
+keyService.invalidateCache();
+```
+
+Errors are `Result`-typed: `scoped_keys_not_found`, `scoped_key_generation_error`, or a `MasterKeyError`.
+
 ## Low-Level Primitives
 
 ```ts

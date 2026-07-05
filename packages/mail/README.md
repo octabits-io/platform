@@ -17,8 +17,8 @@ pnpm add node-mailjet    # for @octabits-io/mail/mailjet
 pnpm add wretch          # for @octabits-io/mail/brevo
 ```
 
-`@octabits-io/foundation` (`Result`, `Logger`) is a runtime dependency. The
-vendor SDKs are **optional peer dependencies**: the root entry (`.`) is
+`@octabits-io/foundation` (`Result`, `Logger`) is a required peer dependency.
+The vendor SDKs are **optional peer dependencies**: the root entry (`.`) is
 dependency-free (contract + logger/memory transports), and each vendor
 transport lives behind its own subpath so you only install and load the SDKs
 you use.

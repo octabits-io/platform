@@ -1,5 +1,11 @@
 # @octabits-io/elysia
 
+## 0.4.1
+
+### Patch Changes
+
+- Doc-comment cleanup: replace references to a specific consumer app with generic phrasing in the health, mcp, and Postgres storage provider docs. No behavior change.
+
 ## 0.4.0
 
 ### Minor Changes

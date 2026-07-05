@@ -5,14 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   baseTenantColumns,
   bytea,
-  tenant,
-  tenantConfig,
   tenantConfigColumns,
-  tenantConfigRelations,
-  tenantEncryptionKey,
   tenantEncryptionKeyColumns,
-  tenantEncryptionKeyRelations,
-  tenantRelations,
 } from "./index";
 
 /** Map a Drizzle table's columns to `{ tsKey: sqlName }` for assertions. */
@@ -24,6 +18,8 @@ function columnNameMap(table: Parameters<typeof getTableColumns>[0]) {
 }
 
 describe("baseTenantColumns", () => {
+  const tenant = pgTable("tenant", { ...baseTenantColumns });
+
   it("exposes only the generic tenant columns", () => {
     expect(Object.keys(baseTenantColumns).sort()).toEqual(
       ["createdAt", "id", "isDisabled", "name"].sort(),
@@ -35,9 +31,7 @@ describe("baseTenantColumns", () => {
       expect(baseTenantColumns).not.toHaveProperty(leaked);
     }
   });
-});
 
-describe("tenant table", () => {
   it("maps to the expected SQL columns", () => {
     expect(columnNameMap(tenant)).toEqual({
       id: "id",
@@ -54,7 +48,11 @@ describe("tenant table", () => {
   });
 });
 
-describe("tenantEncryptionKey table", () => {
+describe("tenantEncryptionKeyColumns", () => {
+  const tenantEncryptionKey = pgTable("tenant_encryption_key", {
+    ...tenantEncryptionKeyColumns,
+  });
+
   it("maps to the expected SQL columns", () => {
     expect(columnNameMap(tenantEncryptionKey)).toEqual({
       id: "id",
@@ -77,15 +75,11 @@ describe("tenantEncryptionKey table", () => {
   it("keeps tenantId unique", () => {
     expect(getTableColumns(tenantEncryptionKey).tenantId.isUnique).toBe(true);
   });
-
-  it("exports column-set matching the table keys", () => {
-    expect(Object.keys(tenantEncryptionKeyColumns).sort()).toEqual(
-      Object.keys(getTableColumns(tenantEncryptionKey)).sort(),
-    );
-  });
 });
 
-describe("tenantConfig table", () => {
+describe("tenantConfigColumns", () => {
+  const tenantConfig = pgTable("tenant_config", { ...tenantConfigColumns });
+
   it("maps to the expected SQL columns", () => {
     expect(columnNameMap(tenantConfig)).toEqual({
       tenantId: "tenant_id",
@@ -102,26 +96,12 @@ describe("tenantConfig table", () => {
   it("stores value as jsonb", () => {
     expect(getTableColumns(tenantConfig).value.getSQLType()).toBe("jsonb");
   });
-
-  it("exports column-set matching the table keys", () => {
-    expect(Object.keys(tenantConfigColumns).sort()).toEqual(
-      Object.keys(getTableColumns(tenantConfig)).sort(),
-    );
-  });
 });
 
 describe("bytea custom type", () => {
   it("resolves to the bytea SQL type", () => {
     const probe = pgTable("probe", { blob: bytea("blob") });
     expect(getTableColumns(probe).blob.getSQLType()).toBe("bytea");
-  });
-});
-
-describe("relations", () => {
-  it("exports relation configs for all three tables", () => {
-    expect(tenantRelations).toBeDefined();
-    expect(tenantEncryptionKeyRelations).toBeDefined();
-    expect(tenantConfigRelations).toBeDefined();
   });
 });
 
@@ -148,7 +128,7 @@ describe("extension mechanism (spread column-set)", () => {
     expect(names.aiMaxWorkflowsPerDay).toBe("ai_max_workflows_per_day");
     expect(names.disabledReason).toBe("disabled_reason");
 
-    // The base table is unaffected by a consumer's extension.
-    expect(getTableColumns(tenant)).not.toHaveProperty("orgId");
+    // The column-set is unaffected by a consumer's extension.
+    expect(baseTenantColumns).not.toHaveProperty("orgId");
   });
 });

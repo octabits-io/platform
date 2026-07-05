@@ -1,6 +1,6 @@
 /**
- * MCP per-request container harness (#14): the lifecycle wrapper both reynt MCP
- * routes (operator + customer) duplicate around `elysia-mcp` in stateless mode.
+ * MCP per-request container harness (#14): the lifecycle wrapper every MCP
+ * route would otherwise duplicate around `elysia-mcp` in stateless mode.
  *
  * `elysia-mcp` is stateless — a fresh `McpServer` per request, with
  * `authentication()` and `setupServer()` running sequentially (no interleaving),
@@ -30,9 +30,6 @@ import type { Logger } from '@octabits-io/foundation/logger';
 
 /** Scope-key path segment convention: alphanumeric, hyphens, underscores. */
 export const SCOPE_KEY_PATTERN = /^[a-zA-Z0-9-_]+$/;
-
-/** @deprecated Use {@link SCOPE_KEY_PATTERN}. */
-export const TENANT_ID_PATTERN = SCOPE_KEY_PATTERN;
 
 /**
  * Extracts the scope key from a request URL. Return `null` to reject the
@@ -79,15 +76,12 @@ export type ResolveScopeResult<S extends DisposableScope> =
 
 export interface CreateMcpRoutesOptions<S extends DisposableScope> {
   /**
-   * Auth + scope seam. Receives the parsed `scopeKey` (also as the deprecated
-   * `tenantId` alias) and the MCP request context; returns a staged `{ scope }`
-   * (the harness disposes it after the response / on error) or an early
-   * `{ response }` (e.g. `jsonRpcError(...)`).
+   * Auth + scope seam. Receives the parsed `scopeKey` and the MCP request
+   * context; returns a staged `{ scope }` (the harness disposes it after the
+   * response / on error) or an early `{ response }` (e.g. `jsonRpcError(...)`).
    */
   resolveScope: (args: {
     scopeKey: string;
-    /** @deprecated Alias of `scopeKey`, kept for tenant-convention consumers. */
-    tenantId: string;
     context: McpContext;
   }) => Promise<ResolveScopeResult<S>>;
   /**
@@ -111,8 +105,6 @@ export interface CreateMcpRoutesOptions<S extends DisposableScope> {
   capabilities?: ServerCapabilities;
   /** Response returned when `parseScopeKey` yields no scope key. Default `jsonRpcError(400, -32600, 'Invalid scope key')`. */
   invalidScopeResponse?: () => Response;
-  /** @deprecated Use `invalidScopeResponse`. */
-  invalidTenantResponse?: () => Response;
   /** Reserved for future diagnostics; currently unused by the harness itself. */
   logger?: Logger;
 }
@@ -131,7 +123,7 @@ export const createMcpRoutes = <S extends DisposableScope>(options: CreateMcpRou
     prefix = '/mcp',
     basePath = '/',
     capabilities = { tools: {} },
-    invalidScopeResponse = options.invalidTenantResponse ?? (() => jsonRpcError(400, -32600, 'Invalid scope key')),
+    invalidScopeResponse = () => jsonRpcError(400, -32600, 'Invalid scope key'),
   } = options;
 
   // Keyed by the per-request McpServer instance — carries the scope from
@@ -162,7 +154,7 @@ export const createMcpRoutes = <S extends DisposableScope>(options: CreateMcpRou
           return { response: invalidScopeResponse() };
         }
 
-        const result = await resolveScope({ scopeKey, tenantId: scopeKey, context });
+        const result = await resolveScope({ scopeKey, context });
         if (result.response) {
           return { response: result.response };
         }
