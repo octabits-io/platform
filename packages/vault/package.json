@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/vault",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Boot-time HashiCorp Vault secret loader — hydrates process.env from KV-v2 paths declared in a JSON manifest, before config loads. Plain fetch, no SDK.",
   "license": "MIT",
   "type": "module",

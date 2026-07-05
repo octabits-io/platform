@@ -1,5 +1,72 @@
 # @octabits-io/elysia
 
+## 0.4.0
+
+### Minor Changes
+
+- [`75c2fac`](https://github.com/octabits-io/platform/commit/75c2fac0e6e8080d45ed03e22aa4639856cc5ce9) - Add `createHealthRoutes` (root export): the `/health` liveness alias + `/live` +
+  `/ready` route trio every API duplicates, plus the `onError` that maps `/ready`
+  failures to a `503` with `{ status: 'error', message }`. The readiness probe is
+  the injected `checkReady: () => Promise<void>` seam (reynt passes a
+  `SELECT 1`-via-Drizzle closure) — no db/container coupling. Response bodies are
+  byte-equivalent to the reynt routes: `{ status: 'ok' }` (liveness) and
+  `{ status: 'ok', db: 'connected' }` (readiness). `prefix`, `tags`,
+  `readyErrorMessage`, and an optional foundation `Logger` are configurable. Also
+  exports the `SCHEMA_HEALTH_LIVE_RESPONSE` / `SCHEMA_HEALTH_READY_RESPONSE` zod
+  schemas.
+
+- [`75c2fac`](https://github.com/octabits-io/platform/commit/75c2fac0e6e8080d45ed03e22aa4639856cc5ce9) - Add `./mcp` subpath (`@octabits-io/elysia/mcp`): `createMcpRoutes`, the
+  per-request container harness both reynt MCP routes duplicate around
+  `elysia-mcp` in stateless mode. It owns the `pendingContainer` staging, the
+  `WeakMap<McpServer, scope>` handoff, per-request scope acquire, tenant-id
+  path parsing (`/^[a-zA-Z0-9-_]+$/`), and scope disposal on
+  `onAfterResponse`/`onError`. The auth differences (operator superadmin-grant
+  synthesis vs. the simpler customer flow) become the injected `resolveScope`
+  seam, and tool registration the `registerTools(server, getContainer)` seam.
+  Also exports `parseTenantId`, `jsonRpcError`, and `TENANT_ID_PATTERN`.
+  `elysia-mcp` and `@modelcontextprotocol/sdk` are OPTIONAL peers, so the root
+  export stays free of them.
+
+- [`d517615`](https://github.com/octabits-io/platform/commit/d5176151616574ce7e653c3e9b4942b8c8d92f7c) - Make the platform packages tenancy-agnostic: multi-tenancy becomes one way to
+  use each API instead of a structural requirement.
+
+  **storage (BREAKING)**: the required per-call `tenant: string` is now an
+  optional `namespace?: string` on every `ObjectStorageService` /
+  `ObjectStorageUrlProvider` / `ObjectFileServer` method — omit it for
+  single-partition deployments. S3 keys default to `<namespace>/<key>` (no more
+  hardcoded `tenant/` segment); pass `` namespacePrefix: ns => `tenant/${ns}/`  ``
+  on the S3 configs to keep existing bucket layouts. The Postgres provider renames
+  its column `tenant_id` → `namespace` (the table initializer migrates existing
+  tables in place, data preserved; root namespace stored as `''`), and
+  `createPublicUrl` now receives `(namespace: string | undefined, key)`. The
+  Postgres HTTP handlers take an optional `namespace` accordingly. Picsum's
+  `defaultQuery` placeholder default is now domain-neutral.
+
+  **drizzle-toolkit**: `crud` gains `createBaseCrudService` (no scoping, any
+  table with `id`) and `createScopedCrudService` (generic
+  `scope: { column, value }` row isolation). `createBaseTenantScopedCrudService`
+  is unchanged — now a thin preset of the scoped variant
+  (`scope: { column: 'tenantId', ... }`).
+
+  **elysia**: `createMcpRoutes` scope extraction is pluggable via
+  `parseScopeKey?: (url) => string | null` (default remains the
+  `/tenant/:tenantId/` convention; single-scope servers can pass
+  `() => 'default'`). `resolveScope` receives `scopeKey` (with `tenantId` kept
+  as a deprecated alias), and `invalidScopeResponse` supersedes the deprecated
+  `invalidTenantResponse`. Default rejection message is now "Invalid scope key".
+
+  **queue**: new `SCHEMA_SYSTEM_JOB_PAYLOAD` / `SystemJobPayload` base for
+  global/cron jobs — no more `'__system__'` sentinel tenant ids;
+  `SCHEMA_TENANT_JOB_PAYLOAD` now extends it.
+
+  **foundation**: `SystemScopeFactory` is partition-agnostic — its parameter is
+  an optional `scopeKey?: string` (previously required `tenantId: string`).
+
+  **pii**: `createTenantKeyService` now detects the concurrent key-generation
+  race via SQLSTATE 23505 (walking the error `cause` chain) instead of matching
+  `'unique'` in error messages; `TenantKeyGenerationError` gains a `conflict`
+  flag.
+
 ## 0.3.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/storage",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Tenant-namespaced blob storage contract with S3-compatible, Postgres, and picsum providers",
   "license": "MIT",
   "type": "module",
