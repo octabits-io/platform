@@ -1,5 +1,20 @@
 # @octabits-io/elysia
 
+## 0.5.0
+
+### Minor Changes
+
+- [`691c2fc`](https://github.com/octabits-io/platform/commit/691c2fcfefacee90b0ef2beb519fec3a5b83d108) - Remove the deprecated tenant-named mcp aliases (breaking):
+
+  - `resolveScope` no longer receives the `tenantId` alias — destructure
+    `scopeKey` instead (`resolveScope: async ({ scopeKey, context }) => ...`).
+  - `TENANT_ID_PATTERN` is gone — use `SCOPE_KEY_PATTERN`.
+  - The `invalidTenantResponse` option is gone — use `invalidScopeResponse`.
+
+  `parseTenantId` (the `/tenant/:tenantId/` path convention as the default
+  `parseScopeKey`) is unchanged — it is the documented tenant preset, not a
+  deprecated alias.
+
 ## 0.4.1
 
 ### Patch Changes

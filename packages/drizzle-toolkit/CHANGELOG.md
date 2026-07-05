@@ -1,5 +1,24 @@
 # @octabits-io/drizzle-toolkit
 
+## 0.6.0
+
+### Minor Changes
+
+- [`691c2fc`](https://github.com/octabits-io/platform/commit/691c2fcfefacee90b0ef2beb519fec3a5b83d108) - Slim the toolkit down to its generic core (breaking):
+
+  - **`./tenant`**: removed the ready-built `tenant` / `tenantEncryptionKey` /
+    `tenantConfig` tables and their relations. Only the spreadable column-sets
+    (`baseTenantColumns`, `tenantEncryptionKeyColumns`, `tenantConfigColumns`)
+    and the `bytea` custom type remain — declare the tables (plus FKs, indexes,
+    relations) in your own schema so your migrations never depend on a
+    library-defined table.
+  - **`./testing`**: removed the testcontainers-based test utilities
+    (`createGlobalSetup`, `setupTestDatabase`, `cleanupTestDatabase`,
+    `resetDatabase`, `unusedService`). The module had no consumers; copy it from
+    git history if you need it. The `testcontainers` /
+    `@testcontainers/postgresql` / `vitest` optional peer dependencies are gone
+    with it.
+
 ## 0.4.0
 
 ### Minor Changes

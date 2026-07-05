@@ -1,5 +1,17 @@
 # @octabits-io/pii
 
+## 0.6.0
+
+### Minor Changes
+
+- [`691c2fc`](https://github.com/octabits-io/platform/commit/691c2fcfefacee90b0ef2beb519fec3a5b83d108) - Remove the deprecated `TenantKey*` type aliases (breaking): `TenantKeys`,
+  `TenantKeyCache`, `TenantKeyDb`, `TenantKeyError`, `TenantKeyNotFoundError`,
+  and `TenantKeyGenerationError` are gone — use the `ScopedKey*` equivalents
+  (`ScopedKeys`, `ScopedKeyCache`, `ScopedKeyDb`, `ScopedKeyError`,
+  `ScopedKeyNotFoundError`, `ScopedKeyGenerationError`). The tenant preset
+  itself (`createTenantKeyService`, `TenantKeyService`, `TenantKeyServiceDeps`)
+  is unchanged.
+
 ## 0.5.0
 
 ### Minor Changes
