@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/drizzle-toolkit",
-  "version": "0.6.0",
+  "version": "0.8.0",
   "description": "Drizzle ORM toolkit: database error handling, pagination, factory, migrations, scoped CRUD, scoped config store, RLS scoping, idempotency, and generic scope schema primitives",
   "license": "MIT",
   "type": "module",
@@ -76,7 +76,7 @@
     "url": "https://github.com/octabits-io/platform/issues"
   },
   "dependencies": {
-    "@octabits-io/foundation": "^0.4.0",
+    "@octabits-io/foundation": "^0.8.0",
     "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {

@@ -1,5 +1,42 @@
 # @octabits-io/drizzle-toolkit
 
+## 0.8.0
+
+### Minor Changes
+
+- [`ed7813e`](https://github.com/octabits-io/platform/commit/ed7813e8274c1246ab694703d59ced0839b2e5d3) - BREAKING: tenant vocabulary removed from the public API. The toolkit stays fully multi-tenant capable through generic scope seams — the scope column/key names are now always the consumer's to declare.
+
+  - `./tenant` subpath → **`./scope`**: `baseTenantColumns` → `baseScopeColumns`; `tenantEncryptionKeyColumns` → `encryptionKeyColumns` and `tenantConfigColumns` → `scopedConfigColumns`, both **without the baked-in `tenant_id` column** — spread the set and add your own scope column (name, FK, uniqueness) in your schema.
+  - `./crud`: `createBaseTenantScopedCrudService`, `BaseTenantScopedCrudConfig`, and `BaseTenantScopedCrudService` removed — use `createScopedCrudService({ scope: { column, value } })` with your column name.
+  - `./rls`: `createTenantDb` → `createScopedDb`; `TenantSessionVars` → `SessionVars`.
+  - `./idempotency`: the `tenantId?: string` option becomes `scope?: { column, value }`; `idempotencyKeyColumns` no longer ships a `tenant_id` column.
+
+- [`01051db`](https://github.com/octabits-io/platform/commit/01051dbe171b2831b015d5d1cb95ddaeadf2aaf8) - New `./scoped-key-store` module: `createDrizzleScopedKeyStore({ db, table, scope })` — the Drizzle adapter behind `@octabits-io/pii`'s structural `ScopedKeyStore` seam, so pii carries no `drizzle-orm` peer.
+
+  - Binds to one `{ column, value }` scope over an encryption-key table (spread `encryptionKeyColumns` from `./scope` + a unique scope column). `insert` stamps the scope column and maps a lost unique race (SQLSTATE 23505, walked through the driver/ORM `cause` chain) to `scoped_key_store_conflict`; `find` returns the four key fields for the scope (or `null`); `exists` / `destroy` are scoped by construction. `store.withDb(tx)` re-binds table + scope to a transaction.
+  - Row/error types (`NewScopedKeyRow`, `ScopedKeyRow`, `ScopedKeyStoreError`, …) are structural duplicates of pii's — no cross-package import, mirroring the `./config` `ConfigCipher` decoupling.
+
+- [`513571d`](https://github.com/octabits-io/platform/commit/513571d069bac7ebd52234fcaf154aa8b1e8e315) - Review-fix release: RLS coverage/safety, error classification, scoped-update isolation, idempotency race honesty, and packaging.
+
+  - **rls**: `createScopedDb` now wraps `with()`, `$count()`, and `refreshMaterializedView()` in the GUC transaction (previously they silently ran on the raw db without GUCs — an RLS escape); `$with()` passes through to the raw db with correct binding so CTE aliases keep working. Sync builder APIs (`toSQL`/`getSQL`/`prepare`/`as`) on the deferred proxy now throw a clear error pointing at `runWithGucs` instead of silently recording.
+  - **rls**: `releaseScopedClient` no longer swallows COMMIT failures — the client is released with the error (destroying the broken connection) and the error is rethrown, so silently-lost writes surface. ROLLBACK failures are still swallowed but also destroy the client.
+  - **db**: `extractPgError` only recognizes SQLSTATE-shaped codes (`/^[0-9A-Z]{5}$/`), so Node system errors (`ECONNREFUSED`, `ETIMEDOUT`, …) are rethrown instead of being mapped to `database_error`. Added `40001` → `serialization_failure` and `40P01` → `deadlock_detected` to the code map.
+  - **crud**: scoped `update()` strips the scope column from the payload — a payload smuggling the scope column can no longer transfer a row to another scope.
+  - **idempotency**: `commit()` now returns an `IdempotencyCommitResult` (`committed` / `raced` with the winner's stored response / `race_conflict`) — on a unique-violation race it re-fetches the winner's row and hands back its response when the request hashes match. Module docs now state the check-then-act at-least-once window for concurrent duplicates. `commit()` recomputes the clock (TTL starts at commit, not begin). `hashRequest` is now object-key-order-insensitive (stable stringify) — **hashes change for bodies whose keys were not already serialized in sorted order**, so pre-existing stored records with such bodies will classify as conflicts until they expire.
+  - **config**: upserts keep `updatedAt`/`updatedBy` current on the conflict-update path (guarded — tables without the audit columns are unaffected); `readAll()` returns a copy instead of the internal cache object; cross-scope cache keys encode both parts so scope/key pairs can no longer collide across the `:` boundary; documented that `writeConfig` only invalidates in-process caches (multi-instance deployments need the recommended cache TTL).
+  - **factory**: the `int8 → Number` pg type parser is registered lazily and idempotently inside `createDrizzle`/`createDrizzleFromClient` instead of at module load (no more global mutation on import, no silent no-op under pg version skew).
+  - **migrate**: `runMigrations` logs through a structural `MigrationLogger` seam (`logger: MigrationLogger | true | false`) — nothing prints when the logger is disabled, including on failure; `true` keeps a plain console fallback (emoji output removed).
+  - **packaging**: `pg` moved from dependencies to an **optional peer dependency** (only `./factory` and `./migrate` need it at runtime); `types` now precedes `import` in every exports condition block; `tsup` added to devDependencies.
+
+- [`ed7813e`](https://github.com/octabits-io/platform/commit/ed7813e8274c1246ab694703d59ced0839b2e5d3) - New `./config` subpath: a scoped key-value config engine (validate → encrypt → cache → default).
+
+  `createScopedConfigService({ scope?: { column, value }, table, schema, encryptedKeys, cacheableKeys, cipher, ... })` upserts schema-validated config entries, ciphers flagged keys into a `{ __encrypted }` envelope via an injected raw-string cipher (no pii dependency), and reads through a two-tier (request-scoped + shared LRU) cache with Zod-default application. `scope` is optional: scoped deployments pass `{ column, value }` (conflict target `(scopeColumn, key)`), single-scope deployments omit it (conflict target `(key)`). Pairs with `./scope`'s `scopedConfigColumns`.
+
+### Patch Changes
+
+- Updated dependencies [[`513571d`](https://github.com/octabits-io/platform/commit/513571d069bac7ebd52234fcaf154aa8b1e8e315), [`ed7813e`](https://github.com/octabits-io/platform/commit/ed7813e8274c1246ab694703d59ced0839b2e5d3)]:
+  - @octabits-io/foundation@0.8.0
+
 ## 0.6.0
 
 ### Minor Changes

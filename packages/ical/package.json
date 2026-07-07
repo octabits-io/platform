@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/ical",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "iCal ingestion: http/webcal fetcher with change-detection hashing, and a VEVENT/RRULE parser exposing raw event ranges with an optional day-blocking collapse layer",
   "license": "MIT",
   "type": "module",

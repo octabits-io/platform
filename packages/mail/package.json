@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/mail",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Provider-agnostic mail transport contract with SMTP, Mailjet, Brevo, logger, and in-memory outbound transports",
   "license": "MIT",
   "type": "module",

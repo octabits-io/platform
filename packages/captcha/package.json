@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/captcha",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Provider-agnostic captcha contract (challenge → redeem → verified-token → validate) with an ALTCHA proof-of-work implementation and a no-op for dev/test",
   "license": "MIT",
   "type": "module",
