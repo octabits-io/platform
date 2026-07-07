@@ -22,11 +22,15 @@ import {
 } from "./index.ts";
 
 // A concrete table built from the shipped column-set, mirroring a typical
-// multi-tenant `idempotency_key` (composite PK + FK + expiry index).
+// scoped `idempotency_key` (consumer-added scope column + composite PK + FK +
+// expiry index).
 const tenant = pgTable("tenant", { id: text().primaryKey().notNull() });
 const idempotencyKey = pgTable(
   "idempotency_key",
-  { ...idempotencyKeyColumns },
+  {
+    ...idempotencyKeyColumns,
+    tenantId: text("tenant_id").notNull(), // consumer-declared scope column
+  },
   (table) => [
     primaryKey({ columns: [table.tenantId, table.key], name: "idempotency_key_pk" }),
     foreignKey({
@@ -81,7 +85,12 @@ const FUTURE = "2026-01-02T00:00:00Z"; // after dateProvider.now()
 const PAST = "2025-12-31T00:00:00Z"; // before dateProvider.now()
 
 describe("idempotencyKeyColumns", () => {
+  it("does NOT ship a scope-reference column (consumer declares it)", () => {
+    expect(idempotencyKeyColumns).not.toHaveProperty("tenantId");
+  });
+
   it("matches the reference idempotency_key column set (ts key → sql name)", () => {
+    // The table adds a consumer-declared `tenantId` scope column on top of the set.
     const cols = getTableColumns(idempotencyKey);
     const map = Object.fromEntries(
       Object.entries(cols).map(([k, c]) => [k, (c as { name: string }).name]),
@@ -122,7 +131,7 @@ describe("createIdempotencyService.begin", () => {
       db,
       table: idempotencyKey,
       dateProvider,
-      tenantId: "t1",
+      scope: { column: "tenantId", value: "t1" },
       logger: noopLogger,
     });
 
@@ -149,7 +158,7 @@ describe("createIdempotencyService.begin", () => {
     const { db } = makeDb([
       { requestHash: HASH, responseStatus: 201, responseBody: { cached: true }, expiresAt: FUTURE },
     ]);
-    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, tenantId: "t1" });
+    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, scope: { column: "tenantId", value: "t1" } });
 
     const outcome = await service.begin({ key: "k", requestHash: HASH });
     expect(outcome.kind).toBe("cached");
@@ -161,7 +170,7 @@ describe("createIdempotencyService.begin", () => {
     const { db, insertValues } = makeDb([
       { requestHash: OTHER_HASH, responseStatus: 200, responseBody: {}, expiresAt: FUTURE },
     ]);
-    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, tenantId: "t1" });
+    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, scope: { column: "tenantId", value: "t1" } });
 
     const outcome = await service.begin({ key: "k", requestHash: HASH });
     expect(outcome.kind).toBe("conflict");
@@ -172,7 +181,7 @@ describe("createIdempotencyService.begin", () => {
     const { db, deleteWheres } = makeDb([
       { requestHash: HASH, responseStatus: 200, responseBody: {}, expiresAt: PAST },
     ]);
-    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, tenantId: "t1" });
+    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, scope: { column: "tenantId", value: "t1" } });
 
     const outcome = await service.begin({ key: "k", requestHash: HASH });
     expect(outcome.kind).toBe("fresh"); // even though hash matched, the row expired
@@ -187,7 +196,7 @@ describe("createIdempotencyService.begin", () => {
       db,
       table: idempotencyKey,
       dateProvider,
-      tenantId: "t1",
+      scope: { column: "tenantId", value: "t1" },
       logger: { warn, debug: vi.fn() },
     });
 
@@ -200,7 +209,7 @@ describe("createIdempotencyService.begin", () => {
   it("commit rethrows a non-unique db error", async () => {
     const fkViolation = Object.assign(new Error("fk"), { cause: { code: "23503" } });
     const { db } = makeDb([], { insertThrows: fkViolation });
-    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, tenantId: "t1" });
+    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, scope: { column: "tenantId", value: "t1" } });
 
     const outcome = await service.begin({ key: "k", requestHash: HASH });
     if (outcome.kind !== "fresh") throw new Error("expected fresh");
@@ -208,20 +217,20 @@ describe("createIdempotencyService.begin", () => {
   });
 });
 
-describe("tenant scoping toggle", () => {
-  it("scopes select/insert by tenantId when provided", async () => {
+describe("scoping toggle", () => {
+  it("scopes select/insert by the scope column when provided", async () => {
     const { db, selectWheres, insertValues } = makeDb([]);
-    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, tenantId: "t1" });
+    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, scope: { column: "tenantId", value: "t1" } });
     const outcome = await service.begin({ key: "k", requestHash: HASH });
     if (outcome.kind !== "fresh") throw new Error("expected fresh");
     await outcome.commit(200, {});
 
-    // Scoped WHERE composes 2 predicates (tenant + key) → an and() SQL wrapper.
+    // Scoped WHERE composes 2 predicates (scope + key) → an and() SQL wrapper.
     expect(renderSql(selectWheres[0])).toContain('"tenant_id"');
     expect(insertValues.mock.calls[0]![0]).toHaveProperty("tenantId", "t1");
   });
 
-  it("omits tenantId from queries and inserts when unscoped", async () => {
+  it("omits the scope column from queries and inserts when unscoped", async () => {
     const { db, selectWheres, insertValues } = makeDb([]);
     const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider });
     const outcome = await service.begin({ key: "k", requestHash: HASH });

@@ -29,7 +29,10 @@ of the octabits stack, not a standalone kit.
   readiness-failure → 503 mapping.
 - **`@octabits-io/elysia/mcp`** — `createMcpRoutes({ resolveScope, registerTools, … })`:
   stateless `elysia-mcp` harness with per-request scope staging/dispose; scope-key
-  extraction pluggable via `parseScopeKey` (default: the `/tenant/:tenantId/` convention).
+  extraction via the required `parseScopeKey` seam — no default URL convention.
+  Use `createPathSegmentScopeParser('scope')` for a `/scope/:scopeKey/` layout,
+  `createPathSegmentScopeParser('tenant')` for `/tenant/:id/`, or `() => 'default'`
+  for single-scope deployments.
   `elysia-mcp` + `@modelcontextprotocol/sdk` are optional peers.
 - **Env-config helpers** — `getEnv*`, `isProduction`, `parseCsv`, `parseCorsOrigins`.
 - **Response schemas** — `SCHEMA_ERROR_RESPONSE`, `SCHEMA_VALIDATION_ERROR`,

@@ -1,6 +1,6 @@
 # @octabits-io/foundation
 
-Shared foundation library providing core primitives used across the platform: error handling, dependency injection, structured logging, common utilities, Zod config fragments, an RBAC engine, and OIDC/JWT validation.
+Shared foundation library providing core primitives used across the platform: error handling, dependency injection, structured logging, common utilities, Zod config fragments, an RBAC engine, OIDC/JWT validation, and per-scope signing.
 
 ## Modules
 
@@ -196,3 +196,85 @@ if (result.ok) console.log(result.value.userId);
 
 jwtService.extractBearerToken('Bearer abc'); // 'abc'
 ```
+
+**API key format** — issue and verify `<prefix><keyId>.<secret>` bearer tokens.
+Pure `node:crypto`, no I/O: `keyId` enables O(1) row lookup, only the secret's
+SHA-256 hash is persisted, and `verifyHash` compares in constant time.
+
+```ts
+import { createApiKeyFormat } from '@octabits-io/foundation/auth';
+
+const apiKeys = createApiKeyFormat({ prefix: 'acme_' });
+
+const keyId = apiKeys.generateKeyId();
+const secret = apiKeys.generateSecret();
+const token = apiKeys.formatToken(keyId, secret);   // 'acme_<keyId>.<secret>'
+const storedHash = apiKeys.hashSecret(secret);       // persist this + keyId
+const publicPrefix = apiKeys.deriveKeyPrefix(keyId); // 'acme_<keyId>' — safe to show
+
+// On an incoming request:
+const parsed = apiKeys.parseToken(token);            // { keyId, secret } | null
+if (parsed) {
+  // look up the row by parsed.keyId, then:
+  apiKeys.verifyHash(parsed.secret, storedHash);     // constant-time boolean
+}
+```
+
+**Bearer dispatcher** — one entrypoint for any `Authorization: Bearer ...`
+header. Strategies are tried in order; the first whose `matches` returns `true`
+owns the token. All strategies return the shared `Result` shape, so callers stay
+agnostic to which one ran.
+
+```ts
+import { createBearerAuthService } from '@octabits-io/foundation/auth';
+
+const bearer = createBearerAuthService<MyPrincipal>({
+  strategies: [
+    { matches: (t) => apiKeys.isApiKeyToken(t), validate: (t) => validateApiKey(t) },
+    { matches: () => true, validate: (t) => jwtService.validateToken(t) }, // fallback
+  ],
+});
+
+const result = await bearer.validateAuthorizationHeader(req.headers.authorization);
+// { ok: false, error: { key: 'missing_token' | 'no_matching_strategy' } } when unhandled
+```
+
+---
+
+### `@octabits-io/foundation/signing`
+
+Generic per-scope, per-purpose signing (optional peer: `jose`, loaded lazily and
+only for the JWT primitives). One service for HMAC/JWT crypto, HKDF key
+derivation, and constant-time comparison — so no consumer re-rolls its own. The
+`scopeKey` is an opaque string feeding HKDF domain separation (not a DB column);
+each `purpose` gets its own 256-bit key. Keys live behind an injected `keyStore`.
+
+```ts
+import { createScopedSigningService } from '@octabits-io/foundation/signing';
+
+const signing = createScopedSigningService({
+  infoPrefix: 'acme',                 // → HKDF info `acme-<purpose>-signing-key-v1`
+  scopeKey: tenantId,                 // opaque salt for domain separation
+  keyStore: { read, write },          // your `purpose → base64-key` persistence
+  masterSecret: process.env.SIGNING_MASTER_SECRET, // optional; enables derive + JWT signing
+});
+
+// Full-length detached HMAC (base64url)
+const sig = await signing.hmac('reply', message);          // Result<string>
+await signing.verifyHmac('reply', message, sig.value);     // Result<boolean> (constant-time)
+
+// Length-constrained hex tag (default 12 bytes / 24 hex chars)
+const tag = await signing.shortTag('reply', conversationId);
+await signing.verifyShortTag('reply', conversationId, tag.value);
+
+// Self-contained HS256 token (auto-provisions the key into keyStore)
+const jwt = await signing.signJwt('booking', { bookingId }, { expiresAt });
+await signing.verifyJwt('booking', jwt.value);             // Result<JWTPayload>
+```
+
+With a `masterSecret`, keys are HKDF-derived on the fly (no store round-trip, and
+verifiable before any lookup). Without one, the service is read-only against
+`keyStore` — verifying, and signing under, keys a provisioning path wrote
+earlier; signing an unprovisioned purpose returns `scoped_signing_key_not_found`.
+Errors are `Result` values (`scoped_signing_key_not_found`,
+`scoped_signing_signature_invalid`), never thrown.

@@ -7,7 +7,7 @@ import {
   createJobNotFoundError,
   createQueueNotFoundError,
   createJobCancelError,
-  SCHEMA_TENANT_JOB_PAYLOAD,
+  SCHEMA_SCOPED_JOB_PAYLOAD,
   SCHEMA_BASE_JOB_PAYLOAD,
 } from './index.ts';
 
@@ -15,12 +15,12 @@ import {
 // Test payload + schema
 // ---------------------------------------------------------------------------
 
-const SCHEMA_TEST_JOB = SCHEMA_TENANT_JOB_PAYLOAD.extend({
+const SCHEMA_TEST_JOB = SCHEMA_SCOPED_JOB_PAYLOAD.extend({
   to: z.email(),
 });
 type TestJob = z.infer<typeof SCHEMA_TEST_JOB>;
 
-const validPayload: TestJob = { tenantId: 't1', to: 'a@b.com' };
+const validPayload: TestJob = { scopeKey: 't1', to: 'a@b.com' };
 
 // ---------------------------------------------------------------------------
 // pg-boss mock (no live Postgres)
@@ -85,7 +85,7 @@ describe('createQueueDomain.enqueue', () => {
 
   it('rejects an invalid payload without touching pg-boss (fail fast, structured issues)', async () => {
     const domain = domainWith(boss);
-    // Missing tenantId + bad email
+    // Missing scopeKey + bad email
     const result = await domain.enqueue({ to: 'not-an-email' } as unknown as TestJob);
 
     expect(result.ok).toBe(false);
@@ -256,7 +256,7 @@ describe('createQueueDomain.schedule / stop', () => {
     const boss = createMockBoss();
     const domain = domainWith(boss);
     const result = await domain.schedule('nightly', '0 0 * * *', {
-      tenantId: '',
+      scopeKey: '',
       to: 'x',
     } as unknown as TestJob);
 
@@ -350,10 +350,10 @@ describe('monitoring error factories', () => {
 // ===========================================================================
 
 describe('exported schemas', () => {
-  it('SCHEMA_TENANT_JOB_PAYLOAD requires a non-empty tenantId', () => {
-    expect(SCHEMA_TENANT_JOB_PAYLOAD.safeParse({ tenantId: 't1' }).success).toBe(true);
-    expect(SCHEMA_TENANT_JOB_PAYLOAD.safeParse({ tenantId: '' }).success).toBe(false);
-    expect(SCHEMA_TENANT_JOB_PAYLOAD.safeParse({}).success).toBe(false);
+  it('SCHEMA_SCOPED_JOB_PAYLOAD requires a non-empty scopeKey', () => {
+    expect(SCHEMA_SCOPED_JOB_PAYLOAD.safeParse({ scopeKey: 't1' }).success).toBe(true);
+    expect(SCHEMA_SCOPED_JOB_PAYLOAD.safeParse({ scopeKey: '' }).success).toBe(false);
+    expect(SCHEMA_SCOPED_JOB_PAYLOAD.safeParse({}).success).toBe(false);
   });
 
   it('SCHEMA_BASE_JOB_PAYLOAD accepts any record', () => {

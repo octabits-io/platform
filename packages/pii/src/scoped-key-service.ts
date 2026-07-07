@@ -5,13 +5,14 @@
  * cached in memory after decryption.
  *
  * Generic over the scope column: one service instance is bound to one
- * `{ column, value }` scope (e.g. `{ column: 'tenantId', value: tenantId }` —
- * see `createTenantKeyService` for that preset — or `workspaceId`, `ownerId`,
- * …). Generic over the storage table too: pass an encryption-key Drizzle
- * table (e.g. `@octabits-io/drizzle-toolkit/tenant`'s `tenantEncryptionKey`
- * or an app schema with the same columns) plus its `db.query` key. The cache
- * is injected (any `{ get/set/has/delete/clear }` — e.g. a foundation
- * LruCacheService cache with a 5-minute TTL).
+ * `{ column, value }` scope — the consumer chooses the column (e.g.
+ * `{ column: 'tenantId', value: tenantId }`, or `workspaceId`, `ownerId`, …).
+ * Generic over the storage table too: pass an encryption-key Drizzle table
+ * (e.g. `@octabits-io/drizzle-toolkit/scope`'s `encryptionKeyColumns` plus a
+ * consumer-declared scope column, or an app schema with the same columns)
+ * plus its `db.query` key. The cache is injected (any
+ * `{ get/set/has/delete/clear }` — e.g. a foundation LruCacheService cache
+ * with a 5-minute TTL).
  */
 import { eq } from 'drizzle-orm';
 import crypto from 'node:crypto';
@@ -104,10 +105,10 @@ export interface ScopedKeyServiceDeps {
   /** Scope this instance is bound to (column property name + value). */
   scope: KeyScope;
   masterKeyProvider: MasterKeyProvider;
-  /** The encryption-key Drizzle table (columns per drizzle-toolkit/tenant). */
+  /** The encryption-key Drizzle table (columns per drizzle-toolkit/scope's `encryptionKeyColumns` + a scope column). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   table: any;
-  /** Key of the table in `db.query` (e.g. 'tenantEncryptionKey'). */
+  /** Key of the table in `db.query` (e.g. 'encryptionKey'). */
   tableName: string;
   /** Decrypted-key cache (recommend LRU with ~5-minute TTL). */
   cache: ScopedKeyCache;

@@ -5,15 +5,14 @@
  * column: `list` (paginated + total), `getById`, `create`, `update`,
  * `delete` — with consistent errors, pagination, and audit stamping.
  *
- * Three entry points, from generic to specific:
+ * Two entry points, from generic to specific:
  * - `createBaseCrudService` — no scoping; works on any table with `id`.
  * - `createScopedCrudService` — every query auto-ANDed with
  *   `eq(table[scope.column], scope.value)` and `create()` force-injects the
  *   scope column, so row isolation holds by construction. The scope is a
  *   construction-time dependency (e.g. a per-request IoC scope), never a
- *   method argument.
- * - `createBaseTenantScopedCrudService` — the multi-tenant preset: a scoped
- *   service with `scope = { column: 'tenantId', value: tenantId }`.
+ *   method argument. Bind whatever scope column partitions your app
+ *   (`scope: { column: 'tenantId', value }`, `{ column: 'workspaceId', value }`, …).
  *
  * **Type Assertion Notes:** `as any` casts are used where Drizzle's type
  * system can't express the constraint (`(table as any).id` / dynamic scope
@@ -125,15 +124,6 @@ export interface ScopedCrudConfig<
   scope: CrudScope<TScopeKey>;
 }
 
-/** Configuration for the tenant-scoped preset. */
-export interface BaseTenantScopedCrudConfig<
-  TTable extends PgTable,
-  TEntity,
-  TSelectColumns extends Record<string, boolean> = Record<string, boolean>
-> extends BaseCrudConfig<TTable, TEntity, TSelectColumns> {
-  tenantId: string;
-}
-
 /**
  * Base service interface for CRUD operations. Create/update parameter types
  * are inferred from the table via `$inferInsert`; `TOmitKey` removes the
@@ -151,13 +141,7 @@ export interface BaseCrudService<
   delete(params: { id: string }): Promise<Result<void, ResourceNotFoundError | OctDatabaseError>>;
 }
 
-/** Tenant-scoped service alias — `tenantId` is injected, never caller-supplied. */
-export type BaseTenantScopedCrudService<
-  TTable extends PgTable,
-  TEntity
-> = BaseCrudService<TTable, TEntity, 'tenantId'>;
-
-/** Shared implementation behind the three public factories. */
+/** Shared implementation behind the two public factories. */
 function buildCrudService<
   TTable extends PgTable,
   TEntity,
@@ -332,24 +316,4 @@ export function createScopedCrudService<
 ): BaseCrudService<TTable, TEntity, TScopeKey> {
   const { scope, ...base } = config;
   return buildCrudService(base, scope);
-}
-
-/**
- * Create a tenant-scoped CRUD service over a Drizzle table with
- * `id` + `tenantId` columns — the multi-tenant preset of
- * `createScopedCrudService`. Eliminates the per-resource boilerplate for
- * simple admin CRUD (consistent errors, pagination, audit stamping).
- */
-export function createBaseTenantScopedCrudService<
-  TTable extends PgTable,
-  TEntity,
-  TSelectColumns extends Record<string, boolean> = Record<string, boolean>
->(
-  config: BaseTenantScopedCrudConfig<TTable, TEntity, TSelectColumns>
-): BaseTenantScopedCrudService<TTable, TEntity> {
-  const { tenantId, ...base } = config;
-  return createScopedCrudService({
-    ...base,
-    scope: { column: 'tenantId', value: tenantId },
-  });
 }

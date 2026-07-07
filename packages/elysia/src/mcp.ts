@@ -15,9 +15,10 @@
  * injected `registerTools(server, getContainer)` seam.
  *
  * How the scope key is extracted from the URL is itself a seam
- * (`parseScopeKey`): the default is the `/tenant/:tenantId/` path convention
- * ({@link parseTenantId}), but consumers can supply any extractor — a
- * different path shape, a header, a constant for single-scope deployments.
+ * (`parseScopeKey`, required — there is deliberately no default URL
+ * convention): use {@link createPathSegmentScopeParser} for a
+ * `.../{segment}/:scopeKey/...` path layout, or supply any extractor — a
+ * header, a constant (`() => 'default'`) for single-scope deployments.
  *
  * `elysia-mcp` and `@modelcontextprotocol/sdk` are OPTIONAL peers — only pulled
  * in by consumers of this `./mcp` subpath, keeping the root export free of them.
@@ -38,19 +39,25 @@ export const SCOPE_KEY_PATTERN = /^[a-zA-Z0-9-_]+$/;
 export type ParseScopeKey = (url: string) => string | null;
 
 /**
- * Default {@link ParseScopeKey}: extract the tenant id from an MCP request URL
- * of the shape `.../tenant/:tenantId/...`. Returns `null` when the `tenant`
- * segment is absent or the following segment is missing / fails
- * {@link SCOPE_KEY_PATTERN}.
+ * Build a {@link ParseScopeKey} that extracts the scope key from the URL path
+ * segment immediately following `segment` — i.e. a `.../{segment}/:scopeKey/...`
+ * convention. Returns `null` when `segment` is absent or the following segment
+ * is missing / fails {@link SCOPE_KEY_PATTERN}.
+ *
+ * E.g. `createPathSegmentScopeParser('scope')` for `/scope/:scopeKey/`; a
+ * multi-tenant consumer passes `createPathSegmentScopeParser('tenant')` for a
+ * `/tenant/:id/` URL layout.
  */
-export function parseTenantId(url: string): string | null {
-  const pathname = new URL(url).pathname;
-  const segments = pathname.split('/');
-  const idx = segments.indexOf('tenant');
-  if (idx < 0) return null;
-  const candidate = segments[idx + 1];
-  if (!candidate || !SCOPE_KEY_PATTERN.test(candidate)) return null;
-  return candidate;
+export function createPathSegmentScopeParser(segment: string): ParseScopeKey {
+  return (url: string): string | null => {
+    const pathname = new URL(url).pathname;
+    const segments = pathname.split('/');
+    const idx = segments.indexOf(segment);
+    if (idx < 0) return null;
+    const candidate = segments[idx + 1];
+    if (!candidate || !SCOPE_KEY_PATTERN.test(candidate)) return null;
+    return candidate;
+  };
 }
 
 /** Build a JSON-RPC 2.0 error `Response` with the given HTTP status. */
@@ -93,10 +100,13 @@ export interface CreateMcpRoutesOptions<S extends DisposableScope> {
   serverInfo: { name: string; version: string };
   /**
    * Extracts the scope key from the request URL; return `null` to reject.
-   * Default {@link parseTenantId} (the `/tenant/:tenantId/` path convention).
-   * Single-scope deployments can pass `() => 'default'`.
+   * Required — there is deliberately no default URL convention. Use
+   * `createPathSegmentScopeParser('scope')` for a `/scope/:scopeKey/` layout,
+   * `createPathSegmentScopeParser('tenant')` for a `/tenant/:id/` layout
+   * (consumer vocabulary, their choice), or `() => 'default'` for single-scope
+   * deployments.
    */
-  parseScopeKey?: ParseScopeKey;
+  parseScopeKey: ParseScopeKey;
   /** Elysia route prefix. Default `/mcp`. */
   prefix?: string;
   /** `elysia-mcp` base path within the prefix. Default `/`. */
@@ -119,7 +129,7 @@ export const createMcpRoutes = <S extends DisposableScope>(options: CreateMcpRou
     resolveScope,
     registerTools,
     serverInfo,
-    parseScopeKey = parseTenantId,
+    parseScopeKey,
     prefix = '/mcp',
     basePath = '/',
     capabilities = { tools: {} },

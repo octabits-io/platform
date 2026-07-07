@@ -68,26 +68,28 @@ openssl rand -base64 32
 
 Per-scope key management: lazily generates an Age keypair + blind-index HMAC
 key per scope, stores them master-key-encrypted in a Drizzle table (column
-shapes per [`@octabits-io/drizzle-toolkit/tenant`](../drizzle-toolkit)'s
-`tenantEncryptionKeyColumns`), and serves decrypted keys through a cache.
-Generic over the scope column; `createTenantKeyService` is the multi-tenant
-preset (`scope: { column: 'tenantId', value: tenantId }`).
+shapes per [`@octabits-io/drizzle-toolkit/scope`](../drizzle-toolkit)'s
+`encryptionKeyColumns` plus a consumer-declared scope column), and serves
+decrypted keys through a cache. Generic over the scope column — the consumer
+picks it. A multi-tenant consumer binds the scope to its own `tenantId`
+column (`scope: { column: 'tenantId', value: tenantId }`); a single-tenant or
+differently-partitioned consumer picks `orgId`, `workspaceId`, `ownerId`, ….
 
 ```ts
-import { createScopedKeyService, createTenantKeyService } from '@octabits-io/pii';
+import { createScopedKeyService } from '@octabits-io/pii';
 import { createLruCacheService } from '@octabits-io/foundation/utils';
 
 const keyService = createScopedKeyService({
   db,                                        // structural: insert/delete + db.query
-  scope: { column: 'orgId', value: orgId },  // or use the tenant preset below
+  scope: { column: 'orgId', value: orgId },  // consumer-chosen scope column
   masterKeyProvider,
   table: schema.orgEncryptionKey,            // your encryption-key table
   tableName: 'orgEncryptionKey',             // its key in db.query
   cache,                                     // e.g. LRU with ~5-minute TTL
 });
 
-// Multi-tenant preset — same service, scope bound to the tenantId column:
-const tenantKeys = createTenantKeyService({ db, tenantId, masterKeyProvider, table, tableName, cache });
+// A multi-tenant consumer binds the scope to its own tenantId column:
+// scope: { column: 'tenantId', value: tenantId }
 
 const keys = await keyService.getKeys();     // lazy-generates on first use
 // keys.value: { recipient, identity, blindIndexKey, keyVersion }

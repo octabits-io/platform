@@ -23,20 +23,21 @@
  *                                   `@octabits-io/foundation/utils`)
  *   - {@link IdempotencyLogger}   — optional structured logger (defaults to noop)
  *
- * ## Multi-tenant vs single-tenant
+ * ## Scoped vs unscoped
  *
- * `tenantId` is **optional**. When provided, every query is scoped by
- * `eq(table.tenantId, tenantId)` and inserts stamp it — giving per-tenant
- * isolation over a shared `(tenant_id, key)` composite-PK table. When omitted,
- * the key alone is the primary key and no tenant column is referenced, which
- * suits a single-tenant table.
+ * A `scope` (`{ column, value }`) is **optional**. When provided, every query
+ * is filtered by `eq(table[scope.column], scope.value)` and inserts stamp it —
+ * giving per-scope isolation over a shared `(scopeColumn, key)` composite-PK
+ * table. When omitted, the key alone is the primary key and no scope column is
+ * referenced, which suits a single-tenant table.
  *
  * ## Table definition
  *
  * Spread {@link idempotencyKeyColumns} into your own `pgTable(...)` so the
- * column shapes stay in one place; declare the primary key, foreign key and
- * expiry index in the table's constraints callback (they depend on your
- * concrete tenant table and desired constraint names).
+ * column shapes stay in one place; add your own scope column (when scoping) and
+ * declare the primary key, foreign key and expiry index in the table's
+ * constraints callback (they depend on your concrete schema and desired
+ * constraint names).
  */
 import { and, eq, lt, type SQL } from "drizzle-orm";
 import {
@@ -56,17 +57,19 @@ import { extractPgError } from "../db/index.ts";
  * Generic `idempotency_key` columns — spread into a
  * `pgTable('idempotency_key', {...})` to define the store table.
  *
- * The composite primary key `(tenantId, key)`, the foreign key to the tenant
- * table, and the `expires_at` index are all table-level constraints and must
- * be declared in the table's constraints callback (they depend on the concrete
- * tenant table and on the constraint names you want to preserve):
+ * The **scope column is not part of the set** — add your own when scoping. The
+ * primary key, any foreign key, and the `expires_at` index are all table-level
+ * constraints declared in the table's constraints callback (they depend on your
+ * concrete schema and on the constraint names you want to preserve):
  *
  * ```ts
- * import { pgTable, primaryKey, foreignKey, index } from 'drizzle-orm/pg-core';
+ * import { pgTable, text, primaryKey, foreignKey, index } from 'drizzle-orm/pg-core';
  * import { idempotencyKeyColumns } from '@octabits-io/drizzle-toolkit/idempotency';
  *
+ * // Scoped: add a scope column and put it first in the composite PK.
  * export const idempotencyKey = pgTable('idempotency_key', {
  *   ...idempotencyKeyColumns,
+ *   tenantId: text('tenant_id').notNull(), // your scope column
  * }, (table) => [
  *   primaryKey({ columns: [table.tenantId, table.key], name: 'idempotency_key_pk' }),
  *   foreignKey({ columns: [table.tenantId], foreignColumns: [tenant.id], name: 'idempotency_key_tenant_id_fk' })
@@ -75,11 +78,10 @@ import { extractPgError } from "../db/index.ts";
  * ]);
  * ```
  *
- * Single-tenant consumers can omit the `tenantId` column (and drop it from the
- * PK/FK) and construct the service without a `tenantId`.
+ * Single-tenant consumers omit the scope column entirely, make `(key)` the
+ * primary key, and construct the service without a `scope`.
  */
 export const idempotencyKeyColumns = {
-  tenantId: text("tenant_id").notNull(),
   key: text().notNull(),
   requestHash: text("request_hash").notNull(),
   responseStatus: smallint("response_status").notNull(),
@@ -181,17 +183,19 @@ export interface CreateIdempotencyServiceParams {
    * Table built from {@link idempotencyKeyColumns}. Typed loosely so tables
    * from a different `drizzle-orm` copy interoperate; the required columns
    * (`key`, `requestHash`, `responseStatus`, `responseBody`, `expiresAt`, and
-   * `tenantId` when scoping) are accessed structurally.
+   * the scope column when scoping) are accessed structurally.
    */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   table: any;
   dateProvider: DateProvider;
   /**
-   * Optional tenant scope. When provided, every query is ANDed with
-   * `eq(table.tenantId, tenantId)` and inserts stamp it; when omitted, the key
-   * alone identifies the record (single-tenant tables).
+   * Optional row scope (`{ column, value }`, mirroring `../crud`/`../config`).
+   * When provided, every query is ANDed with `eq(table[scope.column],
+   * scope.value)` and inserts stamp it; when omitted, the key alone identifies
+   * the record (single-tenant tables). `column` is the **TypeScript property
+   * name** on the Drizzle table (e.g. `'tenantId'`), not the SQL column name.
    */
-  tenantId?: string;
+  scope?: { column: string; value: string };
   /** Optional structured logger; a noop is used when omitted. */
   logger?: IdempotencyLogger;
   /** TTL for freshly committed records (default 24h). */
@@ -204,20 +208,20 @@ export function createIdempotencyService({
   db,
   table,
   dateProvider,
-  tenantId,
+  scope,
   logger = noopLogger,
   ttlSeconds = DEFAULT_TTL_SECONDS,
 }: CreateIdempotencyServiceParams): IdempotencyService {
   /**
-   * ANDs the given conditions with the tenant filter when a `tenantId` is set.
+   * ANDs the given conditions with the scope filter when a `scope` is set.
    * Returns a single condition unchanged so callers don't wrap a lone
    * predicate in `and(...)`.
    */
   function scopedWhere(...conditions: SQL[]): SQL {
     const all =
-      tenantId !== undefined
+      scope !== undefined
         ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          [eq((table as any).tenantId, tenantId), ...conditions]
+          [eq((table as any)[scope.column], scope.value), ...conditions]
         : conditions;
     return (all.length === 1 ? all[0] : and(...all)) as SQL;
   }
@@ -263,7 +267,7 @@ export function createIdempotencyService({
         const expiresAt = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
         try {
           await db.insert(t).values({
-            ...(tenantId !== undefined ? { tenantId } : {}),
+            ...(scope !== undefined ? { [scope.column]: scope.value } : {}),
             key,
             requestHash,
             responseStatus: status,
@@ -285,7 +289,7 @@ export function createIdempotencyService({
         }
 
         // Opportunistic cleanup of expired rows for this scope. Bounded (by
-        // tenant when scoped); cheap, no cron needed.
+        // the scope filter when scoped); cheap, no cron needed.
         try {
           await db.delete(t).where(scopedWhere(lt(t.expiresAt, now.toISOString())));
         } catch (err) {

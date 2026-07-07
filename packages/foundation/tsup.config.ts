@@ -9,6 +9,7 @@ export default defineConfig({
     "config-schema/index": "src/config-schema/index.ts",
     "rbac/index": "src/rbac/index.ts",
     "auth/index": "src/auth/index.ts",
+    "signing/index": "src/signing/index.ts",
   },
   format: "esm",
   dts: true,

@@ -28,13 +28,14 @@ export const SCHEMA_BASE_JOB_PAYLOAD = z.record(z.string(), z.unknown());
 // ============================================================================
 
 /**
- * Recommended base payload for system/global jobs — jobs that are not scoped
- * to any tenant (cron sweeps, reconciliation, cross-tenant maintenance).
+ * Recommended base payload for system/global jobs — jobs that are not bound to
+ * any partition scope (cron sweeps, reconciliation, cross-scope maintenance;
+ * e.g. a job that iterates every tenant).
  *
- * NOT required by the queue base. Use this instead of forcing a sentinel
- * tenant id (e.g. `'__system__'`) through a tenant-shaped payload: a job that
- * iterates all tenants simply has no `tenantId`. Compose it with
- * `.extend(...)` to build concrete payload schemas.
+ * NOT required by the queue base. Use this instead of forcing a sentinel scope
+ * key (e.g. `'__system__'`) through a scoped payload: a job with no partition
+ * simply has no `scopeKey`. Compose it with `.extend(...)` to build concrete
+ * payload schemas.
  *
  * @example
  * const SCHEMA_RECONCILE_JOB = SCHEMA_SYSTEM_JOB_PAYLOAD.extend({ since: z.string() });
@@ -47,24 +48,27 @@ export const SCHEMA_SYSTEM_JOB_PAYLOAD = z.object({
 export type SystemJobPayload = z.infer<typeof SCHEMA_SYSTEM_JOB_PAYLOAD>;
 
 /**
- * Recommended base payload for multi-tenant consumers.
+ * Recommended base payload for partition-scoped consumers.
  *
- * NOT required by the queue base — provided as a convenience so multi-tenant
- * callers (e.g. per-request tenant isolation) can extend a shared shape rather
- * than re-declaring `tenantId`/`correlationId` on every queue. Compose it with
- * `.extend(...)` to build concrete payload schemas. For jobs that are global
- * by nature, extend {@link SCHEMA_SYSTEM_JOB_PAYLOAD} instead of inventing a
- * sentinel tenant id.
+ * NOT required by the queue base — provided as a convenience so scoped callers
+ * (e.g. per-request isolation, one scope per tenant) can extend a shared shape
+ * rather than re-declaring `scopeKey`/`correlationId` on every queue. Compose
+ * it with `.extend(...)` to build concrete payload schemas. For jobs that are
+ * global by nature, extend {@link SCHEMA_SYSTEM_JOB_PAYLOAD} instead of
+ * inventing a sentinel scope key.
+ *
+ * The `scopeKey` field dovetails with `defineQueue`'s `resolveScopeKey` seam,
+ * which extracts a partition key from the payload to bind the DLQ scope.
  *
  * @example
- * const SCHEMA_EMAIL_JOB = SCHEMA_TENANT_JOB_PAYLOAD.extend({ to: z.string().email() });
+ * const SCHEMA_EMAIL_JOB = SCHEMA_SCOPED_JOB_PAYLOAD.extend({ to: z.string().email() });
  */
-export const SCHEMA_TENANT_JOB_PAYLOAD = SCHEMA_SYSTEM_JOB_PAYLOAD.extend({
-  /** Tenant ID for multi-tenant isolation */
-  tenantId: z.string().min(1),
+export const SCHEMA_SCOPED_JOB_PAYLOAD = SCHEMA_SYSTEM_JOB_PAYLOAD.extend({
+  /** Scope key for partition isolation — e.g. a tenant id */
+  scopeKey: z.string().min(1),
 });
 
-export type TenantJobPayload = z.infer<typeof SCHEMA_TENANT_JOB_PAYLOAD>;
+export type ScopedJobPayload = z.infer<typeof SCHEMA_SCOPED_JOB_PAYLOAD>;
 
 // ============================================================================
 // Job Context (abstraction over pg-boss job)

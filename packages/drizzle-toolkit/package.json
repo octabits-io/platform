@@ -1,7 +1,7 @@
 {
   "name": "@octabits-io/drizzle-toolkit",
   "version": "0.6.0",
-  "description": "Drizzle ORM toolkit: database error handling, pagination, factory, migrations, scoped CRUD, RLS scoping, idempotency, and multi-tenant schema primitives",
+  "description": "Drizzle ORM toolkit: database error handling, pagination, factory, migrations, scoped CRUD, scoped config store, RLS scoping, idempotency, and generic scope schema primitives",
   "license": "MIT",
   "type": "module",
   "exports": {
@@ -20,10 +20,10 @@
       "types": "./dist/migrate/index.d.ts",
       "default": "./dist/migrate/index.js"
     },
-    "./tenant": {
-      "import": "./dist/tenant/index.js",
-      "types": "./dist/tenant/index.d.ts",
-      "default": "./dist/tenant/index.js"
+    "./scope": {
+      "import": "./dist/scope/index.js",
+      "types": "./dist/scope/index.d.ts",
+      "default": "./dist/scope/index.js"
     },
     "./idempotency": {
       "import": "./dist/idempotency/index.js",
@@ -34,6 +34,11 @@
       "import": "./dist/crud/index.js",
       "types": "./dist/crud/index.d.ts",
       "default": "./dist/crud/index.js"
+    },
+    "./config": {
+      "import": "./dist/config/index.js",
+      "types": "./dist/config/index.d.ts",
+      "default": "./dist/config/index.js"
     },
     "./rls": {
       "import": "./dist/rls/index.js",

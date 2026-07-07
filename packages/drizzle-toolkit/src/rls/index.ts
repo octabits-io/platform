@@ -2,7 +2,7 @@
  * RLS request/system scoping helpers (#32) — the primitives that make
  * Postgres row-level security work per request:
  *
- * - `createTenantDb(rawDb, gucs)` — a Drizzle proxy that wraps every top-level
+ * - `createScopedDb(rawDb, gucs)` — a Drizzle proxy that wraps every top-level
  *   operation in a short transaction whose first statement is
  *   `set_config(name, value, true)` (transaction-local, PgBouncer-safe).
  * - `runWithGucs` / `withSystemMode` — one-shot scoped transactions.
@@ -10,10 +10,10 @@
  *   model (BEGIN at scope acquire, COMMIT/ROLLBACK at dispose).
  * - `endPoolGracefully` — pool drain with a hard timeout for SIGTERM.
  *
- * Fully generic over the GUC key set — `app.tenant_id` / `app.system_mode`
- * etc. are just string keys the consumer passes. RLS *policies* live in the
- * consumer's SQL migrations; the concrete GUC values are set by the
- * consumer's IoC scope factories.
+ * Fully generic over the GUC key set — the GUC names (e.g. `app.tenant_id` or
+ * `app.scope_key`, plus `app.system_mode`) are just string keys the consumer
+ * passes. RLS *policies* live in the consumer's SQL migrations; the concrete
+ * GUC values are set by the consumer's IoC scope factories.
  */
 import { sql } from 'drizzle-orm';
 import type { Pool, PoolClient } from 'pg';
@@ -23,7 +23,7 @@ import type { Logger as DrizzleLogger } from 'drizzle-orm';
  * GUC key/value pairs applied via `set_config(name, value, true)` at the
  * start of every wrapped transaction. `true` = transaction-local.
  */
-export type TenantSessionVars = Record<string, string>;
+export type SessionVars = Record<string, string>;
 
 /**
  * Minimal structural view of an (augmented) Drizzle instance for RLS
@@ -47,7 +47,7 @@ export interface RlsDatabase {
  *
  * IMPORTANT: every top-level Drizzle query-builder entry point must be listed
  * here. Anything missing falls through to the raw `db` object and runs
- * *without* the GUCs — meaning the tenant GUC is unset and RLS policies that
+ * *without* the GUCs — meaning the scope GUC is unset and RLS policies that
  * compare against `current_setting(..., true)` silently match zero rows.
  */
 export const QUERY_BUILDER_METHODS = new Set(['select', 'selectDistinct', 'selectDistinctOn', 'insert', 'update', 'delete']);
@@ -63,7 +63,7 @@ type AnyFn = (...args: unknown[]) => unknown;
  */
 export async function runWithGucs<TDb extends RlsDatabase, T>(
   rawDb: TDb,
-  gucs: TenantSessionVars,
+  gucs: SessionVars,
   fn: (tx: TDb) => Promise<T>,
 ): Promise<T> {
   return rawDb.transaction(async (tx) => {
@@ -84,7 +84,7 @@ export async function runWithGucs<TDb extends RlsDatabase, T>(
  */
 function createDeferredBuilder<TDb extends RlsDatabase>(
   rawDb: TDb,
-  gucs: TenantSessionVars,
+  gucs: SessionVars,
   initialMethod: string,
   initialArgs: unknown[],
 ): unknown {
@@ -100,7 +100,7 @@ function createDeferredBuilder<TDb extends RlsDatabase>(
         const fn = (cursor as AnyRecord)[method];
         if (typeof fn !== 'function') {
           throw new TypeError(
-            `tenantDb: cannot replay '${method}' on tx — not a function`,
+            `scopedDb: cannot replay '${method}' on tx — not a function`,
           );
         }
         cursor = (fn as AnyFn).apply(cursor, args);
@@ -144,7 +144,7 @@ function createDeferredBuilder<TDb extends RlsDatabase>(
  */
 function createQueryNamespaceProxy<TDb extends RlsDatabase>(
   rawDb: TDb,
-  gucs: TenantSessionVars,
+  gucs: SessionVars,
   rawNamespace: TDb['query'],
 ): TDb['query'] {
   return new Proxy(rawNamespace as unknown as AnyRecord, {
@@ -173,7 +173,7 @@ function createQueryNamespaceProxy<TDb extends RlsDatabase>(
                 const fn = txTable?.[methodName];
                 if (typeof fn !== 'function') {
                   throw new TypeError(
-                    `tenantDb: tx.query.${tableName}.${methodName} is not a function`,
+                    `scopedDb: tx.query.${tableName}.${methodName} is not a function`,
                   );
                 }
                 return await (fn as AnyFn).apply(txTable, args);
@@ -187,7 +187,7 @@ function createQueryNamespaceProxy<TDb extends RlsDatabase>(
 }
 
 /**
- * Build a tenant-scoped Drizzle proxy. Top-level query methods auto-wrap each
+ * Build a scope-bound Drizzle proxy. Top-level query methods auto-wrap each
  * call in a short transaction with `gucs` applied via `set_config(_, _, true)`.
  * `db.transaction(fn)` and `db.execute(...)` are also wrapped. Everything
  * else passes through to the underlying `rawDb`.
@@ -195,9 +195,9 @@ function createQueryNamespaceProxy<TDb extends RlsDatabase>(
  * The proxy is shaped exactly like the input db from the consumer's POV, so
  * existing service code works unchanged.
  */
-export function createTenantDb<TDb extends RlsDatabase>(
+export function createScopedDb<TDb extends RlsDatabase>(
   rawDb: TDb,
-  gucs: TenantSessionVars,
+  gucs: SessionVars,
 ): TDb {
   // Cache the wrapped query namespace so repeat accesses return the same proxy.
   let queryNs: TDb['query'] | undefined;

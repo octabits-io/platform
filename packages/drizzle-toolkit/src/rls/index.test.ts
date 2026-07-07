@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createTenantDb, runWithGucs, withSystemMode, QUERY_BUILDER_METHODS, type RlsDatabase } from './index.ts';
+import { createScopedDb, runWithGucs, withSystemMode, QUERY_BUILDER_METHODS, type RlsDatabase } from './index.ts';
 
 /** Fake db whose transaction records executed set_config GUCs. */
 function makeDb() {
@@ -34,10 +34,10 @@ describe('runWithGucs', () => {
   });
 });
 
-describe('createTenantDb', () => {
+describe('createScopedDb', () => {
   it('replays deferred builder chains inside a GUC-set tx', async () => {
     const { db, gucCalls } = makeDb();
-    const scoped = createTenantDb(db, GUCS) as unknown as { select(f?: unknown): { from(t: unknown): { where(w: unknown): Promise<unknown> } } };
+    const scoped = createScopedDb(db, GUCS) as unknown as { select(f?: unknown): { from(t: unknown): { where(w: unknown): Promise<unknown> } } };
     const result = await scoped.select({}).from('t').where('w');
     expect(result).toEqual([{ id: 'r1' }]);
     expect(gucCalls.length).toBe(1); // set_config ran first
@@ -51,7 +51,7 @@ describe('createTenantDb', () => {
 
   it('wraps query namespace findFirst/findMany', async () => {
     const { db, gucCalls } = makeDb();
-    const scoped = createTenantDb(db, GUCS);
+    const scoped = createScopedDb(db, GUCS);
     const row = await (scoped.query as Record<string, { findFirst(): Promise<unknown> }>).amenity!.findFirst();
     expect(row).toEqual({ id: 'r1' });
     expect(gucCalls.length).toBe(1);
@@ -59,7 +59,7 @@ describe('createTenantDb', () => {
 
   it('wraps transaction() and execute(); passes through other props', async () => {
     const { db, gucCalls } = makeDb();
-    const scoped = createTenantDb(db, GUCS);
+    const scoped = createScopedDb(db, GUCS);
     await scoped.transaction(async () => 'x');
     await scoped.execute('select 1');
     // 1 set_config from transaction() + 1 set_config + 1 replayed payload from execute()
@@ -69,7 +69,7 @@ describe('createTenantDb', () => {
 
   it('caches the awaited chain result (no double execution)', async () => {
     const { db } = makeDb();
-    const scoped = createTenantDb(db, GUCS) as unknown as { select(): { from(t: unknown): { where(w: unknown): PromiseLike<unknown> } } };
+    const scoped = createScopedDb(db, GUCS) as unknown as { select(): { from(t: unknown): { where(w: unknown): PromiseLike<unknown> } } };
     const q = scoped.select().from('t').where('w');
     const [a, b] = [await q, await q];
     expect(a).toBe(b);

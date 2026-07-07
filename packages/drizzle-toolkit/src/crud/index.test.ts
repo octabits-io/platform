@@ -3,7 +3,6 @@ import { pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import {
   createBaseCrudService,
   createScopedCrudService,
-  createBaseTenantScopedCrudService,
   type CrudDatabase,
 } from './index.ts';
 
@@ -47,15 +46,15 @@ const dateProvider = { now: () => new Date('2026-01-01T00:00:00Z') };
 
 function makeService(rows: Array<Record<string, unknown>>, actorId?: string) {
   const { db, insertValues, setArgs } = makeDb(rows);
-  const service = createBaseTenantScopedCrudService({
-    db, dateProvider, tenantId: 't1', actorId,
+  const service = createScopedCrudService({
+    db, dateProvider, scope: { column: 'tenantId', value: 't1' }, actorId,
     table: amenity, tableName: 'amenity', resourceName: 'amenity',
     mapToEntity: (r) => ({ id: r.id, name: r.name }),
   });
   return { service, insertValues, setArgs };
 }
 
-describe('createBaseTenantScopedCrudService', () => {
+describe('createScopedCrudService (bound scope)', () => {
   it('list returns mapped items + total', async () => {
     const { service } = makeService([{ id: 'wifi', name: 'WiFi' }]);
     const r = await service.list();
@@ -69,7 +68,7 @@ describe('createBaseTenantScopedCrudService', () => {
     expect(!miss.ok && miss.error.key).toBe('amenity_not_found');
   });
 
-  it('create injects tenantId + audit columns when actor present', async () => {
+  it('create injects the scope column + audit columns when actor present', async () => {
     const { service, insertValues } = makeService([], 'user-9');
     const r = await service.create({ id: 'wifi', name: 'WiFi' });
     expect(r.ok).toBe(true);

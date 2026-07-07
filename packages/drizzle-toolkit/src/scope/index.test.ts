@@ -3,10 +3,10 @@ import { pgTable, text, integer, timestamp } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 
 import {
-  baseTenantColumns,
+  baseScopeColumns,
   bytea,
-  tenantConfigColumns,
-  tenantEncryptionKeyColumns,
+  encryptionKeyColumns,
+  scopedConfigColumns,
 } from "./index";
 
 /** Map a Drizzle table's columns to `{ tsKey: sqlName }` for assertions. */
@@ -17,23 +17,23 @@ function columnNameMap(table: Parameters<typeof getTableColumns>[0]) {
   );
 }
 
-describe("baseTenantColumns", () => {
-  const tenant = pgTable("tenant", { ...baseTenantColumns });
+describe("baseScopeColumns", () => {
+  const scopeOwner = pgTable("workspace", { ...baseScopeColumns });
 
-  it("exposes only the generic tenant columns", () => {
-    expect(Object.keys(baseTenantColumns).sort()).toEqual(
+  it("exposes only the generic scope-owner columns", () => {
+    expect(Object.keys(baseScopeColumns).sort()).toEqual(
       ["createdAt", "id", "isDisabled", "name"].sort(),
     );
   });
 
   it("does NOT leak domain-specific columns", () => {
     for (const leaked of ["orgId", "operatorMode", "aiMaxWorkflowsPerDay", "disabledReason"]) {
-      expect(baseTenantColumns).not.toHaveProperty(leaked);
+      expect(baseScopeColumns).not.toHaveProperty(leaked);
     }
   });
 
   it("maps to the expected SQL columns", () => {
-    expect(columnNameMap(tenant)).toEqual({
+    expect(columnNameMap(scopeOwner)).toEqual({
       id: "id",
       name: "name",
       isDisabled: "is_disabled",
@@ -42,19 +42,25 @@ describe("baseTenantColumns", () => {
   });
 
   it("has id as the primary key", () => {
-    const cols = getTableColumns(tenant);
+    const cols = getTableColumns(scopeOwner);
     expect(cols.id.primary).toBe(true);
     expect(cols.name.notNull).toBe(true);
   });
 });
 
-describe("tenantEncryptionKeyColumns", () => {
-  const tenantEncryptionKey = pgTable("tenant_encryption_key", {
-    ...tenantEncryptionKeyColumns,
+describe("encryptionKeyColumns", () => {
+  // The scope column is the consumer's to declare — add one to build the table.
+  const encryptionKey = pgTable("encryption_key", {
+    ...encryptionKeyColumns,
+    tenantId: text("tenant_id").notNull().unique(),
+  });
+
+  it("does NOT ship a scope-reference column (consumer declares it)", () => {
+    expect(encryptionKeyColumns).not.toHaveProperty("tenantId");
   });
 
   it("maps to the expected SQL columns", () => {
-    expect(columnNameMap(tenantEncryptionKey)).toEqual({
+    expect(columnNameMap(encryptionKey)).toEqual({
       id: "id",
       tenantId: "tenant_id",
       recipient: "recipient",
@@ -67,22 +73,29 @@ describe("tenantEncryptionKeyColumns", () => {
   });
 
   it("stores encrypted material as bytea", () => {
-    const cols = getTableColumns(tenantEncryptionKey);
+    const cols = getTableColumns(encryptionKey);
     expect(cols.identityEncrypted.getSQLType()).toBe("bytea");
     expect(cols.blindIndexKeyEncrypted.getSQLType()).toBe("bytea");
   });
 
-  it("keeps tenantId unique", () => {
-    expect(getTableColumns(tenantEncryptionKey).tenantId.isUnique).toBe(true);
+  it("lets the consumer make the scope column unique", () => {
+    expect(getTableColumns(encryptionKey).tenantId.isUnique).toBe(true);
   });
 });
 
-describe("tenantConfigColumns", () => {
-  const tenantConfig = pgTable("tenant_config", { ...tenantConfigColumns });
+describe("scopedConfigColumns", () => {
+  // The scope column is the consumer's to declare — add one to build the table.
+  const config = pgTable("config", {
+    ...scopedConfigColumns,
+    tenantId: text("tenant_id").notNull(),
+  });
+
+  it("does NOT ship a scope-reference column (consumer declares it)", () => {
+    expect(scopedConfigColumns).not.toHaveProperty("tenantId");
+  });
 
   it("maps to the expected SQL columns", () => {
-    expect(columnNameMap(tenantConfig)).toEqual({
-      tenantId: "tenant_id",
+    expect(columnNameMap(config)).toEqual({
       key: "key",
       value: "value",
       encrypted: "encrypted",
@@ -90,11 +103,12 @@ describe("tenantConfigColumns", () => {
       updatedAt: "updated_at",
       createdBy: "created_by",
       updatedBy: "updated_by",
+      tenantId: "tenant_id",
     });
   });
 
   it("stores value as jsonb", () => {
-    expect(getTableColumns(tenantConfig).value.getSQLType()).toBe("jsonb");
+    expect(getTableColumns(config).value.getSQLType()).toBe("jsonb");
   });
 });
 
@@ -107,8 +121,8 @@ describe("bytea custom type", () => {
 
 describe("extension mechanism (spread column-set)", () => {
   it("lets a consumer add domain columns while reusing the base", () => {
-    const extendedTenant = pgTable("tenant", {
-      ...baseTenantColumns,
+    const extendedScope = pgTable("workspace", {
+      ...baseScopeColumns,
       orgId: text("org_id").notNull(),
       operatorMode: text("operator_mode").notNull().default("direct"),
       aiMaxWorkflowsPerDay: integer("ai_max_workflows_per_day"),
@@ -116,7 +130,7 @@ describe("extension mechanism (spread column-set)", () => {
       disabledReason: text("disabled_reason"),
     });
 
-    const names = columnNameMap(extendedTenant);
+    const names = columnNameMap(extendedScope);
     // Base columns survive the spread…
     expect(names.id).toBe("id");
     expect(names.name).toBe("name");
@@ -129,6 +143,6 @@ describe("extension mechanism (spread column-set)", () => {
     expect(names.disabledReason).toBe("disabled_reason");
 
     // The column-set is unaffected by a consumer's extension.
-    expect(baseTenantColumns).not.toHaveProperty("orgId");
+    expect(baseScopeColumns).not.toHaveProperty("orgId");
   });
 });

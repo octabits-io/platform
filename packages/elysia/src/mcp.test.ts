@@ -23,19 +23,29 @@ vi.mock('elysia-mcp', () => ({
   },
 }));
 
-const { createMcpRoutes, parseTenantId, jsonRpcError, SCOPE_KEY_PATTERN } = await import('./mcp');
+const { createMcpRoutes, createPathSegmentScopeParser, jsonRpcError, SCOPE_KEY_PATTERN } =
+  await import('./mcp');
 
-describe('parseTenantId', () => {
-  it('extracts the tenant id following the /tenant/ segment', () => {
-    expect(parseTenantId('http://localhost/api/tenant/acme-1/mcp')).toBe('acme-1');
-    expect(parseTenantId('http://localhost/api/tenant/tenant_42/mcp/foo')).toBe('tenant_42');
+describe('createPathSegmentScopeParser', () => {
+  const parseScope = createPathSegmentScopeParser('scope');
+
+  it('extracts the scope key following the default /scope/ segment', () => {
+    expect(parseScope('http://localhost/api/scope/acme-1/mcp')).toBe('acme-1');
+    expect(parseScope('http://localhost/api/scope/scope_42/mcp/foo')).toBe('scope_42');
   });
 
-  it('returns null when the tenant segment is absent or invalid', () => {
-    expect(parseTenantId('http://localhost/api/mcp')).toBeNull();
-    expect(parseTenantId('http://localhost/api/tenant/')).toBeNull();
-    expect(parseTenantId('http://localhost/api/tenant/bad id/mcp')).toBeNull();
-    expect(parseTenantId('http://localhost/api/tenant/bad.id/mcp')).toBeNull();
+  it('returns null when the scope segment is absent or invalid', () => {
+    expect(parseScope('http://localhost/api/mcp')).toBeNull();
+    expect(parseScope('http://localhost/api/scope/')).toBeNull();
+    expect(parseScope('http://localhost/api/scope/bad id/mcp')).toBeNull();
+    expect(parseScope('http://localhost/api/scope/bad.id/mcp')).toBeNull();
+  });
+
+  it('extracts from a custom segment (e.g. a /tenant/ URL layout)', () => {
+    const parseTenant = createPathSegmentScopeParser('tenant');
+    expect(parseTenant('http://localhost/api/tenant/acme-1/mcp')).toBe('acme-1');
+    // The custom segment does not match the default `scope` word.
+    expect(parseTenant('http://localhost/api/scope/acme-1/mcp')).toBeNull();
   });
 
   it('exposes the url-friendly key pattern', () => {
@@ -63,6 +73,7 @@ describe('createMcpRoutes scope lifecycle', () => {
     const app = createMcpRoutes({
       prefix: '',
       serverInfo: { name: 'test', version: '1.0.0' },
+      parseScopeKey: createPathSegmentScopeParser('scope'),
       resolveScope: async ({ scopeKey }) => {
         expect(scopeKey).toBe('acme');
         return { scope };
@@ -73,7 +84,7 @@ describe('createMcpRoutes scope lifecycle', () => {
     });
 
     const res = await app.handle(
-      new Request('http://localhost/tenant/acme/', { method: 'POST', body: '{}' }),
+      new Request('http://localhost/scope/acme/', { method: 'POST', body: '{}' }),
     );
 
     expect(res.status).toBe(200);
@@ -91,6 +102,7 @@ describe('createMcpRoutes scope lifecycle', () => {
     const app = createMcpRoutes({
       prefix: '',
       serverInfo: { name: 'test', version: '1.0.0' },
+      parseScopeKey: createPathSegmentScopeParser('scope'),
       resolveScope,
       registerTools: () => {},
     });
@@ -123,7 +135,7 @@ describe('createMcpRoutes scope lifecycle', () => {
       registerTools: () => {},
     });
 
-    // No /tenant/ segment in the URL — the custom extractor supplies the key.
+    // No /scope/ segment in the URL — the custom extractor supplies the key.
     const res = await app.handle(
       new Request('http://localhost/anything/', { method: 'POST', body: '{}' }),
     );
@@ -137,12 +149,13 @@ describe('createMcpRoutes scope lifecycle', () => {
     const app = createMcpRoutes({
       prefix: '',
       serverInfo: { name: 'test', version: '1.0.0' },
+      parseScopeKey: createPathSegmentScopeParser('scope'),
       resolveScope: async () => ({ response: jsonRpcError(403, -32002, 'Access denied') }),
       registerTools: () => {},
     });
 
     const res = await app.handle(
-      new Request('http://localhost/tenant/acme/', { method: 'POST', body: '{}' }),
+      new Request('http://localhost/scope/acme/', { method: 'POST', body: '{}' }),
     );
 
     expect(res.status).toBe(403);
@@ -159,12 +172,13 @@ describe('createMcpRoutes scope lifecycle', () => {
     const app = createMcpRoutes({
       prefix: '',
       serverInfo: { name: 'test', version: '1.0.0' },
+      parseScopeKey: createPathSegmentScopeParser('scope'),
       resolveScope: async () => ({ scope }),
       registerTools: () => {},
     });
 
     await app.handle(
-      new Request('http://localhost/tenant/acme/', {
+      new Request('http://localhost/scope/acme/', {
         method: 'POST',
         body: '{}',
         headers: { 'x-throw': '1' },

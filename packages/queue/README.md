@@ -14,6 +14,12 @@ domain-agnostic foundation on top of [`pg-boss`](https://github.com/timgit/pg-bo
   never fails or re-runs its batch-mates, a schema-invalid payload is routed
   straight to the DLQ (retrying can't fix it), and handlers see the real
   `retryCount`.
+- **`defineQueue`** — a declarative layer over `createQueueDomain`. From a name,
+  a Zod payload schema, a handler factory, and optional retry/expire config it
+  generates enqueuer / worker / DLQ-handler factories. The dead-letter audit is
+  factored out behind an injected sink (`onDlqAudit`) so **no table schema is
+  baked in**, and partitioning stays generic via a `scopeKey` seam
+  (`resolveScopeKey`) rather than any tenant vocabulary.
 - Monitoring types + error factories (`JobDetails`, `QueueStats`, `JobState`,
   `createJobNotFoundError`, …).
 
@@ -42,7 +48,7 @@ import { z } from 'zod';
 import {
   createBossManager,
   createQueueDomain,
-  SCHEMA_TENANT_JOB_PAYLOAD,
+  SCHEMA_SCOPED_JOB_PAYLOAD,
 } from '@octabits-io/queue';
 
 // 1. One shared pg-boss lifecycle per process
@@ -53,7 +59,7 @@ const manager = createBossManager({
 await manager.start();
 
 // 2. A typed, validated queue domain
-const SCHEMA_EMAIL_JOB = SCHEMA_TENANT_JOB_PAYLOAD.extend({
+const SCHEMA_EMAIL_JOB = SCHEMA_SCOPED_JOB_PAYLOAD.extend({
   to: z.string().email(),
 });
 type EmailJob = z.infer<typeof SCHEMA_EMAIL_JOB>;
@@ -64,7 +70,7 @@ const emailQueue = createQueueDomain<EmailJob>(
 );
 
 // 3. Enqueue + process
-await emailQueue.enqueue({ tenantId: 't1', to: 'guest@example.com' });
+await emailQueue.enqueue({ scopeKey: 't1', to: 'guest@example.com' });
 
 await emailQueue.startWorker(
   async (job) => {
@@ -77,19 +83,76 @@ await emailQueue.startWorker(
 );
 
 // 4. Recurring jobs (payload validated like enqueue) + graceful shutdown
-await emailQueue.schedule('email-digest', '0 8 * * *', { tenantId: 't1', to: 'digest@example.com' });
+await emailQueue.schedule('email-digest', '0 8 * * *', { scopeKey: 't1', to: 'digest@example.com' });
 await emailQueue.stop();
 ```
+
+### Declarative queues with `defineQueue`
+
+When a queue is a single payload type with a worker, an enqueuer, and a
+dead-letter handler, `defineQueue` removes the boilerplate. It is a thin wrapper
+over `createQueueDomain` — the enqueuer/worker keep the same validation and
+per-job-acking semantics — plus a ready-made DLQ handler.
+
+```ts
+import { z } from 'zod';
+import { defineQueue, SCHEMA_SCOPED_JOB_PAYLOAD } from '@octabits-io/queue';
+
+const SCHEMA_EMAIL_JOB = SCHEMA_SCOPED_JOB_PAYLOAD.extend({ to: z.string().email() });
+type EmailJob = z.infer<typeof SCHEMA_EMAIL_JOB>;
+
+const emailQueue = defineQueue<EmailJob>({
+  name: 'email',
+  schema: SCHEMA_EMAIL_JOB,
+  // Handler factory — receives a scope factory + logger, returns a JobHandler.
+  createHandler: ({ createSystemScope, logger }) => async (job) => {
+    const scope = await createSystemScope(job.data.scopeKey);
+    try {
+      await scope.resolve('mailer').send(job.data);
+      return { ok: true, value: undefined };
+    } finally {
+      await scope.dispose();
+    }
+  },
+  config: { retryLimit: 5, retryDelay: 30, expireInSeconds: 120 }, // all optional
+  // Bind the DLQ scope + populate the audit record's partition key. Omit for
+  // unpartitioned queues — nothing tenant-specific is baked in.
+  resolveScopeKey: (data) => data.scopeKey,
+  // Audit sink — YOU decide how (and whether) to persist. No table schema here.
+  onDlqAudit: async (scope, record) => {
+    await scope.resolve('db').insert(jobAuditLog).values(record);
+  },
+});
+
+// Wire the three factories against a shared pg-boss + your scope factory.
+const boss = manager.getBoss();
+const { enqueue, schedule } = emailQueue.createEnqueuer({ boss });
+const worker = emailQueue.createWorker({ boss, logger });
+const dlq = emailQueue.createDlqHandler({ boss, createSystemScope, logger });
+
+await enqueue({ scopeKey: 't1', to: 'guest@example.com' });
+await worker.startWorker({ createSystemScope });
+await dlq.start();
+```
+
+The scope seam (`QueueScope` / `QueueScopeFactory`) is intentionally narrow —
+`resolve(key)` + `dispose()` — and is structurally compatible with
+foundation's IoC `DisposableServiceResolver` / `SystemScopeFactory`, so you can
+pass a foundation scope factory directly. Each dead-lettered job is logged, run
+through the optional `onDlq` hook, then handed to `onDlqAudit` with a
+`DlqAuditRecord` (`queueName`, `jobId`, `payload`, `errorMessage`,
+`attemptCount`, `completedAt`, `validPayload`, `scopeKey?`); a sink that throws
+is caught and logged, and the scope is always disposed.
 
 ### Base payload types
 
 `createQueueDomain<TPayload>` constrains `TPayload` only to
-`BaseJobPayload` (`Record<string, unknown>`) — the base is not tied to
-multi-tenancy. Multi-tenant consumers can opt in to the recommended
+`BaseJobPayload` (`Record<string, unknown>`) — the base is not tied to any
+partition scheme. Consumers can opt in to the recommended
 `SCHEMA_SYSTEM_JOB_PAYLOAD` (`{ correlationId? }` — global/cron jobs, no sentinel
-tenant ids) or the multi-tenant `SCHEMA_TENANT_JOB_PAYLOAD` (`{ tenantId, correlationId? }`,
-which extends it) and extend those, as
-shown above.
+scope keys) or the partition-scoped `SCHEMA_SCOPED_JOB_PAYLOAD` (`{ scopeKey, correlationId? }`,
+which extends it — `scopeKey` is e.g. a tenant id, and pairs with `defineQueue`'s
+`resolveScopeKey` seam) and extend those, as shown above.
 
 ## License
 

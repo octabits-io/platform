@@ -98,4 +98,34 @@ describe('createScopedKeyService — concurrent generation race', () => {
     expect(inserted[0]).toMatchObject({ workspaceId: 'w1' });
     expect(cache.has('w1')).toBe(true);
   });
+
+  it('serves generated keys via getKeys/hasKeys for a consumer-chosen tenantId scope column', async () => {
+    // A multi-tenant consumer binds the scope to its own `tenantId` column —
+    // no dedicated preset needed; the generic service takes the column name.
+    const inserted: Record<string, unknown>[] = [];
+    const db: ScopedKeyDb = {
+      insert: () => ({ values: async (v) => { inserted.push(v); } }),
+      delete: () => ({ where: async () => {} }),
+      query: { tenantEncryptionKey: { findFirst: vi.fn().mockResolvedValue(undefined) } },
+    };
+    const cache = makeCache();
+
+    const service = createScopedKeyService({
+      db,
+      scope: { column: 'tenantId', value: 't1' },
+      masterKeyProvider,
+      table: { tenantId: {} },
+      tableName: 'tenantEncryptionKey',
+      cache,
+    });
+
+    const result = await service.generateKeyPair();
+    expect(result.ok).toBe(true);
+    expect(inserted[0]).toMatchObject({ tenantId: 't1' });
+    expect(cache.has('t1')).toBe(true);
+
+    const keys = await service.getKeys();
+    expect(keys.ok).toBe(true);
+    expect(await service.hasKeys()).toBe(true);
+  });
 });

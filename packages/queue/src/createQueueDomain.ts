@@ -19,6 +19,29 @@ export interface CreateQueueDomainDeps {
 }
 
 /**
+ * Idempotently create a pg-boss queue, swallowing the "already exists" race.
+ *
+ * pg-boss v10+ requires a queue to exist before `send`/`work`/`schedule`; a
+ * fresh database has none. This is the single source of truth for that
+ * create-if-missing step so producers (the queue domain) and dedicated DLQ
+ * consumers ({@link defineQueue}'s DLQ handler) ensure queues the same way.
+ */
+export async function createQueueIfMissing(
+  boss: PgBoss,
+  queueName: string,
+  options?: Parameters<PgBoss['createQueue']>[1],
+): Promise<void> {
+  try {
+    await boss.createQueue(queueName, options);
+  } catch (error) {
+    // Queue may already exist, which is fine — surface anything else.
+    if (error instanceof Error && !error.message.includes('already exists')) {
+      throw error;
+    }
+  }
+}
+
+/**
  * Factory for creating isolated queue domains.
  * Each domain handles a specific category of jobs (email, calendar, AI, etc.)
  * with its own types, handlers, and configuration.
@@ -60,34 +83,16 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
   async function ensureQueue(): Promise<void> {
     if (queueCreated) return;
 
-    // Create the DLQ first (must exist before referencing it)
-    try {
-      await boss.createQueue(dlq, {
-        retryLimit: 0, // DLQ jobs should not retry
-      });
-    } catch (error) {
-      // Queue may already exist, which is fine
-      if (error instanceof Error && !error.message.includes('already exists')) {
-        throw error;
-      }
-    }
-
-    // Now create the main queue with deadLetter reference
-    try {
-      await boss.createQueue(name, {
-        retryLimit,
-        retryDelay,
-        expireInSeconds,
-        deadLetter: dlq,
-      });
-      queueCreated = true;
-    } catch (error) {
-      // Queue may already exist, which is fine
-      if (error instanceof Error && !error.message.includes('already exists')) {
-        throw error;
-      }
-      queueCreated = true;
-    }
+    // Create the DLQ first (must exist before referencing it), then the main
+    // queue with its deadLetter reference.
+    await createQueueIfMissing(boss, dlq, { retryLimit: 0 }); // DLQ jobs should not retry
+    await createQueueIfMissing(boss, name, {
+      retryLimit,
+      retryDelay,
+      expireInSeconds,
+      deadLetter: dlq,
+    });
+    queueCreated = true;
   }
 
   async function enqueue(payload: TPayload): Promise<Result<QueuedJob, EnqueueError>> {

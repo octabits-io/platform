@@ -6,9 +6,9 @@
  * Zod-validated payloads (`createQueueDomain`).
  *
  * Domain-agnostic — the logger is injected and payload types are supplied by
- * the consumer. Multi-tenant callers can build on the recommended
- * `SCHEMA_TENANT_JOB_PAYLOAD`; global/cron jobs on `SCHEMA_SYSTEM_JOB_PAYLOAD`
- * (no sentinel tenant ids).
+ * the consumer. Partition-scoped callers can build on the recommended
+ * `SCHEMA_SCOPED_JOB_PAYLOAD`; global/cron jobs on `SCHEMA_SYSTEM_JOB_PAYLOAD`
+ * (no sentinel scope keys).
  */
 
 // Lifecycle / monitoring facade
@@ -19,16 +19,27 @@ export type { BossManager, BossManagerConfig } from './BossManager.ts';
 export { createQueueDomain } from './createQueueDomain.ts';
 export type { CreateQueueDomainDeps } from './createQueueDomain.ts';
 
+// Declarative queue factory (worker + enqueuer + DLQ trio over createQueueDomain)
+export { defineQueue } from './defineQueue.ts';
+export type {
+  DefineQueueOptions,
+  QueueDefinition,
+  QueueScope,
+  QueueScopeFactory,
+  DlqAuditRecord,
+  DlqAuditSink,
+} from './defineQueue.ts';
+
 // Payload + domain types
 export {
   SCHEMA_BASE_JOB_PAYLOAD,
   SCHEMA_SYSTEM_JOB_PAYLOAD,
-  SCHEMA_TENANT_JOB_PAYLOAD,
+  SCHEMA_SCOPED_JOB_PAYLOAD,
 } from './types.ts';
 export type {
   BaseJobPayload,
   SystemJobPayload,
-  TenantJobPayload,
+  ScopedJobPayload,
   JobContext,
   QueueDomainConfig,
   QueueDomain,

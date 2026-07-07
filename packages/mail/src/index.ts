@@ -45,3 +45,80 @@ export {
 export type {
   MemoryTransport,
 } from './providers/memory/MemoryTransport';
+
+// --- Inbound contract (provider-agnostic normalized shapes) ----------------
+export type {
+  NormalizedInboundMessage,
+  NormalizedInboundAttachment,
+  MailInboundParseError,
+} from './base/inbound';
+
+// --- Delivery contract (provider-agnostic delivery status + events) --------
+export type {
+  DeliveryStatus,
+  NormalizedDeliveryEvent,
+  MailEventParseError,
+} from './base/delivery';
+
+// --- Inbound attachment security policy ------------------------------------
+export {
+  MAX_INBOUND_ATTACHMENT_BYTES,
+  MAX_INBOUND_ATTACHMENTS_PER_MESSAGE,
+  BLOCKED_ATTACHMENT_EXTENSIONS,
+  BLOCKED_ATTACHMENT_MIME_TYPES,
+  DEFAULT_INBOUND_ATTACHMENT_POLICY,
+  fileExtension,
+  screenInboundAttachment,
+} from './inboundAttachmentPolicy';
+export type {
+  InboundAttachmentPolicy,
+  InboundAttachmentDescriptor,
+  AttachmentBlockReason,
+  AttachmentScreenResult,
+} from './inboundAttachmentPolicy';
+
+// --- Tagged reply-address formatting + parsing -----------------------------
+export {
+  replyAddressMessage,
+  buildReplyAddress,
+  buildReturnPath,
+  parseReplyAddress,
+} from './replyAddress';
+export type {
+  ReplyAddressParts,
+} from './replyAddress';
+
+// --- Transactional dispatch pipeline ---------------------------------------
+export {
+  createBaseMailService,
+} from './dispatch/BaseMailService';
+export type {
+  BaseMailService,
+  BaseMailServiceConfig,
+  OnSendCallback,
+  SendMailMetadata,
+} from './dispatch/BaseMailService';
+export {
+  resolveRecipients,
+  applyRedirectSubjectPrefix,
+  buildEmailContent,
+  getTemplate,
+} from './dispatch/email-builder';
+export type {
+  RecipientsResult,
+  EmailContent,
+  BuildEmailContentOptions,
+} from './dispatch/email-builder';
+export { createDevOverrideMailTransport } from './dispatch/devOverride';
+export type {
+  BaseMailParams,
+  UserMailParams,
+  SystemMailParams,
+  MailClassification,
+  MailTemplateBuilder,
+  MailTemplateRegistry,
+  MailDeliveryMode,
+  ScopedMailServerConfig,
+  ResolvedMailConfig,
+  MailConfigReader,
+} from './dispatch/types';
