@@ -1,5 +1,8 @@
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import { timingSafeEqual } from 'node:crypto';
+import type { createRemoteJWKSet, JWTPayload } from 'jose';
+import { err, ok } from '../result/index.ts';
 import type { Logger } from '../logger/types.ts';
+import { extractBearerToken } from './BearerAuthService.ts';
 
 /** JWT validation error taxonomy (domain-agnostic). */
 export type JwtValidationError =
@@ -57,6 +60,12 @@ export interface JwtValidationServiceConfig<TToken> {
    */
   claimMapper: ClaimMapper<TToken>;
   /**
+   * Accepted JWS algorithms, passed to jose's `jwtVerify`. Defaults to the
+   * asymmetric algorithm families (RS/PS/ES/EdDSA) — JWKS-based OIDC
+   * validation never uses HMAC keys, and pinning prevents algorithm-confusion.
+   */
+  algorithms?: string[];
+  /**
    * Secret token for E2E test auth bypass. When set, requests bearing this
    * exact token skip JWKS validation and receive the caller-supplied
    * `bypassToken`. MUST NEVER be effective in production (neutralized below).
@@ -82,18 +91,55 @@ class OidcDiscoveryError extends Error {
 const DISCOVERY_COOLDOWN_MS = 30_000;
 
 /**
+ * Default accepted JWS algorithms: the asymmetric families. Symmetric (HS*)
+ * algorithms are excluded — they are meaningless against a public JWKS and
+ * enable key-confusion attacks when accepted.
+ */
+const DEFAULT_JWT_ALGORITHMS = [
+  'RS256', 'RS384', 'RS512',
+  'PS256', 'PS384', 'PS512',
+  'ES256', 'ES384', 'ES512',
+  'EdDSA',
+];
+
+type RemoteJwks = ReturnType<typeof createRemoteJWKSet>;
+
+/**
+ * jose signals expiry with `code: 'ERR_JWT_EXPIRED'`. The message fallback
+ * matches only jose's exact expiry wording — a loose `includes('exp')` would
+ * also match e.g. `unexpected "iss" claim value` and misreport wrong-issuer
+ * tokens as expired.
+ */
+function isJwtExpiredError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  if ((error as { code?: unknown }).code === 'ERR_JWT_EXPIRED') return true;
+  return error instanceof Error && error.message.includes('"exp" claim timestamp check failed');
+}
+
+/** Length-guarded constant-time string comparison. */
+function secureEquals(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a);
+  const bBuf = Buffer.from(b);
+  return aBuf.length === bBuf.length && timingSafeEqual(aBuf, bBuf);
+}
+
+/**
  * Creates a JWT validation service that verifies OIDC-issued JWTs.
  *
  * Lazily fetches the JWKS URI from the issuer's OIDC discovery document on
  * first token validation, then uses jose's createRemoteJWKSet for signature
  * verification with automatic caching and key rotation. Verified payloads are
  * handed to the injected `claimMapper` to produce the domain token shape.
+ *
+ * `jose` is an optional peer, loaded lazily on first validation — creating the
+ * service (and the rest of the `./auth` surface) works without it installed.
  */
 export function createJwtValidationService<TToken>({
   issuerUrl,
   audience,
   logger,
   claimMapper,
+  algorithms = DEFAULT_JWT_ALGORITHMS,
   authBypassSecret,
   bypassToken,
 }: JwtValidationServiceConfig<TToken>): JwtValidationService<TToken> {
@@ -101,11 +147,11 @@ export function createJwtValidationService<TToken>({
   const issuer = issuerUrl.replace(/\/$/, '');
 
   // JWKS initialized lazily on first token validation
-  let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
-  let jwksInitPromise: Promise<ReturnType<typeof createRemoteJWKSet>> | null = null;
+  let jwks: RemoteJwks | null = null;
+  let jwksInitPromise: Promise<RemoteJwks> | null = null;
   let lastDiscoveryFailureAt = 0;
 
-  async function getJwks(): Promise<ReturnType<typeof createRemoteJWKSet>> {
+  async function getJwks(): Promise<RemoteJwks> {
     if (jwks) return jwks;
 
     // Cooldown: reject immediately if we failed recently
@@ -118,6 +164,9 @@ export function createJwtValidationService<TToken>({
 
     if (!jwksInitPromise) {
       jwksInitPromise = (async () => {
+        // Lazy jose load — already resolved by validateToken's own import, so
+        // this only reads the module cache.
+        const { createRemoteJWKSet: createJwkSet } = await import('jose');
         const discoveryUrl = `${issuer}/.well-known/openid-configuration`;
         try {
           const res = await fetch(discoveryUrl);
@@ -130,7 +179,7 @@ export function createJwtValidationService<TToken>({
           }
           logger.info('JWKS URI resolved from OIDC discovery', { jwksUri: discovery.jwks_uri });
           lastDiscoveryFailureAt = 0;
-          jwks = createRemoteJWKSet(new URL(discovery.jwks_uri));
+          jwks = createJwkSet(new URL(discovery.jwks_uri));
           return jwks;
         } catch (err) {
           lastDiscoveryFailureAt = Date.now();
@@ -158,77 +207,55 @@ export function createJwtValidationService<TToken>({
   }
 
   /**
-   * Extract Bearer token from Authorization header.
-   */
-  function extractBearerToken(authorizationHeader: string | undefined): string | null {
-    if (!authorizationHeader) return null;
-    const parts = authorizationHeader.split(' ');
-    if (parts.length !== 2 || parts[0] !== 'Bearer') return null;
-    return parts[1]!;
-  }
-
-  /**
    * Validate a JWT and extract the validated token.
    */
   async function validateToken(token: string): Promise<ValidateResult<TToken>> {
     // E2E test bypass: if the token matches the bypass secret, return the synthetic
     // identity without contacting the OIDC provider. Dead code when the bypass secret
     // is unset, and hard-neutralized in production processes (see effectiveBypassSecret).
-    if (effectiveBypassSecret && token === effectiveBypassSecret) {
+    if (effectiveBypassSecret && secureEquals(token, effectiveBypassSecret)) {
       if (bypassToken === undefined) {
         logger.error('Auth bypass secret matched but no bypassToken was configured — rejecting.');
-        return {
-          ok: false,
-          error: { key: 'invalid_token', message: 'Auth bypass not configured' },
-        };
+        return err({ key: 'invalid_token', message: 'Auth bypass not configured' });
       }
       logger.warn('Auth bypass active — using synthetic token for E2E testing');
-      return { ok: true, value: bypassToken };
+      return ok(bypassToken);
     }
+
+    // jose is an optional peer, loaded lazily. A missing install is a
+    // deployment/programming error and throws (outside the Result contract).
+    const { jwtVerify } = await import('jose');
 
     try {
       const resolvedJwks = await getJwks();
       const { payload } = await jwtVerify(token, resolvedJwks, {
         issuer,
         audience,
+        algorithms,
       });
 
       const mapped = claimMapper(payload);
       if (!mapped.ok) {
-        return {
-          ok: false,
-          error: { key: 'missing_claims', message: mapped.message },
-        };
+        return err({ key: 'missing_claims', message: mapped.message });
       }
 
-      return { ok: true, value: mapped.value };
+      return ok(mapped.value);
     } catch (error) {
       if (error instanceof OidcDiscoveryError) {
         logger.warn('OIDC discovery unavailable — cannot validate JWT', {
           issuer,
           error: error.cause instanceof Error ? error.cause.message : error.message,
         });
-        return {
-          ok: false,
-          error: { key: 'jwks_unavailable', message: 'Auth provider temporarily unavailable' },
-        };
+        return err({ key: 'jwks_unavailable', message: 'Auth provider temporarily unavailable' });
       }
 
-      if (error instanceof Error) {
-        if (error.message.includes('exp') || error.message.includes('expired')) {
-          return {
-            ok: false,
-            error: { key: 'expired_token', message: 'Token has expired' },
-          };
-        }
+      if (isJwtExpiredError(error)) {
+        return err({ key: 'expired_token', message: 'Token has expired' });
       }
 
       logger.debug('JWT validation failed', { error: error instanceof Error ? error.message : String(error) });
 
-      return {
-        ok: false,
-        error: { key: 'invalid_token', message: 'Invalid or malformed JWT' },
-      };
+      return err({ key: 'invalid_token', message: 'Invalid or malformed JWT' });
     }
   }
 
@@ -240,10 +267,7 @@ export function createJwtValidationService<TToken>({
   ): Promise<ValidateResult<TToken>> {
     const token = extractBearerToken(authorizationHeader);
     if (!token) {
-      return {
-        ok: false,
-        error: { key: 'missing_token', message: 'Missing or malformed Authorization header' },
-      };
+      return err({ key: 'missing_token', message: 'Missing or malformed Authorization header' });
     }
     return validateToken(token);
   }

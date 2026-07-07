@@ -63,6 +63,11 @@ export function createLruCacheService({ dateProvider }: LruCacheServiceDeps) {
    */
   function createCache<K, V>(options: LruCacheOptions): LruCache<K, V> {
     const { maxSize, ttlMs } = options;
+    // Programming error, not a Result: a non-positive maxSize would make the
+    // eviction loop in set() spin forever (nothing left to evict).
+    if (!Number.isInteger(maxSize) || maxSize < 1) {
+      throw new Error(`LruCache maxSize must be a positive integer, got: ${maxSize}`);
+    }
     const cache = new Map<K, CacheEntry<V>>();
 
     function getNow(): number {

@@ -1,8 +1,9 @@
 import type { PgBoss, Job } from 'pg-boss';
 import type { z } from 'zod';
+import { ok, err } from '@octabits-io/foundation/result';
 import type { Result } from '@octabits-io/foundation/result';
 import type { Logger, LogAttributes } from '@octabits-io/foundation/logger';
-import { createQueueDomain, createQueueIfMissing } from './createQueueDomain.ts';
+import { createQueueDomain, ensureQueueSynced } from './createQueueDomain.ts';
 import type {
   BaseJobPayload,
   QueueDomainConfig,
@@ -45,13 +46,8 @@ export type QueueScopeFactory<TServices = Record<string, unknown>> = (
 // DLQ audit sink
 // ============================================================================
 
-/**
- * Structured record handed to the DLQ audit sink when a job is dead-lettered.
- *
- * The queue base bakes in no table schema — a consumer decides how (and
- * whether) to persist this. Fields are domain-agnostic.
- */
-export interface DlqAuditRecord<TPayload extends BaseJobPayload> {
+/** Fields common to every {@link DlqAuditRecord}, regardless of payload validity. */
+export interface DlqAuditRecordBase {
   /** Name of the queue the job belonged to */
   queueName: string;
   /** DLQ job id (pg-boss) */
@@ -60,19 +56,46 @@ export interface DlqAuditRecord<TPayload extends BaseJobPayload> {
   jobType: string;
   /** Terminal status for a dead-lettered job */
   status: 'dead_letter';
-  /** The (best-effort) payload — validated when {@link validPayload} is true */
-  payload: TPayload;
   /** Human-readable reason the job was dead-lettered */
   errorMessage: string;
-  /** Configured retry limit that was exhausted before dead-lettering */
-  attemptCount: number;
   /** ISO-8601 timestamp when the job reached the DLQ */
   completedAt: string;
-  /** Whether {@link payload} passed the queue's Zod schema */
-  validPayload: boolean;
   /** Partition key extracted from the payload, if any */
   scopeKey?: string;
 }
+
+/**
+ * Structured record handed to the DLQ audit sink when a job is dead-lettered.
+ *
+ * Discriminated on `validPayload`:
+ * - `validPayload: true` — the payload passed the queue's Zod schema. The job
+ *   was dead-lettered by pg-boss after exhausting its retries, so
+ *   `attemptCount` is the configured retry limit and `payload` is typed.
+ * - `validPayload: false` — the payload failed schema validation, so the
+ *   worker dead-lettered it on its first attempt without retrying
+ *   (`attemptCount: 1`). No typed `payload` exists; the raw value is exposed
+ *   as `rawPayload: unknown`.
+ *
+ * The queue base bakes in no table schema — a consumer decides how (and
+ * whether) to persist this. Fields are domain-agnostic.
+ */
+export type DlqAuditRecord<TPayload extends BaseJobPayload> =
+  | (DlqAuditRecordBase & {
+      /** Payload passed the queue's Zod schema */
+      validPayload: true;
+      /** The schema-validated payload */
+      payload: TPayload;
+      /** Configured retry limit that was exhausted before dead-lettering */
+      attemptCount: number;
+    })
+  | (DlqAuditRecordBase & {
+      /** Payload failed the queue's Zod schema */
+      validPayload: false;
+      /** The raw, unvalidated payload as read from the DLQ job */
+      rawPayload: unknown;
+      /** Schema-invalid payloads are dead-lettered on the first attempt, without retry */
+      attemptCount: 1;
+    });
 
 /**
  * Sink invoked for every dead-lettered job (after the optional {@link
@@ -123,6 +146,14 @@ export interface DefineQueueOptions<
   dlqLogFields?: (data: TPayload) => LogAttributes;
 }
 
+/** Tuning options for the dedicated DLQ worker. */
+export interface DlqWorkerOptions {
+  /** How often pg-boss polls the DLQ for new jobs, in seconds (default: 30) */
+  pollingIntervalSeconds?: number;
+  /** Number of DLQ jobs fetched per poll (default: pg-boss's default, 1) */
+  batchSize?: number;
+}
+
 export interface QueueDefinition<
   TPayload extends BaseJobPayload,
   TServices = Record<string, unknown>,
@@ -150,7 +181,7 @@ export interface QueueDefinition<
     createSystemScope: QueueScopeFactory<TServices>;
     logger: Logger;
   }) => {
-    start: () => Promise<Result<void, QueueError>>;
+    start: (options?: DlqWorkerOptions) => Promise<Result<void, QueueError>>;
     stop: () => Promise<void>;
   };
 }
@@ -226,19 +257,32 @@ export function defineQueue<
     logger: Logger;
   }) {
     const { boss, createSystemScope, logger } = deps;
-    let workerId: string | null = null;
+    let workerStarted = false;
 
-    async function start(): Promise<Result<void, QueueError>> {
+    async function start(options?: DlqWorkerOptions): Promise<Result<void, QueueError>> {
+      // Same double-start guard as the domain worker: a second registration
+      // would leak the first (stop() targets the queue name once).
+      if (workerStarted) {
+        return err({
+          key: 'queue_error',
+          message: `DLQ worker already started for queue ${queueConfig.dlq} — call stop() before starting again`,
+          queue: queueConfig.dlq,
+        });
+      }
+
       try {
         // A dedicated DLQ-consumer process may boot before any producer has
         // ensured the queues — on a fresh database pg-boss v10+ errors
         // 'Queue <name>-dlq does not exist' on every poll otherwise. Ensure it
-        // exists first, mirroring createQueueDomain's create-if-missing step.
-        await createQueueIfMissing(boss, queueConfig.dlq, { retryLimit: 0 });
+        // exists first, mirroring createQueueDomain's ensure step.
+        await ensureQueueSynced(boss, queueConfig.dlq, { retryLimit: 0 });
 
-        workerId = await boss.work(
+        await boss.work(
           queueConfig.dlq,
-          { pollingIntervalSeconds: 30 },
+          {
+            pollingIntervalSeconds: options?.pollingIntervalSeconds ?? 30,
+            ...(options?.batchSize != null && { batchSize: options.batchSize }),
+          },
           async (jobs: Job<TPayload>[]) => {
             for (const job of jobs) {
               // Everything that touches the raw payload runs inside this
@@ -295,18 +339,34 @@ export function defineQueue<
 
                   // Audit sink — the consumer decides how/whether to persist.
                   if (onDlqAudit) {
-                    await onDlqAudit(scope, {
+                    const base: DlqAuditRecordBase = {
                       queueName: name,
                       jobId: job.id,
                       jobType: name,
                       status: 'dead_letter',
-                      payload: data,
-                      errorMessage: 'Exhausted all retry attempts',
-                      attemptCount: retryLimit,
+                      errorMessage: validation.success
+                        ? 'Exhausted all retry attempts'
+                        : 'Payload failed schema validation; dead-lettered without retry',
                       completedAt: new Date().toISOString(),
-                      validPayload: validation.success,
                       ...(scopeKey != null && { scopeKey }),
-                    });
+                    };
+                    // Honest attempt accounting: retry-exhausted jobs report
+                    // the configured retry limit; schema-invalid payloads are
+                    // dead-lettered by the worker on their FIRST attempt.
+                    const record: DlqAuditRecord<TPayload> = validation.success
+                      ? {
+                          ...base,
+                          validPayload: true,
+                          payload: validation.data,
+                          attemptCount: retryLimit,
+                        }
+                      : {
+                          ...base,
+                          validPayload: false,
+                          rawPayload: job.data,
+                          attemptCount: 1,
+                        };
+                    await onDlqAudit(scope, record);
                   }
                 } catch (error) {
                   logger.error(
@@ -330,25 +390,26 @@ export function defineQueue<
           },
         );
 
-        return { ok: true, value: undefined };
+        workerStarted = true;
+        return ok(undefined);
       } catch (error) {
-        return {
-          ok: false,
-          error: {
-            key: 'queue_error',
-            message:
-              error instanceof Error ? error.message : `Failed to start DLQ handler for ${name}`,
-            queue: queueConfig.dlq,
-          },
-        };
+        return err({
+          key: 'queue_error',
+          message:
+            error instanceof Error ? error.message : `Failed to start DLQ handler for ${name}`,
+          queue: queueConfig.dlq,
+        });
       }
     }
 
     async function stop(): Promise<void> {
-      if (workerId) {
-        await boss.offWork(workerId);
-        workerId = null;
-      }
+      if (!workerStarted) return;
+      // pg-boss v12 `offWork(name)` matches workers by queue NAME; passing a
+      // worker id as the first argument matches nothing (a silent no-op) —
+      // ids only work via `offWork(name, { id })`. Name-scoped stop is exact
+      // here since this handler registers a single worker (guarded above).
+      await boss.offWork(queueConfig.dlq);
+      workerStarted = false;
     }
 
     return { start, stop };

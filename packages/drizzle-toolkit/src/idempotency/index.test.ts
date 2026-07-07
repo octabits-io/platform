@@ -48,11 +48,17 @@ const dateProvider = { now: () => new Date("2026-01-01T00:00:00Z") };
 
 /**
  * Mock db capturing the select-where SQL, the inserted values, and the
- * delete-where SQL. `selectRows` seeds what `begin()`'s lookup returns.
+ * delete-where SQL. `selectRows` seeds what `begin()`'s lookup returns;
+ * `refetchRows` (when given) seeds every select after the first (the
+ * commit-race re-fetch).
  */
-function makeDb(selectRows: Array<Record<string, unknown>>, opts?: { insertThrows?: unknown }) {
+function makeDb(
+  selectRows: Array<Record<string, unknown>>,
+  opts?: { insertThrows?: unknown; refetchRows?: Array<Record<string, unknown>> },
+) {
   const selectWheres: unknown[] = [];
   const deleteWheres: unknown[] = [];
+  let selectCalls = 0;
   const insertValues = vi.fn(async (v: unknown) => {
     if (opts?.insertThrows) throw opts.insertThrows;
     return undefined;
@@ -62,7 +68,9 @@ function makeDb(selectRows: Array<Record<string, unknown>>, opts?: { insertThrow
       from: () => ({
         where: (w: unknown) => {
           selectWheres.push(w);
-          return { limit: async () => selectRows };
+          selectCalls += 1;
+          const rows = selectCalls > 1 && opts?.refetchRows ? opts.refetchRows : selectRows;
+          return { limit: async () => rows };
         },
       }),
     }),
@@ -122,6 +130,21 @@ describe("hashRequest / isValidIdempotencyKey", () => {
     expect(isValidIdempotencyKey("x".repeat(256))).toBe(false);
     expect(isValidIdempotencyKey("has\nnewline")).toBe(false);
   });
+
+  it("hashes are insensitive to object key order at every depth", () => {
+    expect(hashRequest("POST", "/x", { a: 1, b: { c: 1, d: [1, { e: 2, f: 3 }] } })).toBe(
+      hashRequest("POST", "/x", { b: { d: [1, { f: 3, e: 2 }], c: 1 }, a: 1 }),
+    );
+  });
+
+  it("hashes stay sensitive to array order, values, and undefined-vs-null semantics", () => {
+    expect(hashRequest("POST", "/x", { a: [1, 2] })).not.toBe(hashRequest("POST", "/x", { a: [2, 1] }));
+    expect(hashRequest("POST", "/x", { a: 1 })).not.toBe(hashRequest("POST", "/x", { a: 2 }));
+    // JSON.stringify semantics: undefined object entries are dropped…
+    expect(hashRequest("POST", "/x", { a: 1, b: undefined })).toBe(hashRequest("POST", "/x", { a: 1 }));
+    // …and undefined array items serialize as null.
+    expect(hashRequest("POST", "/x", [undefined])).toBe(hashRequest("POST", "/x", [null]));
+  });
 });
 
 describe("createIdempotencyService.begin", () => {
@@ -139,7 +162,8 @@ describe("createIdempotencyService.begin", () => {
     expect(outcome.kind).toBe("fresh");
     if (outcome.kind !== "fresh") return;
 
-    await outcome.commit(200, { ok: true, draftId: 42 });
+    const committed = await outcome.commit(200, { ok: true, draftId: 42 });
+    expect(committed).toEqual({ kind: "committed" });
     expect(insertValues).toHaveBeenCalledTimes(1);
     expect(insertValues).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -188,10 +212,15 @@ describe("createIdempotencyService.begin", () => {
     expect(deleteWheres).toHaveLength(1); // expired row deleted before fall-through
   });
 
-  it("commit swallows a unique-violation race (logs warn, no throw)", async () => {
+  it("commit lost race with the same hash → re-fetches and returns the winner's response", async () => {
     const uniqueViolation = Object.assign(new Error("dup"), { cause: { code: "23505" } });
     const warn = vi.fn();
-    const { db } = makeDb([], { insertThrows: uniqueViolation });
+    const { db } = makeDb([], {
+      insertThrows: uniqueViolation,
+      refetchRows: [
+        { requestHash: HASH, responseStatus: 201, responseBody: { winner: true }, expiresAt: FUTURE },
+      ],
+    });
     const service = createIdempotencyService({
       db,
       table: idempotencyKey,
@@ -202,8 +231,36 @@ describe("createIdempotencyService.begin", () => {
 
     const outcome = await service.begin({ key: "k", requestHash: HASH });
     if (outcome.kind !== "fresh") throw new Error("expected fresh");
-    await expect(outcome.commit(200, { ok: true })).resolves.toBeUndefined();
+    await expect(outcome.commit(200, { ok: true })).resolves.toEqual({
+      kind: "raced",
+      cached: { status: 201, body: { winner: true } },
+    });
     expect(warn).toHaveBeenCalledWith("Idempotency commit lost race", { key: "k", requestHash: HASH });
+  });
+
+  it("commit lost race with a different hash → race_conflict (no throw)", async () => {
+    const uniqueViolation = Object.assign(new Error("dup"), { cause: { code: "23505" } });
+    const { db } = makeDb([], {
+      insertThrows: uniqueViolation,
+      refetchRows: [
+        { requestHash: OTHER_HASH, responseStatus: 200, responseBody: {}, expiresAt: FUTURE },
+      ],
+    });
+    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, scope: { column: "tenantId", value: "t1" } });
+
+    const outcome = await service.begin({ key: "k", requestHash: HASH });
+    if (outcome.kind !== "fresh") throw new Error("expected fresh");
+    await expect(outcome.commit(200, {})).resolves.toEqual({ kind: "race_conflict" });
+  });
+
+  it("commit lost race with no re-fetchable row → race_conflict (no throw)", async () => {
+    const uniqueViolation = Object.assign(new Error("dup"), { cause: { code: "23505" } });
+    const { db } = makeDb([], { insertThrows: uniqueViolation }); // refetch returns [] too
+    const service = createIdempotencyService({ db, table: idempotencyKey, dateProvider, scope: { column: "tenantId", value: "t1" } });
+
+    const outcome = await service.begin({ key: "k", requestHash: HASH });
+    if (outcome.kind !== "fresh") throw new Error("expected fresh");
+    await expect(outcome.commit(200, {})).resolves.toEqual({ kind: "race_conflict" });
   });
 
   it("commit rethrows a non-unique db error", async () => {
@@ -214,6 +271,32 @@ describe("createIdempotencyService.begin", () => {
     const outcome = await service.begin({ key: "k", requestHash: HASH });
     if (outcome.kind !== "fresh") throw new Error("expected fresh");
     await expect(outcome.commit(200, {})).rejects.toThrow("fk");
+  });
+
+  it("commit recomputes the clock — TTL starts at commit time, not begin time", async () => {
+    let current = new Date("2026-01-01T00:00:00Z");
+    const movingClock = { now: () => current };
+    const { db, insertValues } = makeDb([]);
+    const service = createIdempotencyService({
+      db,
+      table: idempotencyKey,
+      dateProvider: movingClock,
+      scope: { column: "tenantId", value: "t1" },
+    });
+
+    const outcome = await service.begin({ key: "k", requestHash: HASH });
+    if (outcome.kind !== "fresh") throw new Error("expected fresh");
+
+    // The operation takes an hour before committing.
+    current = new Date("2026-01-01T01:00:00Z");
+    await outcome.commit(200, {});
+
+    expect(insertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        createdAt: "2026-01-01T01:00:00.000Z", // commit time, not begin time
+        expiresAt: "2026-01-02T01:00:00.000Z", // commit time + 24h TTL
+      }),
+    );
   });
 });
 

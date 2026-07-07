@@ -11,7 +11,7 @@
  */
 
 import { type Result, type OctError, ok, err } from '@octabits-io/foundation/result';
-import { z } from 'zod';
+import type { z } from 'zod';
 import { encryptHybrid, decryptHybrid, encryptHybridBytes, decryptHybridBytes } from './encryption.ts';
 
 export interface PiiEncryptionError extends OctError {
@@ -151,7 +151,12 @@ export async function decryptPiiJson<T extends z.ZodType>(
     const parsed = JSON.parse(result.value);
     const validated = schema.safeParse(parsed);
     if (!validated.success) {
-      return err({ key: 'pii_decryption_error' as const, message: `Validation failed: ${validated.error.message}` });
+      // Do not embed zod issue details — they describe the decrypted PII
+      // object's shape/paths and must not leak into logs via error messages.
+      return err({
+        key: 'pii_decryption_error' as const,
+        message: `Decrypted data failed schema validation (${validated.error.issues.length} issue${validated.error.issues.length === 1 ? '' : 's'})`,
+      });
     }
     return ok(validated.data);
   } catch {

@@ -68,6 +68,7 @@ export function createBrevoTransport(config: BrevoTransportCreateConfig): BrevoT
           name: message.from.name,
         },
         to: message.to.map((email) => ({ email })),
+        bcc: message.bcc?.map((email) => ({ email })),
         replyTo: message.replyTo
           ? { email: message.replyTo.address, name: message.replyTo.name }
           : undefined,

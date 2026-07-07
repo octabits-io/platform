@@ -1,6 +1,20 @@
 import { PgBoss } from 'pg-boss';
+import { ok, err } from '@octabits-io/foundation/result';
+import type { Result } from '@octabits-io/foundation/result';
 import type { Logger } from '@octabits-io/foundation/logger';
-import type { JobDetails, QueueStats } from './monitoring.ts';
+import {
+  createJobNotFoundError,
+  createQueueNotFoundError,
+  createJobCancelError,
+} from './monitoring.ts';
+import type {
+  JobDetails,
+  QueueStats,
+  JobNotFoundError,
+  QueueNotFoundError,
+  JobCancelError,
+} from './monitoring.ts';
+import type { QueueError } from './types.ts';
 
 export interface BossManagerConfig {
   /** PostgreSQL connection string */
@@ -23,13 +37,18 @@ export interface BossManager {
   /** Stop pg-boss gracefully */
   stop(): Promise<void>;
   /** Get a job by ID from a specific queue */
-  getJobById(queueName: string, jobId: string): Promise<JobDetails | null>;
+  getJobById(
+    queueName: string,
+    jobId: string
+  ): Promise<Result<JobDetails, JobNotFoundError | QueueError>>;
   /** Get stats for multiple queues */
-  getQueues(names?: string[]): Promise<QueueStats[]>;
+  getQueues(names?: string[]): Promise<Result<QueueStats[], QueueError>>;
   /** Get stats for a single queue */
-  getQueueStats(queueName: string): Promise<QueueStats | null>;
+  getQueueStats(
+    queueName: string
+  ): Promise<Result<QueueStats, QueueNotFoundError | QueueError>>;
   /** Cancel a job */
-  cancelJob(queueName: string, jobId: string): Promise<boolean>;
+  cancelJob(queueName: string, jobId: string): Promise<Result<void, JobCancelError>>;
 }
 
 /**
@@ -71,67 +90,105 @@ export function createBossManager(config: BossManagerConfig): BossManager {
     logger.info('pg-boss stopped');
   }
 
-  async function getJobById(queueName: string, jobId: string): Promise<JobDetails | null> {
-    const [job] = await boss.findJobs(queueName, { id: jobId });
-    if (!job) {
-      return null;
-    }
-
+  /** Map an unexpected (e.g. connection-level) throw to a queue_error Result. */
+  function queueError(queueName: string, error: unknown, fallback: string): QueueError {
     return {
-      id: job.id,
-      name: job.name,
-      data: job.data as Record<string, unknown>,
-      state: job.state,
-      retryCount: job.retryCount,
-      retryLimit: job.retryLimit,
-      startedOn: job.startedOn?.toISOString() ?? null,
-      completedOn: job.completedOn?.toISOString() ?? null,
-      createdOn: job.createdOn.toISOString(),
-      expireInSeconds: job.expireInSeconds ?? 0,
-      output: job.output as Record<string, unknown> | null,
+      key: 'queue_error',
+      message: error instanceof Error ? error.message : fallback,
+      queue: queueName,
     };
   }
 
-  async function getQueues(names?: string[]): Promise<QueueStats[]> {
-    const queues = await boss.getQueues();
-    const filtered = names ? queues.filter(q => names.includes(q.name)) : queues;
-    return filtered.map(q => ({
-      name: q.name,
-      deferredCount: q.deferredCount,
-      queuedCount: q.queuedCount,
-      activeCount: q.activeCount,
-      totalCount: q.deferredCount + q.queuedCount + q.activeCount,
-    }));
-  }
+  async function getJobById(
+    queueName: string,
+    jobId: string
+  ): Promise<Result<JobDetails, JobNotFoundError | QueueError>> {
+    try {
+      const [job] = await boss.findJobs(queueName, { id: jobId });
+      if (!job) {
+        return err(createJobNotFoundError(queueName, jobId));
+      }
 
-  async function getQueueStats(queueName: string): Promise<QueueStats | null> {
-    const queue = await boss.getQueue(queueName);
-    if (!queue) {
-      return null;
+      return ok({
+        id: job.id,
+        name: job.name,
+        data: job.data as Record<string, unknown>,
+        state: job.state,
+        retryCount: job.retryCount,
+        retryLimit: job.retryLimit,
+        startedOn: job.startedOn?.toISOString() ?? null,
+        completedOn: job.completedOn?.toISOString() ?? null,
+        createdOn: job.createdOn.toISOString(),
+        expireInSeconds: job.expireInSeconds ?? 0,
+        output: job.output as Record<string, unknown> | null,
+      });
+    } catch (error) {
+      return err(queueError(queueName, error, `Failed to look up job ${jobId}`));
     }
-
-    return {
-      name: queue.name,
-      deferredCount: queue.deferredCount,
-      queuedCount: queue.queuedCount,
-      activeCount: queue.activeCount,
-      totalCount: queue.deferredCount + queue.queuedCount + queue.activeCount,
-    };
   }
 
-  async function cancelJob(queueName: string, jobId: string): Promise<boolean> {
-    // pg-boss cancel takes queue name and job id
-    // Returns a CommandResponse which is truthy on success
+  async function getQueues(names?: string[]): Promise<Result<QueueStats[], QueueError>> {
+    try {
+      const queues = await boss.getQueues();
+      const filtered = names ? queues.filter(q => names.includes(q.name)) : queues;
+      return ok(
+        filtered.map(q => ({
+          name: q.name,
+          deferredCount: q.deferredCount,
+          queuedCount: q.queuedCount,
+          activeCount: q.activeCount,
+          totalCount: q.deferredCount + q.queuedCount + q.activeCount,
+        }))
+      );
+    } catch (error) {
+      return err({
+        key: 'queue_error',
+        message: error instanceof Error ? error.message : 'Failed to list queues',
+      });
+    }
+  }
+
+  async function getQueueStats(
+    queueName: string
+  ): Promise<Result<QueueStats, QueueNotFoundError | QueueError>> {
+    try {
+      const queue = await boss.getQueue(queueName);
+      if (!queue) {
+        return err(createQueueNotFoundError(queueName));
+      }
+
+      return ok({
+        name: queue.name,
+        deferredCount: queue.deferredCount,
+        queuedCount: queue.queuedCount,
+        activeCount: queue.activeCount,
+        totalCount: queue.deferredCount + queue.queuedCount + queue.activeCount,
+      });
+    } catch (error) {
+      return err(queueError(queueName, error, `Failed to get stats for queue ${queueName}`));
+    }
+  }
+
+  async function cancelJob(
+    queueName: string,
+    jobId: string
+  ): Promise<Result<void, JobCancelError>> {
     try {
       await boss.cancel(queueName, jobId);
-      return true;
+      return ok(undefined);
     } catch (error) {
       logger.warn('Failed to cancel job', {
         queue: queueName,
         jobId,
         error: error instanceof Error ? error.message : String(error),
       });
-      return false;
+      return err(
+        createJobCancelError(
+          queueName,
+          jobId,
+          error instanceof Error ? error.message : undefined
+        )
+      );
     }
   }
 

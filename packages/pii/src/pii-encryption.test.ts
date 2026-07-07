@@ -145,7 +145,7 @@ describe('decryptPiiJson', () => {
   });
 
   test('returns error when schema validation fails', async () => {
-    const encrypted = await encryptPiiJson({ wrong: 'shape' }, recipient);
+    const encrypted = await encryptPiiJson({ wrong: 'shape', name: 'Secret Person' }, recipient);
     assert(encrypted.ok);
     assert(encrypted.value !== null);
 
@@ -153,7 +153,11 @@ describe('decryptPiiJson', () => {
     expect(result.ok).toBe(false);
     assert(!result.ok);
     expect(result.error.key).toBe('pii_decryption_error');
-    expect(result.error.message).toContain('Validation failed');
+    expect(result.error.message).toMatch(/failed schema validation \(\d+ issues?\)/);
+    // The message must not leak the decrypted object's shape or values.
+    expect(result.error.message).not.toContain('wrong');
+    expect(result.error.message).not.toContain('age');
+    expect(result.error.message).not.toContain('Secret Person');
   });
 
   test('returns error for non-JSON string', async () => {

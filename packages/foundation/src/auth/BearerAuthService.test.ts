@@ -28,11 +28,21 @@ describe('extractBearerToken', () => {
   it('extracts a Bearer token', () => {
     expect(extractBearerToken('Bearer abc.def')).toBe('abc.def');
   });
+  it('matches the Bearer scheme case-insensitively (RFC 7235)', () => {
+    expect(extractBearerToken('bearer abc.def')).toBe('abc.def');
+    expect(extractBearerToken('BEARER abc.def')).toBe('abc.def');
+    expect(extractBearerToken('BeArEr abc.def')).toBe('abc.def');
+  });
+  it('tolerates multiple spaces between scheme and token', () => {
+    expect(extractBearerToken('Bearer   abc.def')).toBe('abc.def');
+  });
   it('returns null for missing/malformed headers', () => {
     expect(extractBearerToken(undefined)).toBeNull();
     expect(extractBearerToken('abc.def')).toBeNull();
     expect(extractBearerToken('Basic abc')).toBeNull();
     expect(extractBearerToken('Bearer a b')).toBeNull();
+    expect(extractBearerToken('Bearer ')).toBeNull();
+    expect(extractBearerToken('Bearerabc')).toBeNull();
   });
 });
 

@@ -40,6 +40,15 @@ describe('createMemoryTransport', () => {
     expect(transport.getMessagesTo('none@x.com')).toHaveLength(0);
   });
 
+  it('records bcc and matches it in getMessagesTo', async () => {
+    const transport = createMemoryTransport();
+    await transport.send(msg({ to: ['a@x.com'], bcc: ['hidden@x.com'] }));
+
+    expect(transport.getLastMessage()?.bcc).toEqual(['hidden@x.com']);
+    expect(transport.getMessagesTo('hidden@x.com')).toHaveLength(1);
+    expect(transport.getMessagesTo('a@x.com')).toHaveLength(1);
+  });
+
   it('getMessages returns a copy that does not mutate internal state', async () => {
     const transport = createMemoryTransport();
     await transport.send(msg());

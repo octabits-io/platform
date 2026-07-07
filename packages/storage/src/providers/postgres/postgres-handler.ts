@@ -24,18 +24,66 @@ export interface ServeObjectResult {
 }
 
 export type ServeObjectError = {
-  key: 'not_found' | 'internal_error';
+  key: 'not_found' | 'invalid_key' | 'internal_error';
   message: string;
   statusCode: number;
 };
 
 /**
- * Core function to retrieve object data using ObjectFileServer
+ * Options shared by all serve-handler factories.
+ */
+export interface ServeHandlerOptions {
+  /**
+   * Value for the `Content-Disposition` response header on successful
+   * responses (e.g. `'attachment'`). Default: unset (browsers render inline).
+   *
+   * WARNING: serving user-uploaded content (SVG, HTML, ...) inline from the
+   * same origin as your application enables stored XSS — the document's
+   * scripts run with your origin's privileges. Set `'attachment'` (or serve
+   * blobs from a separate, sandboxed origin) whenever stored objects are not
+   * fully trusted.
+   */
+  readonly contentDisposition?: string;
+}
+
+/**
+ * Request keys are untrusted. Reject keys that fail `isValidObjectKey`
+ * (traversal segments, leading slash, empty), both in their raw form and —
+ * when the raw form is valid percent-encoding — in their decoded form, so an
+ * encoded `%2e%2e/` cannot slip past frameworks that hand us the raw path.
+ * The raw key is what gets looked up; decoding is for validation only.
+ */
+function isRequestKeySafe(key: string): boolean {
+  if (!isValidObjectKey(key)) return false;
+  try {
+    const decoded = decodeURIComponent(key);
+    if (decoded !== key && !isValidObjectKey(decoded)) return false;
+  } catch {
+    // Not valid percent-encoding — it cannot hide an encoded traversal.
+  }
+  return true;
+}
+
+/**
+ * Core function to retrieve object data using ObjectFileServer.
+ * Validates the key (traversal, leading slash, encoded variants) before any
+ * storage access; invalid keys yield an `invalid_key` error with status 400.
  */
 export async function getObjectData(
   fileServer: ObjectFileServer,
   params: ServeObjectParams
 ): Promise<Result<ServeObjectResult, ServeObjectError>> {
+  if (!isRequestKeySafe(params.key)) {
+    return {
+      ok: false,
+      error: {
+        key: 'invalid_key',
+        message: 'Invalid object key',
+        statusCode: 400,
+      },
+    };
+  }
+
   const result = await fileServer.getObjectData({ namespace: params.namespace, key: params.key });
 
   if (!result.ok) {
@@ -88,11 +136,15 @@ export interface ExpressLikeResponse {
   end(): this;
 }
 
-export function createExpressHandler(fileServer: ObjectFileServer, namespace?: string) {
+export function createExpressHandler(fileServer: ObjectFileServer, namespace?: string, options?: ServeHandlerOptions) {
   return async (
     req: ExpressLikeRequest,
     res: ExpressLikeResponse
   ): Promise<void> => {
+    // Content-Type reflects user-controlled upload metadata — never let
+    // browsers MIME-sniff it into something executable.
+    res.set('X-Content-Type-Options', 'nosniff');
+
     const key = req.params.key || req.params['0']; // Support catch-all routes
 
     if (!key) {
@@ -112,6 +164,9 @@ export function createExpressHandler(fileServer: ObjectFileServer, namespace?: s
     // Set headers
     if (obj.contentType) {
       res.set('Content-Type', obj.contentType);
+    }
+    if (options?.contentDisposition) {
+      res.set('Content-Disposition', options.contentDisposition);
     }
     if (obj.size !== undefined) {
       res.set('Content-Length', obj.size.toString());
@@ -157,8 +212,12 @@ export interface NitroEvent {
   };
 }
 
-export function createNitroHandler(fileServer: ObjectFileServer, namespace?: string) {
+export function createNitroHandler(fileServer: ObjectFileServer, namespace?: string, options?: ServeHandlerOptions) {
   return async (event: NitroEvent, key?: string): Promise<Buffer | string> => {
+    // Content-Type reflects user-controlled upload metadata — never let
+    // browsers MIME-sniff it into something executable.
+    event.node.res.setHeader('X-Content-Type-Options', 'nosniff');
+
     const _key = key || event.context.params?.key || event.context.params?.['0'];
 
     if (!_key) {
@@ -178,6 +237,9 @@ export function createNitroHandler(fileServer: ObjectFileServer, namespace?: str
     // Set headers
     if (obj.contentType) {
       event.node.res.setHeader('Content-Type', obj.contentType);
+    }
+    if (options?.contentDisposition) {
+      event.node.res.setHeader('Content-Disposition', options.contentDisposition);
     }
     if (obj.size !== undefined) {
       event.node.res.setHeader('Content-Length', obj.size);
@@ -210,7 +272,8 @@ export function createNitroHandler(fileServer: ObjectFileServer, namespace?: str
 export async function createWebResponse(
   fileServer: ObjectFileServer,
   params: ServeObjectParams,
-  requestHeaders?: Headers
+  requestHeaders?: Headers,
+  options?: ServeHandlerOptions
 ): Promise<Response> {
   const result = await getObjectData(fileServer, params);
 
@@ -219,6 +282,7 @@ export async function createWebResponse(
       status: result.error.statusCode,
       headers: {
         'Content-Type': 'text/plain',
+        'X-Content-Type-Options': 'nosniff',
       },
     });
   }
@@ -232,14 +296,22 @@ export async function createWebResponse(
       status: 304,
       headers: {
         'ETag': obj.etag!,
+        'X-Content-Type-Options': 'nosniff',
       },
     });
   }
 
   const headers = new Headers();
 
+  // Content-Type reflects user-controlled upload metadata — never let
+  // browsers MIME-sniff it into something executable.
+  headers.set('X-Content-Type-Options', 'nosniff');
+
   if (obj.contentType) {
     headers.set('Content-Type', obj.contentType);
+  }
+  if (options?.contentDisposition) {
+    headers.set('Content-Disposition', options.contentDisposition);
   }
   if (obj.size !== undefined) {
     headers.set('Content-Length', obj.size.toString());
@@ -277,7 +349,7 @@ export interface GenericResponse {
   body: Buffer | string;
 }
 
-export function createGenericHandler(fileServer: ObjectFileServer) {
+export function createGenericHandler(fileServer: ObjectFileServer, options?: ServeHandlerOptions) {
   return async (req: GenericRequest): Promise<GenericResponse> => {
     const result = await getObjectData(fileServer, {
       namespace: req.namespace,
@@ -289,6 +361,7 @@ export function createGenericHandler(fileServer: ObjectFileServer) {
         statusCode: result.error.statusCode,
         headers: {
           'Content-Type': 'text/plain',
+          'X-Content-Type-Options': 'nosniff',
         },
         body: result.error.message,
       };
@@ -303,6 +376,7 @@ export function createGenericHandler(fileServer: ObjectFileServer) {
         statusCode: 304,
         headers: {
           'ETag': obj.etag!,
+          'X-Content-Type-Options': 'nosniff',
         },
         body: '',
       };
@@ -310,10 +384,16 @@ export function createGenericHandler(fileServer: ObjectFileServer) {
 
     const headers: Record<string, string> = {
       'Cache-Control': 'public, max-age=31536000, immutable',
+      // Content-Type reflects user-controlled upload metadata — never let
+      // browsers MIME-sniff it into something executable.
+      'X-Content-Type-Options': 'nosniff',
     };
 
     if (obj.contentType) {
       headers['Content-Type'] = obj.contentType;
+    }
+    if (options?.contentDisposition) {
+      headers['Content-Disposition'] = options.contentDisposition;
     }
     if (obj.size !== undefined) {
       headers['Content-Length'] = obj.size.toString();
@@ -342,6 +422,10 @@ export function createGenericHandler(fileServer: ObjectFileServer) {
  * Supports patterns like:
  * - /storage/:key*
  * - /api/storage/:key*
+ *
+ * The extracted key is percent-decoded and validated with `isValidObjectKey`;
+ * keys containing traversal segments (`..`, plain or percent-encoded), a
+ * leading slash, or nothing at all yield `{}` instead of a key.
  */
 export function parseStoragePath(path: string): {
   key?: string;
@@ -361,13 +445,27 @@ export function parseStoragePath(path: string): {
     return {};
   }
 
-  const key = parts.slice(startIndex).join('/').replace(/\/+$/, '');
+  const rawKey = parts.slice(startIndex).join('/').replace(/\/+$/, '');
+
+  // URL paths arrive percent-encoded: decode, then reject unsafe keys.
+  let key: string;
+  try {
+    key = decodeURIComponent(rawKey);
+  } catch {
+    return {};
+  }
+
+  if (!isValidObjectKey(key)) {
+    return {};
+  }
 
   return { key };
 }
 
 /**
- * Validate object key format
+ * Validate object key format. Enforced automatically by `getObjectData` (and
+ * therefore by every serve handler) and by `parseStoragePath`; exported for
+ * callers that build their own request plumbing.
  */
 export function isValidObjectKey(key: string): boolean {
   if (!key || key.length === 0) return false;

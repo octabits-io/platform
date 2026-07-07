@@ -17,11 +17,11 @@ pnpm add node-mailjet    # for @octabits-io/mail/mailjet
 pnpm add wretch          # for @octabits-io/mail/brevo
 ```
 
-`@octabits-io/foundation` (`Result`, `Logger`) is a required peer dependency.
-The vendor SDKs are **optional peer dependencies**: the root entry (`.`) is
-dependency-free (contract + logger/memory transports), and each vendor
-transport lives behind its own subpath so you only install and load the SDKs
-you use.
+`@octabits-io/foundation` (`Result`, `Logger`) is a required peer dependency
+used by the root entry at runtime. The vendor SDKs are **optional peer
+dependencies**: the root entry (`.`) is vendor-free (contract + logger/memory
+transports, no provider SDKs), and each vendor transport lives behind its own
+subpath so you only install and load the SDKs you use.
 
 ## The contract
 
@@ -34,9 +34,11 @@ interface MailTransport {
 }
 ```
 
-A `MailMessage` is fully provider-agnostic: `from`, `to[]`, optional `replyTo`,
-optional `returnPath` (SMTP envelope sender), `subject`, `text`, `html`, and
-optional `attachments` (raw bytes; each transport re-encodes as needed).
+A `MailMessage` is fully provider-agnostic: `from`, `to[]`, optional `bcc[]`
+(blind-carbon-copy — delivered but never shown in visible headers), optional
+`replyTo`, optional `returnPath` (SMTP envelope sender), `subject`, `text`,
+`html`, and optional `attachments` (raw bytes; each transport re-encodes as
+needed).
 
 `SentMailInfo.messageId` is the provider's RFC 5322 Message-ID when available
 (SMTP and Brevo surface it; Mailjet does not → `null`).

@@ -149,6 +149,31 @@ describe('queue domain against real pg-boss', () => {
     await d.stop();
   });
 
+  it('stop() actually detaches the worker: jobs enqueued afterwards stay unprocessed', async () => {
+    // Regression for the offWork(workerId) bug: pg-boss v12 offWork matches by
+    // queue NAME, so passing the worker id was a silent no-op and the worker
+    // kept polling forever.
+    const seen: string[] = [];
+    const d = domain('q-stop');
+    await d.startWorker(
+      async (job) => {
+        seen.push(job.data.ref);
+        return { ok: true, value: undefined };
+      },
+      { pollingIntervalSeconds: 0.5 }
+    );
+
+    await d.enqueue({ ref: 'before-stop', fail: false });
+    await waitFor(() => seen.length === 1);
+
+    await d.stop();
+    await d.enqueue({ ref: 'after-stop', fail: false });
+
+    // Give a stopped worker ample polls — nothing new may be processed.
+    await new Promise((r) => setTimeout(r, 2000));
+    expect(seen).toEqual(['before-stop']);
+  });
+
   it('exposes queue stats and job lookup through the BossManager facade', async () => {
     const d = domain('q-stats');
     const res = await d.enqueue({ ref: 's', fail: false });
@@ -158,12 +183,23 @@ describe('queue domain against real pg-boss', () => {
     // Counts refresh on pg-boss's monitor sweep (monitorIntervalSeconds), so
     // only the shape is deterministic here — not the freshly-enqueued count.
     const stats = await manager.getQueueStats('q-stats');
-    expect(stats?.name).toBe('q-stats');
-    expect(typeof stats?.queuedCount).toBe('number');
-    expect(typeof stats?.totalCount).toBe('number');
+    expect(stats.ok).toBe(true);
+    if (stats.ok) {
+      expect(stats.value.name).toBe('q-stats');
+      expect(typeof stats.value.queuedCount).toBe('number');
+      expect(typeof stats.value.totalCount).toBe('number');
+    }
 
     const job = await manager.getJobById('q-stats', res.value.jobId);
-    expect(job?.id).toBe(res.value.jobId);
-    expect(job?.data).toEqual({ ref: 's', fail: false });
+    expect(job.ok).toBe(true);
+    if (job.ok) {
+      expect(job.value.id).toBe(res.value.jobId);
+      expect(job.value.data).toEqual({ ref: 's', fail: false });
+    }
+
+    // Missing lookups surface as typed errors, not nulls.
+    const missing = await manager.getQueueStats('q-missing');
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.error.key).toBe('queue_not_found');
   });
 });

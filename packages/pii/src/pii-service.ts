@@ -16,7 +16,7 @@
  */
 
 import type { Result } from '@octabits-io/foundation/result';
-import { z } from 'zod';
+import type { z } from 'zod';
 import {
   encryptPiiString,
   decryptPiiString,

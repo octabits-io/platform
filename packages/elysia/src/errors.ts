@@ -10,6 +10,7 @@
 import { Elysia } from 'elysia';
 import type { OctError } from '@octabits-io/foundation/result';
 import type { Logger } from '@octabits-io/foundation/logger';
+import { isProduction } from './config';
 
 /**
  * A domain error carrying a stable `key` and a `message`.
@@ -50,8 +51,22 @@ interface ElysiaSet {
   status?: number | string;
 }
 
+/** The response body shape emitted by {@link statusErrorWithSet}. */
+export interface ErrorResponseBody {
+  key: string;
+  message: string;
+  /** Field-level details (validation errors). */
+  fields?: Array<{ path: string; message: string }>;
+}
+
 /**
  * Convert a keyed error into an error response body and set the status on `set`.
+ *
+ * Only the documented response fields (`key`, `message`, and `fields` when
+ * present) are serialized — any other enumerable properties on the error are
+ * never sent to the client. When the error maps to a 5xx status and the
+ * process runs in production (see `isProduction()`), the message is redacted
+ * to a generic `'Internal error'`; the key is kept.
  *
  * @example
  * const result = await service.getData();
@@ -61,9 +76,14 @@ export function statusErrorWithSet<E extends KeyedError>(
   set: ElysiaSet,
   err: E,
   overrides?: ErrorStatusOverrides,
-): E {
-  set.status = getStatusCodeForError(err, overrides);
-  return { ...err };
+): ErrorResponseBody {
+  const status = getStatusCodeForError(err, overrides);
+  set.status = status;
+  const message = status >= 500 && isProduction() ? 'Internal error' : err.message;
+  const fields = (err as { fields?: ErrorResponseBody['fields'] }).fields;
+  return fields !== undefined
+    ? { key: err.key, message, fields }
+    : { key: err.key, message };
 }
 
 /** API error carrying an HTTP status code and a stable error key. */
@@ -183,7 +203,7 @@ interface ElysiaValidationError extends Error {
 }
 
 export interface ErrorHandlerOptions {
-  /** Whether to hide internal error messages from clients. Defaults to `process.env.NODE_ENV === 'production'`. */
+  /** Whether to hide internal error messages from clients. Defaults to this package's `isProduction()` (`NODE_ENV === 'production'` OR `PRODUCTION` truthy). */
   production?: boolean;
 }
 
@@ -194,7 +214,7 @@ export interface ErrorHandlerOptions {
  * not exposed to clients.
  */
 export const createErrorHandler = (logger: Logger, options: ErrorHandlerOptions = {}) => {
-  const isProduction = options.production ?? process.env.NODE_ENV === 'production';
+  const production = options.production ?? isProduction();
 
   return new Elysia({ name: 'error-handler' })
     .onError({ as: 'global' }, ({ error, code, set }) => {
@@ -229,7 +249,10 @@ export const createErrorHandler = (logger: Logger, options: ErrorHandlerOptions 
 
       if (error instanceof ApiError) {
         set.status = error.statusCode;
-        return { key: error.key, message: error.message };
+        // 5xx messages may carry internals (e.g. an unknown-key OctError mapped
+        // via mapResultError) — redact in production, keep the stable key.
+        const message = error.statusCode >= 500 && production ? 'Internal error' : error.message;
+        return { key: error.key, message };
       }
 
       // Database connection errors → 503 Service Unavailable.
@@ -244,7 +267,7 @@ export const createErrorHandler = (logger: Logger, options: ErrorHandlerOptions 
       set.status = 500;
       return {
         key: 'internal_server_error',
-        message: isProduction ? 'Internal Server Error' : (error instanceof Error ? error.message : 'Internal Server Error'),
+        message: production ? 'Internal Server Error' : (error instanceof Error ? error.message : 'Internal Server Error'),
       };
     });
 };

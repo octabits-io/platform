@@ -14,11 +14,22 @@
  * `{ get/set/has/delete/clear }` — e.g. a foundation LruCacheService cache
  * with a 5-minute TTL).
  */
-import { eq } from 'drizzle-orm';
 import crypto from 'node:crypto';
-import { type OctError, type Result, ok, err } from '@octabits-io/foundation/result';
-import type { MasterKeyProvider, MasterKeyError } from './master-key.ts';
+import { type OctError, type Result, ok, err, tryCatchAsync } from '@octabits-io/foundation/result';
+import type { MasterKeyProvider, MasterKeyProviderError } from './master-key.ts';
 import { generateIdentity, identityToRecipient } from './typage/index.ts';
+
+// drizzle-orm is an OPTIONAL peer dependency. Invariant: it must never be
+// imported at module top level — this file is re-exported from the root
+// barrel, so a static import would make `import '@octabits-io/pii'` crash for
+// consumers that don't install drizzle-orm. It is lazy-loaded (and cached) on
+// the first call into a createScopedKeyService function instead; only those
+// calls require drizzle-orm to be installed.
+let drizzleOrm: Promise<typeof import('drizzle-orm')> | undefined;
+function loadDrizzleOrm(): Promise<typeof import('drizzle-orm')> {
+  drizzleOrm ??= import('drizzle-orm');
+  return drizzleOrm;
+}
 
 /** The `{ column, value }` pair a key-service instance is bound to. */
 export interface KeyScope {
@@ -27,7 +38,7 @@ export interface KeyScope {
    * `'tenantId'`, `'workspaceId'`), not the SQL column name.
    */
   column: string;
-  /** Scope value (e.g. the tenant id). Also used as the cache key. */
+  /** Scope value (e.g. the tenant id). */
   value: string;
 }
 
@@ -46,6 +57,12 @@ export interface ScopedKeyGenerationError extends OctError {
   conflict?: boolean;
 }
 
+/** A key-table read/write failed at the storage layer (connection loss, bad SQL, …). */
+export interface ScopedKeyStorageError extends OctError {
+  key: 'scoped_key_storage_error';
+  message: string;
+}
+
 /**
  * Postgres unique-violation detection (SQLSTATE 23505), walking the `cause`
  * chain so driver/ORM wrappers (e.g. DrizzleQueryError) don't hide the code.
@@ -59,7 +76,11 @@ function isUniqueViolation(error: unknown): boolean {
   return false;
 }
 
-export type ScopedKeyError = ScopedKeyNotFoundError | ScopedKeyGenerationError | MasterKeyError;
+export type ScopedKeyError =
+  | ScopedKeyNotFoundError
+  | ScopedKeyGenerationError
+  | ScopedKeyStorageError
+  | MasterKeyProviderError;
 
 /** Decrypted scope keys ready for use in encryption operations. */
 export interface ScopedKeys {
@@ -110,7 +131,14 @@ export interface ScopedKeyServiceDeps {
   table: any;
   /** Key of the table in `db.query` (e.g. 'encryptionKey'). */
   tableName: string;
-  /** Decrypted-key cache (recommend LRU with ~5-minute TTL). */
+  /**
+   * Decrypted-key cache (recommend LRU with ~5-minute TTL).
+   *
+   * Cache entries are keyed by `encodeURIComponent(column):encodeURIComponent(value)`,
+   * NOT by the table. WARNING: do not share one cache instance across services
+   * that store keys in DIFFERENT tables under the same scope column+value —
+   * their entries would collide. Use one cache per key table.
+   */
   cache: ScopedKeyCache;
 }
 
@@ -120,15 +148,29 @@ export interface ScopedKeyServiceDeps {
  */
 export function createScopedKeyService({ db, scope, masterKeyProvider, table, tableName, cache }: ScopedKeyServiceDeps) {
   const keyCache = cache;
+  // Qualified cache key: scope value alone would collide across services bound
+  // to different scope columns (e.g. workspaceId 'x' vs tenantId 'x').
+  const cacheKey = `${encodeURIComponent(scope.column)}:${encodeURIComponent(scope.value)}`;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const scopeColumn = () => (table as any)[scope.column];
+
+  async function findRow(): Promise<ScopedKeyRow | undefined> {
+    const { eq } = await loadDrizzleOrm();
+    return db.query[tableName]!.findFirst({
+      where: eq(scopeColumn(), scope.value),
+    });
+  }
 
   /**
    * Generate a new encryption key pair for the scope. Call at scope creation
    * (or rely on `getKeys`' lazy generation). Secrets are encrypted with the
    * master key before storage.
    *
-   * @param tx - Optional transaction context (same structural shape as db)
+   * @param tx - Optional transaction context (same structural shape as db).
+   *   When a transaction is passed, the decrypted-key cache is NOT
+   *   pre-populated — the caller's transaction may still roll back, and a
+   *   cached never-persisted key would make future encryptions unrecoverable.
+   *   The cache is populated on the next `getKeys()` read instead.
    */
   async function generateKeyPair(
     tx?: ScopedKeyDb,
@@ -157,8 +199,18 @@ export function createScopedKeyService({ db, scope, masterKeyProvider, table, ta
         blindIndexKeyEncrypted: blindKeyResult.value,
       });
 
-      // Pre-populate cache
-      keyCache.set(scope.value, { recipient, identity, blindIndexKey, keyVersion: 1 });
+      // Pre-populate the cache only when the insert went through the
+      // service's own (auto-committing) db handle — never inside a caller
+      // transaction that may still roll back. Read the row back so the cached
+      // keyVersion is the actually-persisted one (DB default/trigger), not a
+      // hardcoded guess. If the read-back fails, skip caching — the next
+      // getKeys() populates it.
+      if (!tx) {
+        const rowResult = await tryCatchAsync(() => findRow());
+        if (rowResult.ok && rowResult.value) {
+          keyCache.set(cacheKey, { recipient, identity, blindIndexKey, keyVersion: rowResult.value.keyVersion });
+        }
+      }
 
       return ok(undefined);
     } catch (error) {
@@ -170,31 +222,40 @@ export function createScopedKeyService({ db, scope, masterKeyProvider, table, ta
     }
   }
 
-  /**
-   * Get decrypted encryption keys for the scope (cached after first
-   * retrieval; lazily auto-generates on first use, retrying the fetch when a
-   * concurrent request won the unique-constraint race).
-   */
-  async function getKeys(): Promise<Result<ScopedKeys, ScopedKeyError>> {
-    const cached = keyCache.get(scope.value);
+  async function getKeysInner(depth: number): Promise<Result<ScopedKeys, ScopedKeyError>> {
+    const cached = keyCache.get(cacheKey);
     if (cached) return ok(cached);
 
-    const row: ScopedKeyRow | undefined = await db.query[tableName]!.findFirst({
-      where: eq(scopeColumn(), scope.value),
-    });
+    const rowResult = await tryCatchAsync(() => findRow());
+    if (!rowResult.ok) {
+      return err({
+        key: 'scoped_key_storage_error',
+        message: `Failed to load keys for ${scope.column}=${scope.value}: ${rowResult.error.message}`,
+      });
+    }
+    const row = rowResult.value;
 
     if (!row) {
+      // Bound the generate→refetch recursion: one retry is enough to recover
+      // from a lost unique-constraint race; anything beyond that is a broken
+      // store and must not recurse indefinitely.
+      if (depth >= 1) {
+        return err({
+          key: 'scoped_key_generation_error',
+          message: `Keys for ${scope.column}=${scope.value} were generated but could not be re-fetched (retry exhausted)`,
+        });
+      }
       // Auto-generate keys for this scope (lazy initialization)
       const genResult = await generateKeyPair();
       if (!genResult.ok) {
         // Unique-constraint violation = concurrent generation → retry fetch
         if (genResult.error.key === 'scoped_key_generation_error' && genResult.error.conflict) {
-          return getKeys();
+          return getKeysInner(depth + 1);
         }
         return genResult;
       }
-      // Keys are now cached by generateKeyPair, return from cache
-      return getKeys();
+      // Keys are persisted (and usually cached) now — re-fetch once.
+      return getKeysInner(depth + 1);
     }
 
     // Decrypt with master key
@@ -211,18 +272,36 @@ export function createScopedKeyService({ db, scope, masterKeyProvider, table, ta
       keyVersion: row.keyVersion,
     };
 
-    keyCache.set(scope.value, keys);
+    keyCache.set(cacheKey, keys);
     return ok(keys);
   }
 
+  /**
+   * Get decrypted encryption keys for the scope (cached after first
+   * retrieval; lazily auto-generates on first use, retrying the fetch once
+   * when a concurrent request won the unique-constraint race).
+   */
+  async function getKeys(): Promise<Result<ScopedKeys, ScopedKeyError>> {
+    return getKeysInner(0);
+  }
+
   /** Check if the scope has encryption keys. */
-  async function hasKeys(): Promise<boolean> {
-    if (keyCache.has(scope.value)) return true;
-    const row = await db.query[tableName]!.findFirst({
-      columns: { id: true },
-      where: eq(scopeColumn(), scope.value),
+  async function hasKeys(): Promise<Result<boolean, ScopedKeyError>> {
+    if (keyCache.has(cacheKey)) return ok(true);
+    const rowResult = await tryCatchAsync(async () => {
+      const { eq } = await loadDrizzleOrm();
+      return db.query[tableName]!.findFirst({
+        columns: { id: true },
+        where: eq(scopeColumn(), scope.value),
+      });
     });
-    return row !== undefined;
+    if (!rowResult.ok) {
+      return err({
+        key: 'scoped_key_storage_error',
+        message: `Failed to check keys for ${scope.column}=${scope.value}: ${rowResult.error.message}`,
+      });
+    }
+    return ok(rowResult.value !== undefined);
   }
 
   /**
@@ -232,14 +311,23 @@ export function createScopedKeyService({ db, scope, masterKeyProvider, table, ta
    * offboarding when data should be permanently deleted.
    */
   async function destroyKeys(): Promise<Result<void, ScopedKeyError>> {
-    keyCache.delete(scope.value);
-    await db.delete(table).where(eq(scopeColumn(), scope.value));
+    keyCache.delete(cacheKey);
+    const deleteResult = await tryCatchAsync(async () => {
+      const { eq } = await loadDrizzleOrm();
+      await db.delete(table).where(eq(scopeColumn(), scope.value));
+    });
+    if (!deleteResult.ok) {
+      return err({
+        key: 'scoped_key_storage_error',
+        message: `Failed to destroy keys for ${scope.column}=${scope.value}: ${deleteResult.error.message}`,
+      });
+    }
     return ok(undefined);
   }
 
   /** Invalidate cached keys (use after key rotation). */
   function invalidateCache(): void {
-    keyCache.delete(scope.value);
+    keyCache.delete(cacheKey);
   }
 
   /** Clear the entire key cache (forces re-decryption for all scopes). */

@@ -2,12 +2,39 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Client } from 'pg';
 
+/**
+ * Structural logger seam for migration progress (matches the shape of
+ * `@octabits-io/foundation/logger`'s `Logger` for the two methods used).
+ */
+export interface MigrationLogger {
+  info(message: string, meta?: Record<string, unknown>): void;
+  error(message: string, error?: Error): void;
+}
+
+/** Console-backed fallback used when `logger: true` is passed. */
+const consoleMigrationLogger: MigrationLogger = {
+  info: (message, meta) => {
+    if (meta) console.log(message, meta);
+    else console.log(message);
+  },
+  error: (message, error) => {
+    if (error) console.error(message, error);
+    else console.error(message);
+  },
+};
+
 export interface RunMigrationsOptions {
   connectionString: string;
   /** Absolute path to the folder containing the generated migration files. */
   migrationsFolder: string;
   ssl?: boolean | { rejectUnauthorized: boolean };
-  logger?: boolean;
+  /**
+   * Structured logger for migration progress. Pass a {@link MigrationLogger}
+   * to integrate with your logging stack, `true` for a plain console fallback,
+   * or omit/`false` for complete silence (nothing is printed, including on
+   * failure — the error is still thrown).
+   */
+  logger?: boolean | MigrationLogger;
   /**
    * Session GUC variables applied (via `set_config(name, value, false)`) on the
    * migration connection before `migrate()` runs. Use this to bypass RLS for
@@ -24,6 +51,13 @@ export interface RunMigrationsOptions {
  * @returns Promise that resolves when migrations are complete
  */
 export async function runMigrations(options: RunMigrationsOptions): Promise<void> {
+  const logger: MigrationLogger | undefined =
+    options.logger === true
+      ? consoleMigrationLogger
+      : typeof options.logger === 'object'
+        ? options.logger
+        : undefined;
+
   const client = new Client({
     connectionString: options.connectionString,
     ssl: options.ssl,
@@ -40,18 +74,18 @@ export async function runMigrations(options: RunMigrationsOptions): Promise<void
 
     const db = drizzle({ client });
 
-    if (options.logger) {
-      console.log('🔄 Running database migrations...');
-      console.log(`   Migrations folder: ${options.migrationsFolder}`);
-    }
+    logger?.info('Running database migrations', {
+      migrationsFolder: options.migrationsFolder,
+    });
 
     await migrate(db, { migrationsFolder: options.migrationsFolder });
 
-    if (options.logger) {
-      console.log('✅ Database migrations completed successfully');
-    }
+    logger?.info('Database migrations completed successfully');
   } catch (error) {
-    console.error('❌ Migration failed:', error);
+    logger?.error(
+      'Migration failed',
+      error instanceof Error ? error : new Error(String(error)),
+    );
     throw error;
   } finally {
     await client.end();

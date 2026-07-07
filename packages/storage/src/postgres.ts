@@ -11,6 +11,7 @@ export {
 } from './providers/postgres/PostgresObjectStorageService';
 export type {
   StorageDrizzle,
+  TableInitializerOptions,
   PostgresObjectStorageService,
   PostgresObjectStorageConfig,
   PostgresObjectStorageUrlProvider,
@@ -32,6 +33,7 @@ export type {
   ServeObjectParams,
   ServeObjectResult,
   ServeObjectError,
+  ServeHandlerOptions,
   ExpressLikeRequest,
   ExpressLikeResponse,
   NitroEvent,

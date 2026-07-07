@@ -53,6 +53,15 @@ describe('createScopedSigningService', () => {
       const svc = createScopedSigningService({ infoPrefix: 'acme', scopeKey: 's1', keyStore: memoryStore() });
       expect(() => svc.deriveKey('email')).toThrow(/master secret/i);
     });
+
+    it('is not delimiter-ambiguous across (infoPrefix, purpose) boundaries', () => {
+      // Regression: with a plain `${infoPrefix}-${purpose}` info string,
+      // ('a', 'b-c') and ('a-b', 'c') encoded identically and derived the
+      // same key. Length-prefixing both parts keeps them disjoint.
+      const first = createScopedSigningService({ infoPrefix: 'a', scopeKey: 's1', keyStore: memoryStore(), masterSecret: MASTER });
+      const second = createScopedSigningService({ infoPrefix: 'a-b', scopeKey: 's1', keyStore: memoryStore(), masterSecret: MASTER });
+      expect(first.deriveKey('b-c').toString('base64')).not.toBe(second.deriveKey('c').toString('base64'));
+    });
   });
 
   describe('hmac / verifyHmac', () => {
@@ -89,6 +98,25 @@ describe('createScopedSigningService', () => {
       if (!tag.ok) throw new Error('expected ok');
       expect(tag.value).toHaveLength(12); // 6 bytes → 12 hex chars
       expect(await svc.verifyShortTag('reply', 'x', tag.value, { bytes: 6 })).toEqual({ ok: true, value: true });
+    });
+
+    it('rejects out-of-range bytes — verify with bytes: 0 must not return ok(true)', async () => {
+      // Regression: bytes: 0 produced an empty expected tag, and an empty
+      // provided tag "verified" against it via zero-length timingSafeEqual.
+      const svc = createScopedSigningService({ infoPrefix: 'acme', scopeKey: 's1', keyStore: memoryStore(), masterSecret: MASTER });
+
+      for (const bytes of [0, -1, 33, 1.5]) {
+        const tag = await svc.shortTag('reply', 'conv-1', { bytes });
+        expect(tag.ok).toBe(false);
+        if (!tag.ok) expect(tag.error.key).toBe('scoped_signing_invalid_bytes');
+
+        const verified = await svc.verifyShortTag('reply', 'conv-1', '', { bytes });
+        expect(verified.ok).toBe(false);
+        if (!verified.ok) expect(verified.error.key).toBe('scoped_signing_invalid_bytes');
+      }
+
+      // An empty tag with valid bytes is simply wrong, not valid.
+      expect(await svc.verifyShortTag('reply', 'conv-1', '')).toEqual({ ok: true, value: false });
     });
   });
 
@@ -141,6 +169,21 @@ describe('createScopedSigningService', () => {
       const writesAfterFirst = store.writes();
       await svc.signJwt('booking', { x: 2 }, { expiresAt: new Date(Date.now() + 60_000) });
       expect(store.writes()).toBe(writesAfterFirst); // no second write for the same purpose
+    });
+
+    it('serializes concurrent provisioning so no purpose is dropped', async () => {
+      // Regression: two concurrent ensureProvisioned calls both read the same
+      // (empty) map; the second write clobbered the first purpose.
+      const store = memoryStore();
+      const svc = createScopedSigningService({ infoPrefix: 'acme', scopeKey: 's1', keyStore: store, masterSecret: MASTER });
+
+      await Promise.all([
+        svc.ensureProvisioned('booking'),
+        svc.ensureProvisioned('email'),
+        svc.ensureProvisioned('reply'),
+      ]);
+
+      expect(Object.keys(store.snapshot()).sort()).toEqual(['booking', 'email', 'reply']);
     });
 
     it('lets a read-only service (no masterSecret) verify what a provisioning service wrote', async () => {

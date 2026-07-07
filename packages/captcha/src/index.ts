@@ -12,6 +12,7 @@
 // --- Service contract ------------------------------------------------------
 export type {
   CaptchaService,
+  CaptchaTokenOptions,
   CaptchaChallenge,
   CaptchaRedeemSuccess,
   CaptchaChallengeCreationError,

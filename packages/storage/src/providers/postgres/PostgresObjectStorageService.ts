@@ -52,14 +52,36 @@ export const objectStorageTable = pgTable('object_storage', {
 /** Root-namespace sentinel used only inside the table — never exposed to callers. */
 const namespaceColumnValue = (namespace: string | undefined) => namespace ?? '';
 
+/**
+ * Options controlling the lazy `CREATE TABLE IF NOT EXISTS` bootstrap that
+ * runs before the first storage operation.
+ */
+export interface TableInitializerOptions {
+  /**
+   * Run the DDL bootstrap lazily before the first operation. Default `true`.
+   *
+   * When enabled, EVERY operation — including plain reads — may trigger DDL
+   * on first use, so the connected role needs DDL privileges. Set to `false`
+   * when the `object_storage` table is managed by migrations; the provider
+   * then never issues DDL at runtime.
+   */
+  readonly autoCreateTable?: boolean;
+  /**
+   * `pg_advisory_xact_lock` id used to serialize concurrent table
+   * initialization across instances. Default `123456789`. Override it if that
+   * id collides with an advisory lock used elsewhere in your system.
+   */
+  readonly advisoryLockId?: number;
+}
+
 // Configuration
-export interface PostgresObjectStorageConfig {
+export interface PostgresObjectStorageConfig extends TableInitializerOptions {
   readonly drizzle: StorageDrizzle;
   createPublicUrl: (namespace: string | undefined, key: string) => string;
 }
 
 // URL provider config
-export interface PostgresObjectStorageUrlProviderConfig {
+export interface PostgresObjectStorageUrlProviderConfig extends TableInitializerOptions {
   createPublicUrl: (namespace: string | undefined, key: string) => string;
   db: StorageDrizzle;
 }
@@ -74,17 +96,20 @@ export interface PostgresObjectStorageUrlProvider extends ObjectStorageUrlProvid
  * Creates table initialization helper for a drizzle instance.
  * Extracted to be reusable by both URL provider and full service.
  */
-const createTableInitializer = (db: StorageDrizzle) => {
+const DEFAULT_ADVISORY_LOCK_ID = 123456789;
+
+const createTableInitializer = (db: StorageDrizzle, options?: TableInitializerOptions) => {
+  const autoCreateTable = options?.autoCreateTable ?? true;
+  const lockId = options?.advisoryLockId ?? DEFAULT_ADVISORY_LOCK_ID;
   let initialized = false;
 
   return async (): Promise<Result<void, ObjectStorageError>> => {
-    if (initialized) {
+    if (!autoCreateTable || initialized) {
       return { ok: true, value: undefined };
     }
 
     try {
       await db.transaction(async (tx) => {
-        const lockId = 123456789;
         await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockId})`);
 
         await tx.execute(sql`
@@ -234,7 +259,7 @@ export const createPostgresObjectStorageUrlProvider = (config: PostgresObjectSto
     },
   };
 
-  const ensureTableExists = createTableInitializer(config.db);
+  const ensureTableExists = createTableInitializer(config.db, config);
   const getObjectData = createGetObjectData(config.db, ensureTableExists);
   return { ...base, getObjectData };
 };
@@ -275,7 +300,7 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
   const { drizzle: db, createPublicUrl } = config;
 
   // Use shared table initializer
-  const ensureTableExists = createTableInitializer(db);
+  const ensureTableExists = createTableInitializer(db, config);
 
   const getPublicUrl: ObjectStorageService['getPublicUrl'] = ({ namespace, key }) => {
     return createPublicUrl(namespace, key);
@@ -463,16 +488,28 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
   };
 
   const deleteObjectsByPrefix: ObjectStorageService['deleteObjectsByPrefix'] = async ({ namespace, prefix }: { namespace?: string; prefix?: string }) => {
+    // Safety: without a prefix this would delete every object in the
+    // namespace. Require an explicit prefix.
+    if (!prefix) {
+      return {
+        ok: false,
+        error: {
+          key: 'invalid_prefix',
+          message: "deleteObjectsByPrefix requires a non-empty 'prefix' — a missing prefix would delete every object in the namespace",
+        },
+      };
+    }
+
     const initResult = await ensureTableExists();
     if (!initResult.ok) {
       return initResult;
     }
 
     try {
-      const namespaceCondition = eq(objectStorageTable.namespace, namespaceColumnValue(namespace));
-      const whereClause = prefix
-        ? and(namespaceCondition, like(objectStorageTable.key, `${prefix}%`))
-        : namespaceCondition;
+      const whereClause = and(
+        eq(objectStorageTable.namespace, namespaceColumnValue(namespace)),
+        like(objectStorageTable.key, `${prefix}%`)
+      );
 
       const result = await db
         .delete(objectStorageTable)

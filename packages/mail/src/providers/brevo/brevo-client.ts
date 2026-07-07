@@ -12,13 +12,19 @@ import type { MailConfigurationError } from '../../base/errors';
 
 const BREVO_API_BASE = 'https://api.brevo.com/v3';
 
+/** Default per-request HTTP timeout for Brevo API calls. */
+export const DEFAULT_BREVO_TIMEOUT_MS = 30_000;
+
 export interface BrevoCredentials {
   apiKey: string;
+  /** Per-request HTTP timeout in milliseconds. Defaults to 30s. */
+  timeoutMs?: number;
 }
 
 export interface BrevoSendEmailPayload {
   sender: { email: string; name?: string };
   to: Array<{ email: string; name?: string }>;
+  bcc?: Array<{ email: string; name?: string }>;
   replyTo?: { email: string; name?: string };
   subject: string;
   textContent: string;
@@ -53,12 +59,18 @@ interface WretchHttpError extends Error {
   json?: unknown;
 }
 
-/** Base wretch instance for the Brevo API, authenticated with the api-key header. */
-function brevoApi(apiKey: string) {
-  return wretch(BREVO_API_BASE).headers({
-    'api-key': apiKey,
-    accept: 'application/json',
-  });
+/**
+ * Base wretch instance for the Brevo API, authenticated with the api-key
+ * header. A fresh `AbortSignal.timeout` per call bounds every request so a
+ * stalled Brevo endpoint can't hang a send indefinitely.
+ */
+function brevoApi(credentials: BrevoCredentials) {
+  return wretch(BREVO_API_BASE)
+    .headers({
+      'api-key': credentials.apiKey,
+      accept: 'application/json',
+    })
+    .options({ signal: AbortSignal.timeout(credentials.timeoutMs ?? DEFAULT_BREVO_TIMEOUT_MS) });
 }
 
 /**
@@ -68,7 +80,7 @@ export function createBrevoClient(credentials: BrevoCredentials): BrevoClient {
   async function sendTransacEmail(
     payload: BrevoSendEmailPayload,
   ): Promise<BrevoSendEmailResponse> {
-    const data = await brevoApi(credentials.apiKey)
+    const data = await brevoApi(credentials)
       .url('/smtp/email')
       .post(payload)
       .json<{ messageId?: string }>();
@@ -86,7 +98,7 @@ export async function verifyBrevoConnection(
   credentials: BrevoCredentials,
 ): Promise<Result<void, MailConfigurationError>> {
   try {
-    await brevoApi(credentials.apiKey).url('/account').get().res();
+    await brevoApi(credentials).url('/account').get().res();
     return { ok: true, value: undefined };
   } catch (err) {
     return {

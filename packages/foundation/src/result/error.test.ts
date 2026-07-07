@@ -22,9 +22,18 @@ describe('toOctError', () => {
   it('converts string to OctError', () => {
     expect(toOctError('error')).toEqual({ message: 'error', key: 'general' })
   })
-  it('converts Error instance to OctError', () => {
+  it('converts Error instance to OctError with a snake_case key', () => {
     const error = new Error('fail')
-    expect(toOctError(error)).toEqual({ message: 'fail', key: 'Error' })
+    expect(toOctError(error)).toEqual({ message: 'fail', key: 'error' })
+  })
+  it('snake_cases multi-word error names', () => {
+    expect(toOctError(new TypeError('bad type'))).toEqual({ message: 'bad type', key: 'type_error' })
+    expect(toOctError(new RangeError('out of range'))).toEqual({ message: 'out of range', key: 'range_error' })
+  })
+  it('falls back to general for an empty error name', () => {
+    const error = new Error('nameless')
+    error.name = ''
+    expect(toOctError(error)).toEqual({ message: 'nameless', key: 'general' })
   })
   it('returns general OctError for unknown', () => {
     expect(toOctError(123)).toEqual({ message: 'General error', key: 'general' })

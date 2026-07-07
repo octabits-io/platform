@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { solveChallenge } from 'altcha-lib';
 import { deriveKey } from 'altcha-lib/algorithms/pbkdf2';
 import type { Challenge, Solution } from 'altcha-lib/types';
 import { createLruCacheService } from '@octabits-io/foundation/utils';
 import type { DateProvider } from '@octabits-io/foundation/utils';
-import { createAltchaCaptchaService } from './altcha';
+import { createAltchaCaptchaService, type CaptchaNonceStore } from './altcha';
 
 const HMAC_SECRET = '0123456789abcdef0123456789abcdef'; // 32 chars
 // Low cost so tests stay fast — a real prod cost would be much higher.
@@ -24,7 +24,7 @@ function makeDateProvider(initialMs = Date.now()): DateProvider & {
   };
 }
 
-function makeService(opts?: { dateProvider?: ReturnType<typeof makeDateProvider>; expiresMs?: number; verifiedTokenTtlMs?: number }) {
+function makeService(opts?: { dateProvider?: ReturnType<typeof makeDateProvider>; expiresMs?: number; verifiedTokenTtlMs?: number; nonceStore?: CaptchaNonceStore }) {
   const dateProvider = opts?.dateProvider ?? makeDateProvider();
   const lruCacheService = createLruCacheService({ dateProvider });
   const service = createAltchaCaptchaService({
@@ -34,6 +34,7 @@ function makeService(opts?: { dateProvider?: ReturnType<typeof makeDateProvider>
     cost: TEST_COST,
     expiresMs: opts?.expiresMs ?? 600_000,
     verifiedTokenTtlMs: opts?.verifiedTokenTtlMs ?? 1_200_000,
+    nonceStore: opts?.nonceStore,
   });
   return { service, dateProvider };
 }
@@ -132,6 +133,48 @@ describe('AltchaCaptchaService', () => {
       expect(second.error.key).toBe('solution_invalid');
     });
 
+    it('rejects a concurrent double-redeem of the same payload (exactly one succeeds)', async () => {
+      const { service } = makeService();
+      const created = await service.createChallenge();
+      if (!created.ok) throw new Error('createChallenge failed');
+      const payload = await solveAndEncode(created.value.challenge as Challenge);
+
+      const [first, second] = await Promise.all([
+        service.redeemChallenge(payload),
+        service.redeemChallenge(payload),
+      ]);
+
+      const okCount = [first, second].filter((r) => r.ok).length;
+      expect(okCount).toBe(1);
+      const failed = [first, second].find((r) => !r.ok);
+      if (failed && !failed.ok) {
+        expect(failed.error.key).toBe('solution_invalid');
+      }
+    });
+
+    it('uses an injected nonce store for replay protection', async () => {
+      const seen = new Set<string>();
+      const markRedeemed = vi.fn(async (nonce: string, _ttlMs: number) => {
+        if (seen.has(nonce)) return false;
+        seen.add(nonce);
+        return true;
+      });
+      const { service } = makeService({ nonceStore: { markRedeemed } });
+
+      const created = await service.createChallenge();
+      if (!created.ok) throw new Error('createChallenge failed');
+      const payload = await solveAndEncode(created.value.challenge as Challenge);
+
+      const first = await service.redeemChallenge(payload);
+      const second = await service.redeemChallenge(payload);
+
+      expect(first.ok).toBe(true);
+      expect(second.ok).toBe(false);
+      expect(markRedeemed).toHaveBeenCalledTimes(2);
+      // ttlMs (the challenge expiry window) is forwarded to the store
+      expect(markRedeemed.mock.calls[0]![1]).toBe(600_000);
+    });
+
     it('rejects a solution after the challenge expiry window', async () => {
       // Negative expiresMs makes the challenge expired-on-arrival relative to
       // real wall-clock time, which is what altcha-lib's `verifySolution`
@@ -163,6 +206,24 @@ describe('AltchaCaptchaService', () => {
       expect(result.ok).toBe(false);
     });
 
+    it('rejects a near-miss forgery: valid structure and expiry but wrong signature', async () => {
+      const dateProvider = makeDateProvider();
+      const { service } = makeService({ dateProvider });
+
+      // Structurally valid token: plausible future expiry, hex signature of
+      // the right length — but not produced with the HMAC secret. Exercises
+      // the constant-time compare path.
+      const expires = dateProvider.now().getTime() + 600_000;
+      const forgedSig = 'ab'.repeat(32); // 64 hex chars, like a real HMAC-SHA256
+      const forged = btoa(`${expires}.${forgedSig}`)
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+      const result = await service.validateToken(forged);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.key).toBe('token_invalid');
+    });
+
     it('returns token_expired after the verified-token TTL elapses', async () => {
       const dateProvider = makeDateProvider();
       const { service } = makeService({ dateProvider, verifiedTokenTtlMs: 60_000 });
@@ -177,6 +238,54 @@ describe('AltchaCaptchaService', () => {
       expect(validated.ok).toBe(false);
       if (validated.ok) return;
       expect(validated.error.key).toBe('token_expired');
+    });
+  });
+
+  describe('token binding', () => {
+    async function redeemWithBind(bind?: string) {
+      const { service } = makeService();
+      const created = await service.createChallenge();
+      if (!created.ok) throw new Error('createChallenge failed');
+      const payload = await solveAndEncode(created.value.challenge as Challenge);
+      const redeemed = await service.redeemChallenge(payload, bind === undefined ? undefined : { bind });
+      if (!redeemed.ok) throw new Error('redeem failed');
+      return { service, token: redeemed.value.token };
+    }
+
+    it('a bound token validates with the matching bind', async () => {
+      const { service, token } = await redeemWithBind('session-abc');
+      const result = await service.validateToken(token, { bind: 'session-abc' });
+      expect(result.ok).toBe(true);
+    });
+
+    it('a bound token fails with a different bind', async () => {
+      const { service, token } = await redeemWithBind('session-abc');
+      const result = await service.validateToken(token, { bind: 'session-xyz' });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.key).toBe('token_invalid');
+    });
+
+    it('a bound token fails when validated without a bind', async () => {
+      const { service, token } = await redeemWithBind('session-abc');
+      const result = await service.validateToken(token);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.key).toBe('token_invalid');
+    });
+
+    it('an unbound token fails when a bind is required at validation', async () => {
+      const { service, token } = await redeemWithBind(undefined);
+      const result = await service.validateToken(token, { bind: 'session-abc' });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error.key).toBe('token_invalid');
+    });
+
+    it('an unbound token keeps validating without a bind (legacy behavior)', async () => {
+      const { service, token } = await redeemWithBind(undefined);
+      const result = await service.validateToken(token);
+      expect(result.ok).toBe(true);
     });
   });
 });

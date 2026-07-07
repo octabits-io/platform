@@ -241,6 +241,10 @@ function buildCrudService<
   async function update(params: any): Promise<Result<void, ResourceNotFoundError | OctDatabaseError>> {
     return withDbErrorHandling(async () => {
       const { id, ...updateData } = params;
+      // Never let a payload smuggle the scope column into SET — that would
+      // transfer the row to another scope. The type layer omits it, but
+      // runtime callers (spread payloads, `as any`) must be stopped too.
+      if (scope) delete updateData[scope.column];
 
       const result = await db.update(table)
         .set({

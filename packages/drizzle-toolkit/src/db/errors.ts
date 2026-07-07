@@ -9,6 +9,8 @@ export type PostgresErrorCode =
   | 'foreign_key_violation' // 23503
   | 'not_null_violation' // 23502
   | 'check_violation' // 23514
+  | 'serialization_failure' // 40001
+  | 'deadlock_detected' // 40P01
   | 'unknown';
 
 /**

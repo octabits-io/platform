@@ -13,41 +13,50 @@ export interface SmtpTransportConfig {
 }
 
 /**
- * Create a nodemailer transporter from SMTP configuration
+ * The single source of truth for nodemailer transport options — used by both
+ * the send transporter and the connection verifier, so `verify()` validates
+ * the exact configuration real sends will use. TLS posture: implicit TLS when
+ * `secure` is set; otherwise STARTTLS is REQUIRED (`requireTLS`) — the
+ * connection fails rather than silently downgrading to plaintext.
  */
-export function createSmtpTransporter(config: SmtpTransportConfig): Transporter {
-  return nodemailer.createTransport({
+function buildSmtpTransportOptions(
+  config: SmtpTransportConfig,
+  timeouts?: { connectionTimeout: number; greetingTimeout: number },
+) {
+  const secure = config.secure ?? false;
+  return {
     host: config.host,
     port: config.port,
-    secure: config.secure ?? false,
-    requireTLS: true, // Require STARTTLS for port 587, fail if unavailable
+    secure,
+    requireTLS: !secure,
     auth: {
       user: config.auth.user,
       pass: config.auth.pass,
     },
-  });
+    ...timeouts,
+  };
+}
+
+/**
+ * Create a nodemailer transporter from SMTP configuration
+ */
+export function createSmtpTransporter(config: SmtpTransportConfig): Transporter {
+  return nodemailer.createTransport(buildSmtpTransportOptions(config));
 }
 
 /**
  * Verify SMTP connection by creating a transient transporter and calling verify().
  * Returns ok: true if connection succeeds, or an error with the failure message.
+ * Uses the same transport options as {@link createSmtpTransporter} (plus
+ * timeouts), so a passing verify reflects the real send configuration.
  */
 export async function verifySmtpConnection(
   config: SmtpTransportConfig,
   timeoutMs = 10_000,
 ): Promise<Result<void, MailConfigurationError>> {
-  const transporter = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure ?? false,
-    requireTLS: !(config.secure ?? false),
-    auth: {
-      user: config.auth.user,
-      pass: config.auth.pass,
-    },
-    connectionTimeout: timeoutMs,
-    greetingTimeout: timeoutMs,
-  });
+  const transporter = nodemailer.createTransport(
+    buildSmtpTransportOptions(config, { connectionTimeout: timeoutMs, greetingTimeout: timeoutMs }),
+  );
 
   try {
     await transporter.verify();

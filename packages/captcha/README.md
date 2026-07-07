@@ -28,25 +28,41 @@ import type { CaptchaService } from '@octabits-io/captcha';
 interface CaptchaService {
   readonly type: string;
   createChallenge(): Promise<Result<CaptchaChallenge, CaptchaChallengeCreationError>>;
-  redeemChallenge(payload: string): Promise<Result<CaptchaRedeemSuccess, CaptchaRedeemError>>;
-  validateToken(token: string): Promise<Result<void, CaptchaValidateError>>;
+  redeemChallenge(payload: string, options?: CaptchaTokenOptions): Promise<Result<CaptchaRedeemSuccess, CaptchaRedeemError>>;
+  validateToken(token: string, options?: CaptchaTokenOptions): Promise<Result<void, CaptchaValidateError>>;
 }
 ```
 
 - **`createChallenge()`** — mint a provider-specific challenge the client must
   solve, with a unix-epoch-ms `expires`.
-- **`redeemChallenge(payload)`** — verify a solved client payload (opaque
-  provider string) and return a short-lived **verified token**. The token is
-  reusable across legitimate retries within its TTL.
-- **`validateToken(token)`** — the form-submit endpoint checks the verified
-  token (signature + expiry).
+- **`redeemChallenge(payload, options?)`** — verify a solved client payload
+  (opaque provider string) and return a short-lived **verified token**. The
+  token is intentionally **multi-use within its TTL** (reusable across
+  legitimate retries). Pass `options.bind` (e.g. a session id or client-IP
+  hash) to mix a binding context into the token's signature.
+- **`validateToken(token, options?)`** — the form-submit endpoint checks the
+  verified token (signature + expiry). A token minted with a `bind` only
+  validates with the identical `bind`; a token minted without one validates
+  without it.
 
 ## Implementations
 
 | Factory | Import from | SDK peer | Notes |
 | --- | --- | --- | --- |
-| `createAltchaCaptchaService(config)` | `@octabits-io/captcha/altcha` | `altcha-lib` | PBKDF2/SHA-256 proof-of-work. HMAC-signed challenges, HMAC-signed verified tokens, LRU nonce replay-protection. |
-| `createNoopCaptchaService(config?)` | `@octabits-io/captcha` | — | Always-pass. Use when captcha is disabled (dev/test). |
+| `createAltchaCaptchaService(config)` | `@octabits-io/captcha/altcha` | `altcha-lib` | PBKDF2/SHA-256 proof-of-work. HMAC-signed challenges, HMAC-signed verified tokens, nonce replay-protection (pluggable `nonceStore`). |
+| `createNoopCaptchaService(config?)` | `@octabits-io/captcha` | — | Always-pass — **zero protection, never use in production**. Use when captcha is disabled (dev/test); warns on construction (via `config.logger` or `console.warn`). |
+
+### Replay protection & multi-instance deployments
+
+The ALTCHA service default nonce store is a **per-process LRU**: in a
+multi-instance deployment each instance keeps its own nonce set, so a solved
+challenge can be redeemed once *per instance*, and more than
+`nonceCacheMaxSize` (default 10 000) redemptions within one challenge-expiry
+window can evict live nonces early (exposure is capped by the challenge
+expiry). Provide a shared `nonceStore` when that matters — the
+`CaptchaNonceStore` seam is a single atomic
+`markRedeemed(nonce, ttlMs): boolean | Promise<boolean>` that maps directly
+onto Redis `SET <nonce> 1 NX PX <ttlMs>`.
 
 The `TypedCaptchaService` discriminated union (`noop | altcha`) is exported
 from the root; the ALTCHA branch is declared structurally so the root stays

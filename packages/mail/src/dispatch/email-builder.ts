@@ -16,7 +16,9 @@ import type {
 // ============================================================================
 
 /**
- * - `recipients`: addresses the message is actually delivered to.
+ * - `recipients`: addresses the message is visibly delivered to (`To`).
+ * - `bcc`: blind-carbon-copy addresses (the notifications copy in
+ *   `customer_and_notifications` mode) — delivered but never shown in headers.
  * - `primaryRecipient`: the originally intended recipient (for logging/tracking).
  * - `degradedToDefault`: set when `customer_and_notifications` was requested but
  *   no notifications address is configured, so the BCC was skipped and only the
@@ -24,6 +26,7 @@ import type {
  */
 export interface RecipientsResult {
   recipients: string[];
+  bcc?: string[];
   primaryRecipient: string;
   degradedToDefault?: boolean;
 }
@@ -63,6 +66,14 @@ export function resolveRecipients(
   // User mail: apply delivery mode with no platform fallback.
   const p = params as UserMailParams;
   const userEmail = p.email;
+  // Params classified as user mail but carrying no email would otherwise
+  // produce `to: [undefined]` — refuse instead.
+  if (!userEmail) {
+    return err({
+      key: 'invalid_recipient',
+      message: `Cannot send ${params.type}: params classified as user mail but carry no recipient email.`,
+    });
+  }
 
   switch (deliveryMode) {
     case 'notifications_only':
@@ -78,7 +89,9 @@ export function resolveRecipients(
         // Degrade to default — user still gets their mail; BCC is skipped.
         return ok({ recipients: [userEmail], primaryRecipient: userEmail, degradedToDefault: true });
       }
-      return ok({ recipients: [userEmail, notificationsAddress], primaryRecipient: userEmail });
+      // The notifications copy is a true BCC: the user must not see the
+      // scope's internal notifications address in the visible To header.
+      return ok({ recipients: [userEmail], bcc: [notificationsAddress], primaryRecipient: userEmail });
     case 'default':
     default:
       return ok({ recipients: [userEmail], primaryRecipient: userEmail });

@@ -21,10 +21,13 @@ export function createDevOverrideMailTransport(
     async send(message: MailMessage) {
       logger.warn('[mail dev-override] redirecting outgoing mail', {
         originalTo: message.to.join(', '),
+        originalBcc: message.bcc?.join(', '),
         overrideTo: overrideRecipient,
         subject: message.subject,
       });
-      return inner.send({ ...message, to: [overrideRecipient] });
+      // BCC is dropped, not redirected — otherwise a real address could still
+      // receive dev mail through the blind copy.
+      return inner.send({ ...message, to: [overrideRecipient], bcc: undefined });
     },
   };
 }

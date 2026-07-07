@@ -10,6 +10,7 @@ export type {
 export {
   createMailjetClient,
   verifyMailjetConnection,
+  DEFAULT_MAILJET_TIMEOUT_MS,
 } from './providers/mailjet/mailjet-client';
 export type {
   MailjetCredentials,

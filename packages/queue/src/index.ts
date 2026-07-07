@@ -27,7 +27,9 @@ export type {
   QueueScope,
   QueueScopeFactory,
   DlqAuditRecord,
+  DlqAuditRecordBase,
   DlqAuditSink,
+  DlqWorkerOptions,
 } from './defineQueue.ts';
 
 // Payload + domain types

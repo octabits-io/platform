@@ -31,6 +31,15 @@ describe('normalizeQueryParamToIntOrUndefined', () => {
   it('returns undefined for non-numeric string', () => {
     expect(normalizeQueryParamToIntOrUndefined('foo')).toBeUndefined()
   })
+  it('rejects trailing junk instead of parsing a prefix', () => {
+    expect(normalizeQueryParamToIntOrUndefined('12abc')).toBeUndefined()
+    expect(normalizeQueryParamToIntOrUndefined('1.5')).toBeUndefined()
+    expect(normalizeQueryParamToIntOrUndefined('0x10')).toBeUndefined()
+  })
+  it('accepts signed integers', () => {
+    expect(normalizeQueryParamToIntOrUndefined('-42')).toBe(-42)
+    expect(normalizeQueryParamToIntOrUndefined('+7')).toBe(7)
+  })
   it('returns undefined for null/undefined', () => {
     expect(normalizeQueryParamToIntOrUndefined(null)).toBeUndefined()
     expect(normalizeQueryParamToIntOrUndefined(undefined)).toBeUndefined()

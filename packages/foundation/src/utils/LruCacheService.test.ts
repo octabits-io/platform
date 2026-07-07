@@ -66,6 +66,13 @@ describe('createLruCacheService', () => {
     expect(cache.get('a')).toBe(1);
   });
 
+  it('throws on maxSize < 1 (would loop forever during eviction)', () => {
+    const service = createLruCacheService({ dateProvider: createFakeDateProvider() });
+    expect(() => service.createCache<string, number>({ maxSize: 0, ttlMs: 0 })).toThrow(/positive integer/);
+    expect(() => service.createCache<string, number>({ maxSize: -1, ttlMs: 0 })).toThrow(/positive integer/);
+    expect(() => service.createCache<string, number>({ maxSize: 1.5, ttlMs: 0 })).toThrow(/positive integer/);
+  });
+
   it('supports delete and clear', () => {
     const service = createLruCacheService({ dateProvider: createFakeDateProvider() });
     const cache = service.createCache<string, number>({ maxSize: 5, ttlMs: 0 });

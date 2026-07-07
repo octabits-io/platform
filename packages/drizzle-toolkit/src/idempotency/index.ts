@@ -13,6 +13,14 @@
  * (no cron needed). Only successful (2xx) responses should be committed —
  * errors are re-executed on retry, the simpler and more useful default.
  *
+ * **Concurrency caveat:** `begin()` is check-then-act, so *concurrent*
+ * duplicates (same key in flight at the same time) have an at-least-once
+ * window: both requests may execute the operation. The stored (replayable)
+ * response is the commit-race winner's; the loser's `commit()` detects the
+ * unique violation, re-fetches the winner's row, and reports it (see
+ * {@link IdempotencyCommitResult}). Sequential duplicates are fully
+ * deduplicated.
+ *
  * ## Seams
  *
  * Every external dependency is a *structural* interface so instances from a
@@ -99,12 +107,37 @@ export const idempotencyKeyColumns = {
 const DEFAULT_TTL_SECONDS = 24 * 60 * 60; // 24h
 
 /**
+ * JSON-compatible stringify with **sorted object keys** at every depth, so two
+ * structurally-equal bodies hash identically regardless of property insertion
+ * order (JSON re-parses, proxies, and spread merges all reorder keys). Mirrors
+ * `JSON.stringify` semantics otherwise: `undefined` array items become `null`,
+ * object entries with `undefined` values are dropped.
+ */
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => (item === undefined ? "null" : stableStringify(item))).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const entries = Object.keys(value)
+      .sort()
+      .map((k) => [k, (value as Record<string, unknown>)[k]] as const)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`);
+    return `{${entries.join(",")}}`;
+  }
+  // Primitives — String(...) keeps the historical `undefined` interpolation
+  // for non-serializable inputs (undefined/function/symbol).
+  return String(JSON.stringify(value));
+}
+
+/**
  * SHA-256 hash of the request signature. Reuse across all callers so that the
  * same key on a different route or with a different body is treated as a
- * conflict (not a replay).
+ * conflict (not a replay). Object key order is irrelevant (stable stringify),
+ * array order is significant.
  */
 export function hashRequest(method: string, pathTemplate: string, body: unknown): string {
-  const payload = `${method}\n${pathTemplate}\n${JSON.stringify(body)}`;
+  const payload = `${method}\n${pathTemplate}\n${stableStringify(body)}`;
   return createHash("sha256").update(payload).digest("hex");
 }
 
@@ -160,13 +193,33 @@ export interface IdempotencyDatabase {
 export type CachedResponse = { status: number; body: unknown };
 
 /**
+ * Outcome of a `commit()`:
+ *
+ *   - `committed`     — this request's response was stored and is now the
+ *                       replayable record for the key.
+ *   - `raced`         — a concurrent request with the **same** request hash
+ *                       committed first (the at-least-once window — both
+ *                       operations executed). `cached` carries the winner's
+ *                       stored response; replay it to keep every caller seeing
+ *                       one canonical response.
+ *   - `race_conflict` — a concurrent commit won with a **different** request
+ *                       hash (same key, different signature). This request's
+ *                       side effect already happened and cannot be replayed
+ *                       later; surface it as a conflict.
+ */
+export type IdempotencyCommitResult =
+  | { kind: "committed" }
+  | { kind: "raced"; cached: CachedResponse }
+  | { kind: "race_conflict" };
+
+/**
  * Persists the operation's final response under the in-progress idempotency
  * key so subsequent requests with the same key replay it. Call exactly once
  * per `fresh` outcome, only after the operation succeeded — failures should
- * NOT be cached (V1 behavior). Safe to await; concurrent races are handled
- * internally and never throw.
+ * NOT be cached (V1 behavior). Concurrent commit races never throw; they are
+ * reported via {@link IdempotencyCommitResult}.
  */
-export type IdempotencyCommit = (status: number, body: unknown) => Promise<void>;
+export type IdempotencyCommit = (status: number, body: unknown) => Promise<IdempotencyCommitResult>;
 
 export type IdempotencyOutcome =
   | { kind: "cached"; cached: CachedResponse }
@@ -263,8 +316,12 @@ export function createIdempotencyService({
     return {
       kind: "fresh",
       commit: async (status, body) => {
-        const createdAt = now.toISOString();
-        const expiresAt = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
+        // Recompute the clock at commit time — the operation between begin()
+        // and commit() may be slow, and the TTL should start when the response
+        // is stored, not when the request was classified.
+        const commitNow = dateProvider.now();
+        const createdAt = commitNow.toISOString();
+        const expiresAt = new Date(commitNow.getTime() + ttlSeconds * 1000).toISOString();
         try {
           await db.insert(t).values({
             ...(scope !== undefined ? { [scope.column]: scope.value } : {}),
@@ -276,14 +333,32 @@ export function createIdempotencyService({
             expiresAt,
           });
         } catch (err) {
-          // Concurrent commit with same key won the race. Re-fetch and accept
-          // the winner's response if hashes match; otherwise the operation
-          // already produced a side effect we can't undo, so log and return —
-          // the caller's response goes back to the client as-is, but no
-          // further requests can replay it.
+          // Concurrent commit with the same key won the race (the
+          // at-least-once window: both operations executed). Re-fetch the
+          // winner's row: if its request hash matches, hand back its stored
+          // response so the caller can replay the canonical record; if it
+          // differs, this request's side effect already happened and can never
+          // be replayed — surface a conflict.
           if (isUniqueViolation(err)) {
             logger.warn("Idempotency commit lost race", { key, requestHash });
-            return;
+            const winner = (
+              await db
+                .select({
+                  requestHash: t.requestHash,
+                  responseStatus: t.responseStatus,
+                  responseBody: t.responseBody,
+                })
+                .from(t)
+                .where(scopedWhere(eq(t.key, key)))
+                .limit(1)
+            )[0];
+            if (winner && winner.requestHash === requestHash) {
+              return {
+                kind: "raced",
+                cached: { status: winner.responseStatus, body: winner.responseBody },
+              };
+            }
+            return { kind: "race_conflict" };
           }
           throw err;
         }
@@ -291,12 +366,14 @@ export function createIdempotencyService({
         // Opportunistic cleanup of expired rows for this scope. Bounded (by
         // the scope filter when scoped); cheap, no cron needed.
         try {
-          await db.delete(t).where(scopedWhere(lt(t.expiresAt, now.toISOString())));
+          await db.delete(t).where(scopedWhere(lt(t.expiresAt, createdAt)));
         } catch (err) {
           logger.debug("Idempotency expired-row cleanup failed", {
             error: err instanceof Error ? err.message : String(err),
           });
         }
+
+        return { kind: "committed" };
       },
     };
   }

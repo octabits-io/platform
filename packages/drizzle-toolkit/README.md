@@ -5,6 +5,10 @@ a drizzle factory, a migration runner, generic CRUD service factories, a
 scoped config store, RLS scoping, an idempotency-key store, and generic scope
 schema primitives.
 
+`pg` is an **optional peer dependency** — only the `./factory` and `./migrate`
+subpaths need it at runtime (`./rls` uses its types only). Install `pg` in your
+app when you use those modules; every other subpath works without it.
+
 ## Modules
 
 ### `@octabits-io/drizzle-toolkit/db`

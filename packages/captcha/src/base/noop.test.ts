@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { DateProvider } from '@octabits-io/foundation/utils';
+import type { Logger } from '@octabits-io/foundation/logger';
 import { createNoopCaptchaService } from './noop';
 
 function makeDateProvider(initialMs: number): DateProvider {
@@ -7,9 +8,40 @@ function makeDateProvider(initialMs: number): DateProvider {
 }
 
 describe('NoopCaptchaService', () => {
+  // Construction intentionally warns; keep test output clean.
+  beforeEach(() => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('reports type "noop"', () => {
     const service = createNoopCaptchaService();
     expect(service.type).toBe('noop');
+  });
+
+  it('warns on construction via console.warn when no logger is provided', () => {
+    createNoopCaptchaService();
+    expect(console.warn).toHaveBeenCalledWith(
+      'captcha no-op provider active — all challenges auto-pass'
+    );
+  });
+
+  it('warns on construction via the provided logger instead of console', () => {
+    const warn = vi.fn();
+    const logger: Logger = {
+      debug: () => {},
+      info: () => {},
+      warn,
+      error: () => {},
+      child: () => logger,
+    };
+
+    createNoopCaptchaService({ logger });
+
+    expect(warn).toHaveBeenCalledWith('captcha no-op provider active — all challenges auto-pass');
+    expect(console.warn).not.toHaveBeenCalled();
   });
 
   it('createChallenge always succeeds with a far-future expiry', async () => {

@@ -258,6 +258,197 @@ describe('AWSObjectStorageService (S3-compatible)', () => {
     expect(cmd.input.Prefix).toBe('');
   });
 
+  test('uploadObject sets ContentType from content-type metadata (Postgres-provider convention)', async () => {
+    sendMock.mockResolvedValue({});
+    const service = createAWSObjectStorageService(baseConfig);
+
+    const result = await service.uploadObject({
+      namespace: NAMESPACE,
+      key: 'photos/x.jpg',
+      body: new Uint8Array([1, 2, 3]),
+      metadata: { 'content-type': 'image/jpeg', author: 'me' },
+    });
+
+    expect(result.ok).toBe(true);
+    const cmd = sendMock.mock.calls[0]![0];
+    expect(cmd.input.ContentType).toBe('image/jpeg');
+  });
+
+  test('uploadObject accepts the contentType metadata spelling and falls back to octet-stream', async () => {
+    sendMock.mockResolvedValue({});
+    const service = createAWSObjectStorageService(baseConfig);
+
+    await service.uploadObject({
+      key: 'a.bin',
+      body: new Uint8Array([1]),
+      metadata: { contentType: 'application/pdf' },
+    });
+    await service.uploadObject({
+      key: 'b.bin',
+      body: new Uint8Array([1]),
+    });
+
+    expect(sendMock.mock.calls[0]![0].input.ContentType).toBe('application/pdf');
+    expect(sendMock.mock.calls[1]![0].input.ContentType).toBe('application/octet-stream');
+  });
+
+  test.each([
+    ['../escape.txt'],
+    ['a/../../other-ns/secret.txt'],
+    ['/absolute.txt'],
+    [''],
+  ])('uploadObject rejects unsafe key %j before any S3 call', async (key) => {
+    const service = createAWSObjectStorageService(baseConfig);
+
+    const result = await service.uploadObject({ namespace: NAMESPACE, key, body: new Uint8Array([1]) });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.key).toBe('invalid_key');
+    }
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  test('getObjectData and deleteObject reject traversal keys before any S3 call', async () => {
+    const service = createAWSObjectStorageService(baseConfig);
+
+    const got = await service.getObjectData({ namespace: NAMESPACE, key: '../n-s3-other/f.txt' });
+    const deleted = await service.deleteObject({ namespace: NAMESPACE, key: '/rooted.txt' });
+
+    expect(got.ok).toBe(false);
+    if (!got.ok) expect(got.error.key).toBe('invalid_key');
+    expect(deleted.ok).toBe(false);
+    if (!deleted.ok) expect(deleted.error.key).toBe('invalid_key');
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  test('getObjectData allows keys with dot-containing segments (not traversal)', async () => {
+    sendMock.mockResolvedValue({
+      Body: { transformToByteArray: async () => new Uint8Array([1]) },
+    });
+    const service = createAWSObjectStorageService(baseConfig);
+
+    const result = await service.getObjectData({ namespace: NAMESPACE, key: 'a..b/file..name.txt' });
+    expect(result.ok).toBe(true);
+  });
+
+  test('listObjects returns NextContinuationToken (not the request echo) and plumbs pagination inputs', async () => {
+    sendMock.mockResolvedValue({
+      Contents: [{ Key: 'n-s3/a.jpg', Size: 10 }],
+      IsTruncated: true,
+      ContinuationToken: 'request-echo',
+      NextContinuationToken: 'next-page-token',
+    });
+    const service = createAWSObjectStorageService(baseConfig);
+
+    const result = await service.listObjects({
+      namespace: NAMESPACE,
+      includeHead: false,
+      continuationToken: 'request-echo',
+      maxKeys: 500,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.continuationToken).toBe('next-page-token');
+    }
+    const cmd = sendMock.mock.calls[0]![0];
+    expect(cmd.input.ContinuationToken).toBe('request-echo');
+    expect(cmd.input.MaxKeys).toBe(500);
+  });
+
+  test('listObjects reports no continuation token on the last page', async () => {
+    sendMock.mockResolvedValue({
+      Contents: [{ Key: 'n-s3/a.jpg', Size: 10 }],
+      IsTruncated: false,
+      ContinuationToken: 'request-echo',
+    });
+    const service = createAWSObjectStorageService(baseConfig);
+
+    const result = await service.listObjects({ namespace: NAMESPACE, includeHead: false });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.continuationToken).toBeUndefined();
+    }
+  });
+
+  test('listObjects includeHead augments objects from HeadObject responses', async () => {
+    sendMock.mockImplementation((cmd: any) => {
+      if (cmd._type === 'List') {
+        return Promise.resolve({
+          Contents: [{ Key: 'n-s3/a.png', Size: 10 }],
+          NextContinuationToken: undefined,
+        });
+      }
+      // HeadObject
+      return Promise.resolve({
+        ContentType: 'image/png',
+        ContentLength: 12345,
+        Metadata: { author: 'me' },
+      });
+    });
+    const service = createAWSObjectStorageService(baseConfig);
+
+    const result = await service.listObjects({ namespace: NAMESPACE, includeHead: true });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.objects).toEqual([
+        { key: 'a.png', size: 12345, contentType: 'image/png', metadata: { author: 'me' } },
+      ]);
+    }
+  });
+
+  test('listObjects includeHead applies documented fallbacks when HeadObject fails', async () => {
+    const warnings: string[] = [];
+    const logger = { ...noopLogger, warn: (msg: string) => { warnings.push(msg); }, child: () => logger };
+    sendMock.mockImplementation((cmd: any) => {
+      if (cmd._type === 'List') {
+        return Promise.resolve({
+          Contents: [{ Key: 'n-s3/a.png', Size: 10 }],
+        });
+      }
+      return Promise.reject({ name: 'AccessDenied', message: 'no head for you' });
+    });
+    const service = createAWSObjectStorageService({ ...baseConfig, logger });
+
+    const result = await service.listObjects({ namespace: NAMESPACE, includeHead: true });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.objects).toEqual([
+        { key: 'a.png', size: 10, contentType: 'application/octet-stream', metadata: {} },
+      ]);
+    }
+    expect(warnings).toContain('Failed to get head for object');
+  });
+
+  test('maps NoSuchBucket to not_found_bucket', async () => {
+    sendMock.mockRejectedValue({ name: 'NoSuchBucket', message: 'no bucket' });
+    const service = createAWSObjectStorageService(baseConfig);
+
+    const result = await service.getObjectData({ namespace: NAMESPACE, key: 'f.txt' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.key).toBe('not_found_bucket');
+    }
+  });
+
+  test('deleteObjectsByPrefix rejects a missing or empty prefix without touching S3', async () => {
+    const service = createAWSObjectStorageService(baseConfig);
+
+    const missing = await service.deleteObjectsByPrefix({ namespace: NAMESPACE });
+    const empty = await service.deleteObjectsByPrefix({ namespace: NAMESPACE, prefix: '' });
+
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.error.key).toBe('invalid_prefix');
+    expect(empty.ok).toBe(false);
+    if (!empty.ok) expect(empty.error.key).toBe('invalid_prefix');
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
   test('deleteObjectsByPrefix lists then batch-deletes and counts', async () => {
     sendMock.mockImplementation((cmd: any) => {
       if (cmd._type === 'List') {

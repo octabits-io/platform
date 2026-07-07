@@ -95,12 +95,14 @@ const keys = await keyService.getKeys();     // lazy-generates on first use
 // keys.value: { recipient, identity, blindIndexKey, keyVersion }
 
 await keyService.generateKeyPair();          // explicit generation (e.g. at scope creation, in a tx)
-await keyService.hasKeys();
+await keyService.hasKeys();                  // Result<boolean, ScopedKeyError>
 await keyService.destroyKeys();              // crypto-shredding: delete key row + drop cache
 keyService.invalidateCache();
 ```
 
-Errors are `Result`-typed: `scoped_keys_not_found`, `scoped_key_generation_error`, or a `MasterKeyError`.
+Errors are `Result`-typed: `scoped_keys_not_found`, `scoped_key_generation_error`, `scoped_key_storage_error`, or a master-key error (`master_key_error` / `master_key_unsupported_plaintext`).
+
+Cache entries are keyed by `column:value` (URI-encoded). Don't share one cache instance across services that store keys in different tables under the same scope column and value — use one cache per key table.
 
 ## Low-Level Primitives
 

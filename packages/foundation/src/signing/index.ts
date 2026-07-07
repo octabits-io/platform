@@ -6,4 +6,5 @@ export type {
   ScopedSigningError,
   ScopedSigningKeyNotFoundError,
   ScopedSigningSignatureInvalidError,
+  ScopedSigningInvalidBytesError,
 } from './ScopedSigningKeyService.ts';

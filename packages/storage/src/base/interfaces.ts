@@ -52,6 +52,15 @@ export interface ObjectStorageService extends ObjectStorageUrlProvider {
     namespace?: string;
     prefix?: string;
     includeHead: T;
+    /**
+     * Opaque continuation token from a previous page
+     * (`ListObjectsResponse.continuationToken`). Pass it to fetch the next
+     * page. Provider-specific: the S3 provider pages at up to 1000 objects;
+     * the Postgres provider returns everything in one page and ignores this.
+     */
+    continuationToken?: string;
+    /** Maximum number of objects per page (provider-specific cap, e.g. 1000 on S3). */
+    maxKeys?: number;
   }) => Promise<Result<ListObjectsResponse<T>, ObjectStorageError>>;
   readonly uploadObject: (params: {
     namespace?: string;
@@ -60,6 +69,13 @@ export interface ObjectStorageService extends ObjectStorageUrlProvider {
     body: Uint8Array | ReadableStream<Uint8Array>;
   }) => Promise<Result<void, ObjectStorageError>>;
   readonly deleteObject: (params: { namespace?: string; key: string }) => Promise<Result<void, ObjectStorageError>>;
+  /**
+   * Delete every object whose key starts with `prefix`. A non-empty `prefix`
+   * is required — calling without one would wipe the entire namespace (or, on
+   * S3 with no namespace, the entire bucket), so providers return an
+   * `invalid_prefix` error instead. Use an explicit listing + `deleteObject`
+   * loop if a full wipe is genuinely intended.
+   */
   readonly deleteObjectsByPrefix: (params: { namespace?: string; prefix?: string }) => Promise<Result<{ deleted: number }, ObjectStorageError>>;
   readonly getObjectData: (params: { namespace?: string; key: string }) => Promise<Result<ObjectData, ObjectStorageError>>;
 }

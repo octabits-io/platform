@@ -19,16 +19,23 @@ export function getEnvOptional(key: string): string | undefined {
   return process.env[key];
 }
 
-/** Integer env var with a default. */
+/** Integer env var with a default. Throws when the value is set but not a number. */
 export function getEnvNumber(key: string, defaultValue: number): number {
   const value = process.env[key];
-  return value ? parseInt(value, 10) : defaultValue;
+  if (!value) return defaultValue;
+  const parsed = parseInt(value, 10);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Environment variable ${key} is not a number: "${value}"`);
+  }
+  return parsed;
 }
 
-/** Optional integer env var → its parsed value or `undefined`. */
+/** Optional integer env var → its parsed value, or `undefined` when unset or not a number. */
 export function getEnvNumberOptional(key: string): number | undefined {
   const value = process.env[key];
-  return value ? parseInt(value, 10) : undefined;
+  if (!value) return undefined;
+  const parsed = parseInt(value, 10);
+  return Number.isNaN(parsed) ? undefined : parsed;
 }
 
 /** Boolean env var (`'true'`/`'1'` → true) with a default. */
@@ -53,9 +60,15 @@ export function parseCsv(value: string | undefined): string[] {
 
 /**
  * CORS origins: comma-split → trimmed list, or `true` (allow-all) when unset.
+ *
+ * **`undefined` → `true` is a deliberate fail-open development default**: an
+ * unset `CORS_ORIGINS` allows every origin so local setups work out of the
+ * box. Production deployments must set the env var explicitly — apps that
+ * must reject a wildcard in production should guard on `value` being set
+ * before calling this.
+ *
  * Mirrors the `CORS_ORIGINS` pattern (note: no empty-filtering, matching the
- * original behavior). Apps that must reject a wildcard in production should
- * guard on `value` being set before calling this.
+ * original behavior).
  */
 export function parseCorsOrigins(value: string | undefined): string[] | true {
   return value ? value.split(',').map((s) => s.trim()) : true;

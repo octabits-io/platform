@@ -15,7 +15,11 @@ export function normalizeQueryParamToIntOrUndefined(value: string | string[] | n
   if (sValue === undefined) {
     return undefined
   }
-  const num = Number.parseInt(sValue)
+  // Strict integer parse: bare parseInt would accept trailing junk ("12abc" → 12)
+  if (!/^[+-]?\d+$/.test(sValue)) {
+    return undefined
+  }
+  const num = Number.parseInt(sValue, 10)
   return Number.isFinite(num) ? num : undefined
 }
 

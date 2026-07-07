@@ -18,9 +18,26 @@ import { z } from 'zod';
 export const nonEmptyString = (message?: string) =>
   z.string().min(1, message || 'Value cannot be empty');
 
-/** A non-empty, URL-formatted string. */
+/** A non-empty, URL-formatted string. Optional custom message. */
 export const nonEmptyUrl = (message?: string) =>
-  z.string().url().min(1);
+  z.url(message || 'Value must be a valid URL');
+
+/**
+ * Boolean that also accepts common env-var string spellings. Booleans pass
+ * through; strings map (case-insensitively) `'true'`/`'1'` → `true` and
+ * `'false'`/`'0'`/`''` → `false`. Anything else fails validation — unlike
+ * `z.coerce.boolean()`, which treats every non-empty string ("false", "0")
+ * as `true`.
+ */
+export const booleanFromEnv = () =>
+  z.union([z.boolean(), z.string()]).transform((value, ctx) => {
+    if (typeof value === 'boolean') return value;
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === '0' || normalized === '') return false;
+    ctx.addIssue({ code: 'custom', message: `Invalid boolean value: "${value}"` });
+    return z.NEVER;
+  });
 
 // ----------------------------------------------------------------------------
 // Database
@@ -38,7 +55,7 @@ export const DATABASE_CONFIG_SCHEMA = z.object({
    *  under PgBouncer transaction-pool mode; migrations need persistent
    *  state across DDL statements. Falls back to `url` when omitted. */
   directUrl: nonEmptyUrl().optional(),
-  logger: z.coerce.boolean().default(false).optional(),
+  logger: booleanFromEnv().default(false).optional(),
   /** pg.Pool max connections. Defaults to 20. */
   poolMaxConnections: z.coerce.number().int().positive().optional(),
   /** Idle pool client eviction (ms). Defaults to 30s. */
@@ -55,7 +72,7 @@ export const DATABASE_CONFIG_SCHEMA = z.object({
  */
 export const createRlsSchema = (defaultEnabled: boolean) =>
   z.object({
-    enabled: z.coerce.boolean().default(defaultEnabled),
+    enabled: booleanFromEnv().default(defaultEnabled),
   }).optional();
 
 // ----------------------------------------------------------------------------
@@ -73,5 +90,5 @@ export const LOGGING_CONFIG_SCHEMA = z.object({
     endpoint: nonEmptyUrl(),
     headers: z.record(z.string(), z.string()).optional(),
   }).optional(),
-  consoleOutput: z.coerce.boolean().optional(),
+  consoleOutput: booleanFromEnv().optional(),
 });

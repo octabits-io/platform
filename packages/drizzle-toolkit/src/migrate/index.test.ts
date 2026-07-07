@@ -99,4 +99,73 @@ describe('runMigrations', () => {
 
     expect(end).toHaveBeenCalledTimes(1);
   });
+
+  it('prints nothing when the logger is disabled (default), even on failure', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await runMigrations({ connectionString: 'postgres://x', migrationsFolder: '/abs/m' });
+
+      migrate.mockRejectedValueOnce(new Error('boom'));
+      await expect(
+        runMigrations({ connectionString: 'postgres://x', migrationsFolder: '/abs/m' }),
+      ).rejects.toThrow('boom');
+
+      expect(log).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+    }
+  });
+
+  it('routes progress through an injected structured logger', async () => {
+    const info = vi.fn();
+    const error = vi.fn();
+    await runMigrations({
+      connectionString: 'postgres://x',
+      migrationsFolder: '/abs/migrations',
+      logger: { info, error },
+    });
+
+    expect(info).toHaveBeenCalledWith('Running database migrations', {
+      migrationsFolder: '/abs/migrations',
+    });
+    expect(info).toHaveBeenCalledWith('Database migrations completed successfully');
+    expect(error).not.toHaveBeenCalled();
+  });
+
+  it('reports failures through logger.error and still rethrows', async () => {
+    const info = vi.fn();
+    const error = vi.fn();
+    const boom = new Error('migrate boom');
+    migrate.mockRejectedValueOnce(boom);
+
+    await expect(
+      runMigrations({
+        connectionString: 'postgres://x',
+        migrationsFolder: '/abs/migrations',
+        logger: { info, error },
+      }),
+    ).rejects.toThrow('migrate boom');
+
+    expect(error).toHaveBeenCalledWith('Migration failed', boom);
+  });
+
+  it('logger: true falls back to plain console output', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      await runMigrations({
+        connectionString: 'postgres://x',
+        migrationsFolder: '/abs/migrations',
+        logger: true,
+      });
+      expect(log).toHaveBeenCalledWith('Running database migrations', {
+        migrationsFolder: '/abs/migrations',
+      });
+      expect(log).toHaveBeenCalledWith('Database migrations completed successfully');
+    } finally {
+      log.mockRestore();
+    }
+  });
 });

@@ -61,6 +61,22 @@ describe('parseBrevoInbound', () => {
     expect(second.attachments).toEqual([]);
   });
 
+  it('drops items without a parseable From instead of fabricating an empty sender', () => {
+    const result = parseBrevoInbound({
+      items: [
+        { MessageId: '<no-from@example.com>', Subject: 'missing From' },
+        { MessageId: '<empty-from@example.com>', From: '   ', Subject: 'blank From' },
+        { MessageId: '<obj-empty-from@example.com>', From: { Name: 'Ghost' }, Subject: 'no Address' },
+        { MessageId: '<ok@example.com>', From: 'y@example.com' },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toHaveLength(1);
+    expect(result.value[0]!.externalMessageId).toBe('<ok@example.com>');
+    expect(result.value[0]!.from).toEqual({ address: 'y@example.com', name: null });
+  });
+
   it('drops items without a MessageId (no dedup key)', () => {
     const result = parseBrevoInbound({
       items: [

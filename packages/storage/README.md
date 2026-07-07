@@ -34,7 +34,7 @@ import type { ObjectStorageService } from '@octabits-io/storage';
 interface ObjectStorageService {
   readonly type?: string;
   getPublicUrl(p: { namespace?: string; key: string }): string;
-  listObjects<T extends boolean>(p: { namespace?: string; prefix?: string; includeHead: T }): Promise<Result<ListObjectsResponse<T>, ObjectStorageError>>;
+  listObjects<T extends boolean>(p: { namespace?: string; prefix?: string; includeHead: T; continuationToken?: string; maxKeys?: number }): Promise<Result<ListObjectsResponse<T>, ObjectStorageError>>;
   uploadObject(p: { namespace?: string; key: string; metadata?: Record<string, string>; body: Uint8Array | ReadableStream<Uint8Array> }): Promise<Result<void, ObjectStorageError>>;
   deleteObject(p: { namespace?: string; key: string }): Promise<Result<void, ObjectStorageError>>;
   deleteObjectsByPrefix(p: { namespace?: string; prefix?: string }): Promise<Result<{ deleted: number }, ObjectStorageError>>;
@@ -45,7 +45,15 @@ interface ObjectStorageService {
 Every `namespace` is optional. Pass one to partition objects (multi-tenant); omit
 it to use the single root namespace (single-tenant).
 
-`ObjectStorageError` is an `OctErrorWithKey<'network_error' | 'not_found' | 'not_found_bucket' | 'access_denied' | 'internal_error'>`.
+`listObjects` pages: pass the `continuationToken` from
+`ListObjectsResponse.continuationToken` to fetch the next page (S3 pages at up
+to 1000 objects; the Postgres provider returns everything in one page).
+
+`deleteObjectsByPrefix` requires a **non-empty** `prefix` — a missing/empty
+prefix would wipe the whole namespace (or bucket) and yields an
+`invalid_prefix` error instead.
+
+`ObjectStorageError` is an `OctErrorWithKey<'network_error' | 'not_found' | 'not_found_bucket' | 'access_denied' | 'invalid_key' | 'invalid_prefix' | 'internal_error'>`.
 
 ## Providers
 
@@ -63,9 +71,15 @@ exposing just `getPublicUrl`.
 `@octabits-io/storage/postgres` also exports framework-agnostic serve handlers
 built on the `ObjectFileServer` contract — `createGenericHandler`,
 `createExpressHandler`, `createNitroHandler`, and `createWebResponse` — plus the
-`parseStoragePath` / `isValidObjectKey` / `sanitizeObjectKey` key utilities
-(directory-traversal guards included). They emit ETag / `Last-Modified` /
-`Cache-Control` headers and honor `If-None-Match` (304).
+`parseStoragePath` / `isValidObjectKey` / `sanitizeObjectKey` key utilities.
+Every handler validates the request key before touching storage (traversal
+segments — plain or percent-encoded — leading slashes, and empty keys are
+rejected with 400), emits ETag / `Last-Modified` / `Cache-Control` /
+`X-Content-Type-Options: nosniff` headers, and honors `If-None-Match` (304).
+An optional `ServeHandlerOptions.contentDisposition` (e.g. `'attachment'`) is
+available on every handler factory — strongly recommended when serving
+user-uploaded SVG/HTML from your app's origin, since inline rendering of
+untrusted markup enables stored XSS.
 
 ## Examples
 
@@ -129,6 +143,11 @@ const storage = createPostgresObjectStorageService({
 
 // The `object_storage` table is created on first use (CREATE TABLE IF NOT EXISTS);
 // a legacy `tenant_id` column is migrated to `namespace` automatically.
+// NOTE: with this default (`autoCreateTable: true`) the connected role needs
+// DDL privileges — even a plain read can trigger the bootstrap. Pass
+// `autoCreateTable: false` when the table is managed by migrations, and
+// `advisoryLockId` to change the bootstrap's pg_advisory_xact_lock id
+// (default 123456789) if it collides with one of yours.
 await storage.uploadObject({ namespace: 't1', key: 'docs/f.pdf', body: bytes });
 
 const obj = await storage.getObjectData({ namespace: 't1', key: 'docs/f.pdf' });
@@ -142,12 +161,14 @@ Serve stored blobs over HTTP with a framework-agnostic handler (ETag / 304 /
 `Cache-Control` included):
 
 ```ts
-import { createWebResponse, sanitizeObjectKey } from '@octabits-io/storage/postgres';
+import { createWebResponse } from '@octabits-io/storage/postgres';
 
-// e.g. inside a Web-standard route handler
-const key = sanitizeObjectKey(pathAfterPrefix); // directory-traversal guard
-return createWebResponse(storage, { namespace: 't1', key }, request.headers);
+// e.g. inside a Web-standard route handler. Traversal / invalid keys are
+// rejected with 400 by the handler itself; `sanitizeObjectKey` remains
+// available if you prefer normalizing instead of rejecting.
+return createWebResponse(storage, { namespace: 't1', key: pathAfterPrefix }, request.headers);
 // single-tenant: return createWebResponse(storage, { key }, request.headers);
+// untrusted uploads: pass { contentDisposition: 'attachment' } as the 4th arg
 ```
 
 ## Testing

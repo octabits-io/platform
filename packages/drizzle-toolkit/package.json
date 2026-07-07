@@ -6,43 +6,43 @@
   "type": "module",
   "exports": {
     "./db": {
-      "import": "./dist/db/index.js",
       "types": "./dist/db/index.d.ts",
+      "import": "./dist/db/index.js",
       "default": "./dist/db/index.js"
     },
     "./factory": {
-      "import": "./dist/factory/index.js",
       "types": "./dist/factory/index.d.ts",
+      "import": "./dist/factory/index.js",
       "default": "./dist/factory/index.js"
     },
     "./migrate": {
-      "import": "./dist/migrate/index.js",
       "types": "./dist/migrate/index.d.ts",
+      "import": "./dist/migrate/index.js",
       "default": "./dist/migrate/index.js"
     },
     "./scope": {
-      "import": "./dist/scope/index.js",
       "types": "./dist/scope/index.d.ts",
+      "import": "./dist/scope/index.js",
       "default": "./dist/scope/index.js"
     },
     "./idempotency": {
-      "import": "./dist/idempotency/index.js",
       "types": "./dist/idempotency/index.d.ts",
+      "import": "./dist/idempotency/index.js",
       "default": "./dist/idempotency/index.js"
     },
     "./crud": {
-      "import": "./dist/crud/index.js",
       "types": "./dist/crud/index.d.ts",
+      "import": "./dist/crud/index.js",
       "default": "./dist/crud/index.js"
     },
     "./config": {
-      "import": "./dist/config/index.js",
       "types": "./dist/config/index.d.ts",
+      "import": "./dist/config/index.js",
       "default": "./dist/config/index.js"
     },
     "./rls": {
-      "import": "./dist/rls/index.js",
       "types": "./dist/rls/index.d.ts",
+      "import": "./dist/rls/index.js",
       "default": "./dist/rls/index.js"
     }
   },
@@ -72,14 +72,21 @@
   },
   "dependencies": {
     "@octabits-io/foundation": "^0.4.0",
-    "drizzle-orm": "^0.45.2",
-    "pg": "^8.22.0"
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
     "@types/pg": "^8.20.0",
+    "pg": "^8.22.0",
+    "tsup": "^8.5.1",
     "vitest": "^4.1.9"
   },
   "peerDependencies": {
+    "pg": "^8.22.0",
     "typescript": "^5 || ^6"
+  },
+  "peerDependenciesMeta": {
+    "pg": {
+      "optional": true
+    }
   }
 }

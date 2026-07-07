@@ -320,6 +320,25 @@ describe('IoC Container', () => {
       expect(services.exists).toBe('yes')
       expect(services.missing).toBeUndefined()
     })
+
+    it('should return a fresh instance per access for transient services', () => {
+      // Regression: the proxy cached every resolution, turning transients into
+      // de-facto singletons.
+      const container = new IoC<{ uuid: { id: number }; shared: { id: number } }>()
+      let transientCount = 0
+      let singletonCount = 0
+      container.register('uuid', () => ({ id: ++transientCount }), ServiceLifetime.Transient)
+      container.register('shared', () => ({ id: ++singletonCount }), ServiceLifetime.Singleton)
+
+      const services = container.toServices()
+
+      expect(services.uuid).not.toBe(services.uuid)
+      expect(transientCount).toBeGreaterThan(1)
+
+      // Singletons stay cached
+      expect(services.shared).toBe(services.shared)
+      expect(singletonCount).toBe(1)
+    })
   })
 
   describe('Re-registration', () => {
@@ -334,6 +353,40 @@ describe('IoC Container', () => {
 
       expect(first).toBe(1)
       expect(second).toBe(2)
+    })
+
+    it('should let a child-scope singleton re-registration win over the root singleton cache', () => {
+      // Regression: once the root had cached a singleton, a scope-level
+      // re-registration of the same key was silently ignored.
+      const container = new IoC<{ value: number }>()
+      container.register('value', () => 1, ServiceLifetime.Singleton)
+
+      // Root resolves first, populating the root singleton cache
+      expect(container.resolve('value')).toBe(1)
+
+      const scope = container.createScope()
+      scope.register('value', () => 2, ServiceLifetime.Singleton)
+
+      expect(scope.resolve('value')).toBe(2)
+      // The override is a singleton within the scope that owns it
+      expect(scope.resolve('value')).toBe(2)
+      // The root registration and its cached instance are untouched
+      expect(container.resolve('value')).toBe(1)
+    })
+
+    it('should share a scope-registered singleton with child scopes of that scope', () => {
+      const container = new IoC<{ id: string }>()
+      container.register('id', () => 'root', ServiceLifetime.Singleton)
+      container.resolve('id')
+
+      const scope = container.createScope()
+      let calls = 0
+      scope.register('id', () => `override-${++calls}`, ServiceLifetime.Singleton)
+
+      const child = scope.createScope()
+      expect(scope.resolve('id')).toBe('override-1')
+      expect(child.resolve('id')).toBe('override-1')
+      expect(calls).toBe(1)
     })
 
     it('should clear cached scoped service when re-registering', () => {

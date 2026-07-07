@@ -64,6 +64,7 @@ export function createMailjetTransport(config: MailjetTransportCreateConfig): Ma
             Name: message.from.name,
           },
           To: message.to.map(email => ({ Email: email })),
+          Bcc: message.bcc?.map(email => ({ Email: email })),
           ReplyTo: message.replyTo
             ? { Email: message.replyTo.address, Name: message.replyTo.name }
             : undefined,

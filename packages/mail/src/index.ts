@@ -2,9 +2,11 @@
 // @octabits-io/mail — provider-agnostic mail transport contract
 // ============================================================================
 //
-// The root entry is dependency-free: the transport contract, the error
-// taxonomy, and the two vendor-less transports (logger for dev, memory for
-// tests). Vendor transports live behind subpath exports so consumers only
+// The root entry is vendor-free (no mail-provider SDKs), but not
+// dependency-free: it uses `@octabits-io/foundation` (Result/Logger) at
+// runtime, which is a required peer. It carries the transport contract, the
+// error taxonomy, and the two vendor-less transports (logger for dev, memory
+// for tests). Vendor transports live behind subpath exports so consumers only
 // install and load the SDKs they actually use:
 //
 //   @octabits-io/mail/smtp     — nodemailer   (optional peer: nodemailer)
@@ -22,6 +24,7 @@ export type {
   MailDeliveryError,
   MailTemplateError,
   MailNotConfiguredError,
+  MailInvalidRecipientError,
   MailError,
   SentMailInfo,
   SendMailResult,
@@ -110,6 +113,7 @@ export type {
   BuildEmailContentOptions,
 } from './dispatch/email-builder';
 export { createDevOverrideMailTransport } from './dispatch/devOverride';
+export { isValidRecipientAddress, stripHeaderUnsafeChars } from './dispatch/sanitize';
 export type {
   BaseMailParams,
   UserMailParams,

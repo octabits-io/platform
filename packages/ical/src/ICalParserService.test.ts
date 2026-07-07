@@ -280,8 +280,8 @@ test('eventShortOvernight should produce single day', () => {
 // previous day must NOT be blocked. Read on a UTC server the old code saw hour
 // 11 (12:00 CEST = 10:00 UTC in winter / 11:00 in summer) and wrongly blocked
 // the prior day. The collapse now reasons on the event's own wall-clock hour,
-// so this asserts the SAME output a Berlin server would produce — and the whole
-// suite is run under TZ=UTC and TZ=Pacific/Kiritimati to prove it holds.
+// so this asserts the SAME output a Berlin server would produce regardless of
+// the TZ the test process happens to run under.
 // ---------------------------------------------------------------------------
 const eventBerlinNoon = `BEGIN:VCALENDAR
 VERSION:2.0
@@ -422,6 +422,175 @@ RRULE:FREQ=SECONDLY
 SUMMARY:Pathological secondly RRULE
 END:VEVENT
 END:VCALENDAR`;
+
+// ---------------------------------------------------------------------------
+// Regression — the occurrence cap must NOT be consumed by pre-window
+// occurrences. Previously the 5000-cap incremented before the windowStart
+// check, so a daily event with a DTSTART years in the past returned ZERO
+// occurrences for a current window (5000 pre-window days exhausted the cap).
+// ---------------------------------------------------------------------------
+
+test('daily event with DTSTART years before the window still yields in-window occurrences', () => {
+  const oldDaily = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTAMP:20100101T000000Z
+UID:old-daily@test.com
+DTSTART:20100101T100000Z
+DTEND:20100101T110000Z
+RRULE:FREQ=DAILY
+SUMMARY:Daily since 2010
+END:VEVENT
+END:VCALENDAR`;
+
+  const x = icalParserService.parseEventRanges(oldDaily, {
+    windowStart: new Date('2026-02-01T00:00:00Z'),
+    windowEnd: new Date('2026-02-08T00:00:00Z'),
+  });
+
+  expect(x.ok).toBe(true);
+  if (!x.ok) return;
+  // ~5875 pre-window occurrences are skipped without touching the cap;
+  // Feb 1–7 at 10:00Z start before windowEnd → exactly 7 occurrences.
+  expect(x.value).toHaveLength(7);
+  expect(x.value[0]?.startWallClock).toMatchObject({ year: 2026, month: 2, day: 1, hour: 10 });
+  expect(x.value[6]?.startWallClock).toMatchObject({ year: 2026, month: 2, day: 7, hour: 10 });
+});
+
+test('hourly event older than 7 months still yields in-window occurrences', () => {
+  // 2025-06-01 → 2026-01-05 is ~5232 hourly occurrences — more than the 5000
+  // cap, which previously starved the window entirely.
+  const oldHourly = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTAMP:20250601T000000Z
+UID:old-hourly@test.com
+DTSTART:20250601T000000Z
+DTEND:20250601T003000Z
+RRULE:FREQ=HOURLY
+SUMMARY:Hourly since June
+END:VEVENT
+END:VCALENDAR`;
+
+  const x = icalParserService.parseEventRanges(oldHourly, {
+    windowStart: new Date('2026-01-05T00:00:00Z'),
+    windowEnd: new Date('2026-01-06T00:00:00Z'),
+  });
+
+  expect(x.ok).toBe(true);
+  if (!x.ok) return;
+  // 24 hourly occurrences start on 2026-01-05 before the windowEnd.
+  expect(x.value).toHaveLength(24);
+});
+
+// ---------------------------------------------------------------------------
+// Regression — the windowEnd bound is built with `Time.fromJSDate(d, true)`
+// (UTC). Without `useUTC` ical.js reads the Date via *local* getters and
+// treats them as UTC, shifting the expansion boundary by the server's UTC
+// offset. This asserts the exact-tie behavior (an occurrence starting exactly
+// at windowEnd is excluded), which only holds under a UTC reading.
+// ---------------------------------------------------------------------------
+test('windowEnd boundary is read in UTC, independent of server TZ', () => {
+  const dailyNoon = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTAMP:20250101T000000Z
+UID:window-end-boundary@test.com
+DTSTART:20250301T120000Z
+DTEND:20250301T130000Z
+RRULE:FREQ=DAILY
+SUMMARY:Daily at noon UTC
+END:VEVENT
+END:VCALENDAR`;
+
+  const x = icalParserService.parseEventRanges(dailyNoon, {
+    windowEnd: new Date('2025-03-05T12:00:00Z'),
+  });
+
+  expect(x.ok).toBe(true);
+  if (!x.ok) return;
+  // Mar 1–4 start strictly before 2025-03-05T12:00:00Z; the Mar 5 12:00Z
+  // occurrence is an exact tie and must be excluded — on any server TZ.
+  expect(x.value).toHaveLength(4);
+  expect(x.value[3]?.startWallClock).toMatchObject({ year: 2025, month: 3, day: 4, hour: 12 });
+});
+
+// ---------------------------------------------------------------------------
+// RECURRENCE-ID overrides — the occurrence's own item summary must win over
+// the master event's summary.
+// ---------------------------------------------------------------------------
+test('RECURRENCE-ID override uses the overriding VEVENT summary', () => {
+  const withOverride = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTAMP:20250101T000000Z
+UID:override@test.com
+DTSTART:20250303T100000Z
+DTEND:20250303T110000Z
+RRULE:FREQ=WEEKLY
+SUMMARY:Master summary
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20250101T000000Z
+UID:override@test.com
+RECURRENCE-ID:20250310T100000Z
+DTSTART:20250310T120000Z
+DTEND:20250310T130000Z
+SUMMARY:Overridden summary
+END:VEVENT
+END:VCALENDAR`;
+
+  const x = icalParserService.parseEventRanges(withOverride, {
+    windowEnd: new Date('2025-03-25T00:00:00Z'),
+  });
+
+  expect(x.ok).toBe(true);
+  if (!x.ok) return;
+  expect(x.value.map((r) => r.summary)).toEqual([
+    'Master summary',
+    'Overridden summary',
+    'Master summary',
+    'Master summary',
+  ]);
+  // The override also moved the occurrence from 10:00 to 12:00.
+  expect(x.value[1]?.startWallClock).toMatchObject({ year: 2025, month: 3, day: 10, hour: 12 });
+});
+
+// EXDATE excludes an expanded occurrence.
+test('EXDATE-excluded occurrence is not returned', () => {
+  const withExdate = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTAMP:20250101T000000Z
+UID:exdate@test.com
+DTSTART:20250303T100000Z
+DTEND:20250303T110000Z
+RRULE:FREQ=WEEKLY
+EXDATE:20250310T100000Z
+SUMMARY:Weekly with exdate
+END:VEVENT
+END:VCALENDAR`;
+
+  const x = icalParserService.parseEventRanges(withExdate, {
+    windowEnd: new Date('2025-03-25T00:00:00Z'),
+  });
+
+  expect(x.ok).toBe(true);
+  if (!x.ok) return;
+  // Mar 3, 17, 24 — Mar 10 excluded via EXDATE.
+  expect(x.value).toHaveLength(3);
+  expect(x.value.map((r) => r.startWallClock.day)).toEqual([3, 17, 24]);
+});
+
+// Malformed input surfaces as an err Result, never a throw.
+test('malformed iCal input returns err', () => {
+  const x = icalParserService.parseEventRanges('this is not an iCal payload');
+
+  expect(x.ok).toBe(false);
+  if (x.ok) return;
+  expect(typeof x.error.key).toBe('string');
+  expect(typeof x.error.message).toBe('string');
+});
 
 test('collapseToBlockedDateRanges caps occurrences for pathological RRULE', () => {
   const startTime = performance.now();

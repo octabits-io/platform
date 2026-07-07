@@ -23,7 +23,24 @@ export interface MailNotConfiguredError extends OctError {
   message: string;
 }
 
-export type MailError = MailConfigurationError | MailDeliveryError | MailTemplateError | MailNotConfiguredError;
+/**
+ * A recipient (or reply/bounce) address was missing or failed the dispatch
+ * layer's sanitization check (separators, whitespace, control characters, or
+ * not shaped like an email address). Refused before any transport is invoked.
+ */
+export interface MailInvalidRecipientError extends OctError {
+  key: 'invalid_recipient';
+  message: string;
+  /** The offending address, when safe to echo. */
+  address?: string;
+}
+
+export type MailError =
+  | MailConfigurationError
+  | MailDeliveryError
+  | MailTemplateError
+  | MailNotConfiguredError
+  | MailInvalidRecipientError;
 
 /**
  * Successful-send metadata. `messageId` is the provider's RFC 5322 Message-ID
@@ -42,6 +59,8 @@ export interface RenderedEmail {
   html: string;
   text: string;
   recipients: string[];
+  /** BCC recipients (e.g. the notifications copy in `customer_and_notifications` mode). */
+  bcc?: string[];
   primaryRecipient: string;
 }
 

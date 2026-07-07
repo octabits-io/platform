@@ -126,7 +126,11 @@ function normalizeItem(item: BrevoItem): NormalizedInboundMessage | null {
   // safely stored (no idempotency). Skip it rather than fabricate an id.
   if (!item.MessageId) return null;
 
-  const from = normalizeAddress(item.From) ?? { address: '', name: null };
+  // A message without a parseable From has no sender to attribute or reply to —
+  // treat it as a parse-reject for this item (skip it) rather than emitting a
+  // fabricated empty sender downstream consumers would have to special-case.
+  const from = normalizeAddress(item.From);
+  if (!from) return null;
 
   return {
     externalMessageId: item.MessageId,
@@ -155,8 +159,16 @@ function normalizeItem(item: BrevoItem): NormalizedInboundMessage | null {
  * Parse a Brevo inbound-parsing webhook payload (`{ items: [...] }`) into the
  * provider-agnostic normalized shape. Total (never throws) → returns a Result.
  *
- * Items without a `MessageId` are dropped (no dedup key); a payload with a valid
+ * Items without a `MessageId` (no dedup key) or without a parseable `From`
+ * address (no sender to attribute) are dropped; a payload with a valid
  * envelope but zero usable items returns an empty array, not an error.
+ *
+ * SECURITY: Brevo does NOT sign inbound webhooks — there is no signature to
+ * verify, so this parser cannot authenticate the payload's origin. Endpoint
+ * authentication is the consumer's responsibility: use an unguessable secret
+ * path segment, an IP allowlist for Brevo's webhook egress ranges, and/or a
+ * shared-secret header configured on the webhook, and treat every parsed
+ * field as untrusted input regardless.
  */
 export function parseBrevoInbound(
   payload: unknown,

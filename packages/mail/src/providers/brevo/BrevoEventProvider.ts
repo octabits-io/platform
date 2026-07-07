@@ -86,6 +86,13 @@ function normalizeEvent(raw: BrevoEvent): NormalizedDeliveryEvent | null {
  * events. Total (never throws) → returns a Result. Events without a Message-ID
  * or event name are dropped; status-irrelevant events keep `deliveryStatus:
  * null` (the handler skips them).
+ *
+ * SECURITY: Brevo does NOT sign event webhooks — there is no signature to
+ * verify, so this parser cannot authenticate the payload's origin. Endpoint
+ * authentication is the consumer's responsibility: use an unguessable secret
+ * path segment, an IP allowlist for Brevo's webhook egress ranges, and/or a
+ * shared-secret header configured on the webhook, and treat every parsed
+ * field as untrusted input regardless.
  */
 export function parseBrevoEvents(
   payload: unknown,

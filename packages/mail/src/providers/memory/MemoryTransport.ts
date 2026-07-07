@@ -10,7 +10,7 @@ export interface MemoryTransport extends MailTransport {
   readonly type: 'memory';
   /** Get all captured messages */
   getMessages(): MailMessage[];
-  /** Get messages by recipient email */
+  /** Get messages by recipient email (matches both `to` and `bcc`) */
   getMessagesTo(email: string): MailMessage[];
   /** Get the last sent message */
   getLastMessage(): MailMessage | undefined;
@@ -51,7 +51,7 @@ export function createMemoryTransport(): MemoryTransport {
     type: 'memory' as const,
     send,
     getMessages: () => [...messages],
-    getMessagesTo: (email) => messages.filter(m => m.to.includes(email)),
+    getMessagesTo: (email) => messages.filter(m => m.to.includes(email) || (m.bcc?.includes(email) ?? false)),
     getLastMessage: () => messages[messages.length - 1],
     clear: () => { messages.length = 0; },
     count: () => messages.length,

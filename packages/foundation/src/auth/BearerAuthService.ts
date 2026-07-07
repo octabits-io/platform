@@ -18,15 +18,20 @@ export interface BearerStrategy<TValue, TError extends OctError = OctError> {
   validate(token: string): Promise<Result<TValue, TError>> | Result<TValue, TError>;
 }
 
+/** `Bearer` scheme match is case-insensitive per RFC 7235; scheme and token
+ *  may be separated by any run of spaces. The token itself must be a single
+ *  non-whitespace run. */
+const BEARER_HEADER_PATTERN = /^Bearer +(\S+)$/i;
+
 /**
  * Extract the bearer token from an `Authorization: Bearer <token>` header value.
+ * The single shared implementation — the JWT validation service re-exposes it.
  * Returns `null` for a missing or malformed header.
  */
 export function extractBearerToken(authorizationHeader: string | undefined): string | null {
   if (!authorizationHeader) return null;
-  const parts = authorizationHeader.split(' ');
-  if (parts.length !== 2 || parts[0] !== 'Bearer') return null;
-  return parts[1] ?? null;
+  const match = BEARER_HEADER_PATTERN.exec(authorizationHeader);
+  return match?.[1] ?? null;
 }
 
 /**

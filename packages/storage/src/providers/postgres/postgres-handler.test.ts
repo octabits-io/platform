@@ -1,11 +1,14 @@
-import { describe, test, expect, beforeEach } from 'vitest';
+import { describe, test, expect, beforeEach, vi } from 'vitest';
 import {
   getObjectData,
   parseStoragePath,
   isValidObjectKey,
   sanitizeObjectKey,
   createGenericHandler,
+  createExpressHandler,
+  createWebResponse,
 } from './postgres-handler';
+import type { ExpressLikeResponse } from './postgres-handler';
 import type { ObjectFileServer } from '../../base/interfaces';
 import type { ObjectData } from '../../base/types';
 import type { ObjectStorageError } from '../../base/errors';
@@ -107,6 +110,22 @@ describe('ObjectStorageService.postgres.handler', () => {
       }
     });
 
+    test('rejects traversal keys with invalid_key / 400 before hitting storage', async () => {
+      const spyServer: ObjectFileServer = {
+        getObjectData: vi.fn(async () => ({ ok: false as const, error: { key: 'not_found' as const, message: 'x' } })),
+      };
+
+      for (const key of ['../secret.txt', 'a/../../b.txt', '/rooted.txt', '%2e%2e/secret.txt', '..%2fsecret.txt']) {
+        const result = await getObjectData(spyServer, { namespace: NAMESPACE, key });
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.key).toBe('invalid_key');
+          expect(result.error.statusCode).toBe(400);
+        }
+      }
+      expect(spyServer.getObjectData).not.toHaveBeenCalled();
+    });
+
     test('should generate consistent ETags', async () => {
       const testData = Buffer.from('Test data');
       upload({
@@ -169,6 +188,39 @@ describe('ObjectStorageService.postgres.handler', () => {
       expect(response.headers['Content-Type']).toBe('text/plain');
     });
 
+    test('sets X-Content-Type-Options: nosniff on success and error responses', async () => {
+      const handler = createGenericHandler(fileServer);
+
+      const okResponse = await handler({ namespace: NAMESPACE, key: 'handler/test.txt' });
+      expect(okResponse.statusCode).toBe(200);
+      expect(okResponse.headers['X-Content-Type-Options']).toBe('nosniff');
+
+      const errResponse = await handler({ namespace: NAMESPACE, key: 'missing.txt' });
+      expect(errResponse.statusCode).toBe(404);
+      expect(errResponse.headers['X-Content-Type-Options']).toBe('nosniff');
+    });
+
+    test('returns 400 for plain and percent-encoded traversal keys', async () => {
+      const handler = createGenericHandler(fileServer);
+
+      const plain = await handler({ namespace: NAMESPACE, key: '../handler/test.txt' });
+      expect(plain.statusCode).toBe(400);
+
+      const encoded = await handler({ namespace: NAMESPACE, key: '%2e%2e/handler/test.txt' });
+      expect(encoded.statusCode).toBe(400);
+    });
+
+    test('sets Content-Disposition only when configured', async () => {
+      const plain = createGenericHandler(fileServer);
+      const attachment = createGenericHandler(fileServer, { contentDisposition: 'attachment' });
+
+      const plainResponse = await plain({ namespace: NAMESPACE, key: 'handler/test.txt' });
+      expect(plainResponse.headers['Content-Disposition']).toBeUndefined();
+
+      const attachmentResponse = await attachment({ namespace: NAMESPACE, key: 'handler/test.txt' });
+      expect(attachmentResponse.headers['Content-Disposition']).toBe('attachment');
+    });
+
     test('should handle 304 Not Modified with If-None-Match', async () => {
       const handler = createGenericHandler(fileServer);
 
@@ -192,6 +244,98 @@ describe('ObjectStorageService.postgres.handler', () => {
 
       expect(secondResponse.statusCode).toBe(304);
       expect(secondResponse.body).toBe('');
+    });
+  });
+
+  describe('createExpressHandler', () => {
+    const makeRes = () => {
+      const headers: Record<string, string> = {};
+      let statusCode = 0;
+      let body: Buffer | string | undefined;
+      let ended = false;
+      const res: ExpressLikeResponse = {
+        status(code: number) { statusCode = code; return this; },
+        set(field: string, value: string) { headers[field] = value; return this; },
+        send(b: Buffer | string) { body = b; return this; },
+        end() { ended = true; return this; },
+      };
+      return { res, headers, get statusCode() { return statusCode; }, get body() { return body; }, get ended() { return ended; } };
+    };
+
+    beforeEach(() => {
+      upload({
+        namespace: NAMESPACE,
+        key: 'express/file.txt',
+        body: Buffer.from('express blob'),
+        metadata: { 'content-type': 'text/plain' },
+      });
+    });
+
+    test('serves objects with nosniff and optional Content-Disposition', async () => {
+      const handler = createExpressHandler(fileServer, NAMESPACE, { contentDisposition: 'attachment' });
+      const ctx = makeRes();
+
+      await handler({ params: { key: 'express/file.txt' }, headers: {} }, ctx.res);
+
+      expect(ctx.statusCode).toBe(200);
+      expect(ctx.headers['X-Content-Type-Options']).toBe('nosniff');
+      expect(ctx.headers['Content-Type']).toBe('text/plain');
+      expect(ctx.headers['Content-Disposition']).toBe('attachment');
+      expect(ctx.body?.toString()).toBe('express blob');
+    });
+
+    test('returns 400 for a plain traversal key', async () => {
+      const handler = createExpressHandler(fileServer, NAMESPACE);
+      const ctx = makeRes();
+
+      await handler({ params: { key: '../express/file.txt' }, headers: {} }, ctx.res);
+
+      expect(ctx.statusCode).toBe(400);
+      expect(ctx.headers['X-Content-Type-Options']).toBe('nosniff');
+    });
+
+    test('returns 400 for a percent-encoded traversal key', async () => {
+      const handler = createExpressHandler(fileServer, NAMESPACE);
+      const ctx = makeRes();
+
+      await handler({ params: { key: '%2e%2e/express/file.txt' }, headers: {} }, ctx.res);
+
+      expect(ctx.statusCode).toBe(400);
+    });
+  });
+
+  describe('createWebResponse', () => {
+    beforeEach(() => {
+      upload({
+        namespace: NAMESPACE,
+        key: 'web/file.txt',
+        body: Buffer.from('web blob'),
+        metadata: { 'content-type': 'text/plain' },
+      });
+    });
+
+    test('serves objects with nosniff and optional Content-Disposition', async () => {
+      const response = await createWebResponse(
+        fileServer,
+        { namespace: NAMESPACE, key: 'web/file.txt' },
+        undefined,
+        { contentDisposition: 'attachment' }
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
+      expect(response.headers.get('Content-Disposition')).toBe('attachment');
+      expect(await response.text()).toBe('web blob');
+    });
+
+    test('returns 400 with nosniff for traversal keys', async () => {
+      const response = await createWebResponse(fileServer, {
+        namespace: NAMESPACE,
+        key: '%2e%2e/web/file.txt',
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
     });
   });
 
@@ -223,6 +367,25 @@ describe('ObjectStorageService.postgres.handler', () => {
     test('should handle leading/trailing slashes', () => {
       const result = parseStoragePath('///storage/key///');
       expect(result.key).toBe('key');
+    });
+
+    test('percent-decodes keys', () => {
+      const result = parseStoragePath('/storage/my%20folder/file%20name.txt');
+      expect(result.key).toBe('my folder/file name.txt');
+    });
+
+    test('rejects plain traversal paths', () => {
+      expect(parseStoragePath('/storage/../etc/passwd')).toEqual({});
+      expect(parseStoragePath('/storage/a/../../b.txt')).toEqual({});
+    });
+
+    test('rejects percent-encoded traversal paths', () => {
+      expect(parseStoragePath('/storage/%2e%2e/%2e%2e/etc/passwd')).toEqual({});
+      expect(parseStoragePath('/storage/a/%2E%2E/b.txt')).toEqual({});
+    });
+
+    test('rejects malformed percent-encoding', () => {
+      expect(parseStoragePath('/storage/bad%zz')).toEqual({});
     });
   });
 

@@ -123,14 +123,20 @@ export interface QueueDomainConfig<TPayload extends BaseJobPayload> {
 export interface QueueDomain<TPayload extends BaseJobPayload> {
   /** Enqueue a job for processing */
   enqueue(payload: TPayload): Promise<Result<QueuedJob, EnqueueError>>;
-  /** Start the worker to process jobs */
+  /**
+   * Start the worker to process jobs.
+   *
+   * A domain runs at most one worker: calling this while a worker is already
+   * started returns a `queue_error` Result (the first registration stays
+   * active). Call {@link stop} before starting again.
+   */
   startWorker(
     handler: JobHandler<TPayload>,
     options?: WorkerOptions
   ): Promise<Result<void, QueueError>>;
   /** Schedule a recurring job */
   schedule(name: string, cron: string, payload: TPayload): Promise<Result<void, EnqueueError>>;
-  /** Stop the worker gracefully */
+  /** Stop the worker gracefully (no-op when none is running) */
   stop(): Promise<void>;
 }
 

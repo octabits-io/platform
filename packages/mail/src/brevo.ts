@@ -11,6 +11,7 @@ export {
   createBrevoClient,
   verifyBrevoConnection,
   formatBrevoError,
+  DEFAULT_BREVO_TIMEOUT_MS,
 } from './providers/brevo/brevo-client';
 export type {
   BrevoClient,

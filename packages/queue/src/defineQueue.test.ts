@@ -22,6 +22,7 @@ const validPayload: TestJob = { scopeKey: 't1', to: 'a@b.com' };
 function createMockBoss() {
   return {
     createQueue: vi.fn().mockResolvedValue(undefined),
+    updateQueue: vi.fn().mockResolvedValue(undefined),
     send: vi.fn().mockResolvedValue('job-123'),
     work: vi.fn().mockResolvedValue('worker-1'),
     offWork: vi.fn().mockResolvedValue(undefined),
@@ -205,14 +206,19 @@ describe('defineQueue — worker', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('stops the underlying worker', async () => {
+  it('stops the underlying worker by queue name (pg-boss v12 offWork matches names, not ids)', async () => {
     const boss = createMockBoss();
     const { createSystemScope } = createScopeStub();
     const worker = defineTestQueue().createWorker({ boss: boss as unknown as PgBoss, logger });
 
     await worker.startWorker({ createSystemScope });
     await worker.stop();
-    expect(boss.offWork).toHaveBeenCalledWith('worker-1');
+    expect(boss.offWork).toHaveBeenCalledTimes(1);
+    expect(boss.offWork).toHaveBeenCalledWith('email');
+
+    // The worker is now treated as stopped: a repeat stop() is a no-op.
+    await worker.stop();
+    expect(boss.offWork).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -310,6 +316,8 @@ describe('defineQueue — DLQ handler', () => {
       validPayload: true,
       scopeKey: 't1',
     });
+    // A valid-payload record never carries rawPayload (discriminated union).
+    expect(onDlqAudit.mock.calls[0]![1]).not.toHaveProperty('rawPayload');
     const auditOrder = onDlqAudit.mock.invocationCallOrder[0]!;
     const hookOrder = onDlq.mock.invocationCallOrder[0]!;
     expect(hookOrder).toBeLessThan(auditOrder);
@@ -322,12 +330,14 @@ describe('defineQueue — DLQ handler', () => {
     expect(scope.dispose).toHaveBeenCalledTimes(1);
   });
 
-  it('marks validPayload false and omits scopeKey when the DLQ payload fails validation', async () => {
+  it('emits an honest invalid-payload record: rawPayload, real message, attemptCount 1', async () => {
     const boss = createMockBoss();
     const { createSystemScope } = createScopeStub();
     const onDlqAudit = vi.fn().mockResolvedValue(undefined);
 
-    await defineTestQueue({ onDlqAudit })
+    // retryLimit 5 configured — an invalid payload never retries, so the
+    // record must NOT claim 5 exhausted attempts.
+    await defineTestQueue({ onDlqAudit, config: { retryLimit: 5 } })
       .createDlqHandler({ boss: boss as unknown as PgBoss, createSystemScope, logger })
       .start();
 
@@ -339,7 +349,14 @@ describe('defineQueue — DLQ handler', () => {
     const record = onDlqAudit.mock.calls[0]![1] as Record<string, unknown>;
     expect(record.validPayload).toBe(false);
     expect(record).not.toHaveProperty('scopeKey');
-    expect(record.payload).toEqual({ to: 'nope' });
+    // Schema-invalid payloads dead-letter on the FIRST attempt — no fabricated
+    // retry exhaustion, and the raw value is exposed as rawPayload (untyped).
+    expect(record.errorMessage).toBe(
+      'Payload failed schema validation; dead-lettered without retry',
+    );
+    expect(record.attemptCount).toBe(1);
+    expect(record.rawPayload).toEqual({ to: 'nope' });
+    expect(record).not.toHaveProperty('payload');
   });
 
   it('is a no-op audit-wise but still logs + disposes when no audit sink is provided', async () => {
@@ -403,7 +420,7 @@ describe('defineQueue — DLQ handler', () => {
     }
   });
 
-  it('stops the DLQ worker only when one is running', async () => {
+  it('stops the DLQ worker by queue name only when one is running', async () => {
     const boss = createMockBoss();
     const { createSystemScope } = createScopeStub();
     const dlq = defineTestQueue().createDlqHandler({
@@ -417,7 +434,81 @@ describe('defineQueue — DLQ handler', () => {
 
     await dlq.start();
     await dlq.stop();
-    expect(boss.offWork).toHaveBeenCalledWith('worker-1');
+    // pg-boss v12 offWork matches by queue NAME — a worker id as the first
+    // argument would be a silent no-op.
+    expect(boss.offWork).toHaveBeenCalledTimes(1);
+    expect(boss.offWork).toHaveBeenCalledWith('email-dlq');
+
+    // Treated as stopped afterwards: repeat stop() is a no-op.
+    await dlq.stop();
+    expect(boss.offWork).toHaveBeenCalledTimes(1);
+  });
+
+  it('syncs DLQ queue settings via updateQueue after createQueue', async () => {
+    const boss = createMockBoss();
+    const { createSystemScope } = createScopeStub();
+
+    await defineTestQueue()
+      .createDlqHandler({ boss: boss as unknown as PgBoss, createSystemScope, logger })
+      .start();
+
+    // createQueue is ON CONFLICT DO NOTHING in v12 — updateQueue closes drift.
+    expect(boss.updateQueue).toHaveBeenCalledWith('email-dlq', { retryLimit: 0 });
+  });
+
+  it('passes DLQ worker tuning (pollingIntervalSeconds/batchSize) through to boss.work', async () => {
+    const boss = createMockBoss();
+    const { createSystemScope } = createScopeStub();
+
+    const result = await defineTestQueue()
+      .createDlqHandler({ boss: boss as unknown as PgBoss, createSystemScope, logger })
+      .start({ pollingIntervalSeconds: 5, batchSize: 10 });
+
+    expect(result.ok).toBe(true);
+    expect(boss.work).toHaveBeenCalledWith(
+      'email-dlq',
+      { pollingIntervalSeconds: 5, batchSize: 10 },
+      expect.any(Function),
+    );
+  });
+
+  it('keeps the default 30s polling and omits batchSize when no tuning is given', async () => {
+    const boss = createMockBoss();
+    const { createSystemScope } = createScopeStub();
+
+    await defineTestQueue()
+      .createDlqHandler({ boss: boss as unknown as PgBoss, createSystemScope, logger })
+      .start();
+
+    expect(boss.work).toHaveBeenCalledWith(
+      'email-dlq',
+      { pollingIntervalSeconds: 30 },
+      expect.any(Function),
+    );
+  });
+
+  it('returns a queue_error on a second start() without stop() (no leaked registration)', async () => {
+    const boss = createMockBoss();
+    const { createSystemScope } = createScopeStub();
+    const dlq = defineTestQueue().createDlqHandler({
+      boss: boss as unknown as PgBoss,
+      createSystemScope,
+      logger,
+    });
+
+    expect((await dlq.start()).ok).toBe(true);
+    const second = await dlq.start();
+    expect(second.ok).toBe(false);
+    if (!second.ok) {
+      expect(second.error.key).toBe('queue_error');
+      expect(second.error.message).toContain('already started');
+    }
+    expect(boss.work).toHaveBeenCalledTimes(1);
+
+    // stop() then start() registers a fresh worker.
+    await dlq.stop();
+    expect((await dlq.start()).ok).toBe(true);
+    expect(boss.work).toHaveBeenCalledTimes(2);
   });
 
   it('isolates a poison job (raw-payload callback throw) so batch-mates are still logged + audited', async () => {
@@ -457,8 +548,9 @@ describe('defineQueue — DLQ handler', () => {
     expect(auditedById.has('ok')).toBe(true);
     expect(auditedById.get('ok')).toMatchObject({ scopeKey: 't1', validPayload: true });
     // Best-effort audit still emitted for the poison job (safe fields only).
-    expect(auditedById.get('poison')).toMatchObject({ validPayload: false, payload: null });
+    expect(auditedById.get('poison')).toMatchObject({ validPayload: false, rawPayload: null });
     expect(auditedById.get('poison')).not.toHaveProperty('scopeKey');
+    expect(auditedById.get('poison')).not.toHaveProperty('payload');
 
     // Both scopes disposed — no leak from the poison path.
     expect(scope.dispose).toHaveBeenCalledTimes(2);

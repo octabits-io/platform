@@ -40,8 +40,12 @@ export const BLOCKED_ATTACHMENT_EXTENSIONS: ReadonlySet<string> = new Set([
   'jar', 'apk', 'sh', 'bash', 'csh', 'ksh', 'run', 'bin', 'deb', 'rpm',
   // macOS executables
   'app', 'command', 'pkg',
-  // Macro-enabled Office documents
-  'docm', 'dotm', 'xlsm', 'xltm', 'xlam', 'pptm', 'potm', 'ppam', 'sldm',
+  // Macro-enabled Office documents + Excel add-ins
+  'docm', 'dotm', 'xlsm', 'xltm', 'xlam', 'pptm', 'potm', 'ppam', 'sldm', 'xll',
+  // Mountable disk images (auto-mounted by Windows, bypass Mark-of-the-Web)
+  'iso', 'img', 'vhd', 'vhdx',
+  // Other classic phishing carriers: compiled HTML help + internet shortcuts
+  'chm', 'url',
 ]);
 
 /**
@@ -117,9 +121,16 @@ export interface AttachmentScreenResult {
   code?: AttachmentBlockReason;
 }
 
-/** Lower-cased final extension of a filename, or '' when there is none. */
+/**
+ * Lower-cased final extension of a filename, or '' when there is none.
+ *
+ * Trailing dots and spaces are stripped from the basename first: Windows
+ * removes them on save, so `invoice.exe.` and `invoice.exe ` land on disk as
+ * `invoice.exe` — they must screen as `exe`, not as extension-less.
+ */
 export function fileExtension(filename: string): string {
-  const base = filename.split(/[\\/]/).pop() ?? filename;
+  const raw = filename.split(/[\\/]/).pop() ?? filename;
+  const base = raw.replace(/[. ]+$/, '');
   const dot = base.lastIndexOf('.');
   if (dot <= 0 || dot === base.length - 1) return '';
   return base.slice(dot + 1).toLowerCase();
@@ -139,6 +150,10 @@ export function normalizeMimeType(contentType: string): string {
  * Screen an inbound attachment against the policy using its DECLARED metadata.
  * Cheap, runs before any bytes are fetched. The byte size is re-checked against
  * the actual downloaded length by the caller (a declared length can lie).
+ *
+ * Note: `maxPerMessage` is NOT enforced here — this function sees one
+ * attachment at a time. The caller iterating a message's attachments is
+ * responsible for capping the count (drop + log extras beyond the limit).
  *
  * @param att   Declared attachment metadata (all fields untrusted).
  * @param policy Optional overrides; omitted fields fall back to the defaults.

@@ -45,6 +45,7 @@ describe('createBrevoTransport', () => {
     const result = await transport.send({
       from: { address: 'noreply@tenant.com', name: 'Tenant' },
       to: ['guest@example.com'],
+      bcc: ['notify@tenant.com'],
       replyTo: { address: 'reply@tenant.com', name: 'Reply' },
       subject: 'Hello',
       text: 'plain',
@@ -67,6 +68,7 @@ describe('createBrevoTransport', () => {
     const sent = JSON.parse(opts.body as string);
     expect(sent.sender).toEqual({ email: 'noreply@tenant.com', name: 'Tenant' });
     expect(sent.to).toEqual([{ email: 'guest@example.com' }]);
+    expect(sent.bcc).toEqual([{ email: 'notify@tenant.com' }]);
     expect(sent.replyTo).toEqual({ email: 'reply@tenant.com', name: 'Reply' });
     expect(sent.subject).toBe('Hello');
     expect(sent.textContent).toBe('plain');
@@ -76,8 +78,8 @@ describe('createBrevoTransport', () => {
     ]);
   });
 
-  it('returns messageId null when Brevo omits it', async () => {
-    stubFetch({}, 201);
+  it('returns messageId null when Brevo omits it and omits bcc when not set', async () => {
+    const fetchMock = stubFetch({}, 201);
     const transport = createBrevoTransport({ brevo: { apiKey: 'key-123' }, logger });
     const result = await transport.send({
       from: { address: 'noreply@tenant.com' },
@@ -88,6 +90,22 @@ describe('createBrevoTransport', () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.messageId).toBeNull();
+    const sent = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(sent.bcc).toBeUndefined();
+  });
+
+  it('passes a per-request timeout signal to fetch', async () => {
+    const fetchMock = stubFetch({ messageId: '<x@y>' }, 201);
+    const transport = createBrevoTransport({ brevo: { apiKey: 'key-123' }, logger });
+    await transport.send({
+      from: { address: 'noreply@tenant.com' },
+      to: ['guest@example.com'],
+      subject: 'Hi',
+      text: 't',
+      html: '<p>t</p>',
+    });
+    const opts = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(opts.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('returns a mail_delivery_error on a non-2xx response', async () => {

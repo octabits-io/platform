@@ -34,12 +34,21 @@ loader:
 1. Authenticates against Vault (kubernetes or static-token).
 2. Reads each KV-v2 path declared in the manifest.
 3. Sets `process.env[envVar] = value` for each `(vaultKey → envVar)` mapping —
-   but only if the env var is currently `undefined`, so local overrides and
-   break-glass values in `.env` always win.
+   but only if the env var is currently unset **or empty**, so local overrides
+   and break-glass values in `.env` always win. An empty string counts as
+   unset (a blank `FOO=` line in an env file never shadows the Vault value);
+   non-empty values are never clobbered.
 
-Any failure (auth, network, missing key, malformed manifest) throws
+Any failure (auth, network, timeout, missing key, malformed manifest) throws
 synchronously so the process refuses to start — a silent fallback to env vars
 where Vault is meant to be the source of truth would mask configuration bugs.
+
+Number and boolean KV scalars are coerced via `String()`; objects, arrays,
+and `null` fail loud — they have no sane env-var representation.
+
+**TLS:** `VAULT_ADDR` is used verbatim. Plain `http://` is acceptable only
+for in-cluster traffic or an agent-sidecar on localhost; anywhere else use
+`https://` — secrets travel in these responses.
 
 ## Environment variables
 
@@ -47,11 +56,13 @@ where Vault is meant to be the source of truth would mask configuration bugs.
 | --- | --- |
 | `VAULT_ADDR` | Vault base URL. **Unset → loader is a no-op.** |
 | `VAULT_SECRETS_MANIFEST` | JSON array of `(path → env-var map)` bindings. Empty/unset → no-op. |
-| `VAULT_AUTH_METHOD` | `token` or `k8s`. Defaults to `k8s` when `VAULT_K8S_ROLE` is set, else `token`. |
+| `VAULT_AUTH_METHOD` | `token` or `k8s` (any other value throws). Defaults to `k8s` when `VAULT_K8S_ROLE` is set, else `token`. |
 | `VAULT_TOKEN` | Static token (for `token` auth). |
 | `VAULT_K8S_ROLE` | Vault Kubernetes auth role (for `k8s` auth). |
 | `VAULT_K8S_JWT_PATH` | Service-account JWT path (default `/var/run/secrets/kubernetes.io/serviceaccount/token`). |
+| `VAULT_K8S_MOUNT` | Kubernetes auth mount path — `/v1/auth/<mount>/login` (default `kubernetes`). |
 | `VAULT_NAMESPACE` | Optional Vault Enterprise namespace (`X-Vault-Namespace`). |
+| `VAULT_TIMEOUT_MS` | Per-request timeout for login and KV reads, in ms (default `10000`). |
 
 ## Manifest format
 
@@ -75,9 +86,11 @@ through as `/v1/<path>`.
 
 - `loadVaultSecrets(): Promise<void>` — the boot-time entrypoint above.
 - `authenticate(opts): Promise<string>` — low-level: return a client token for
-  `{ method: 'token' }` or `{ method: 'k8s' }`.
+  `{ method: 'token' }` or `{ method: 'k8s' }` (k8s accepts optional `mount`
+  and `timeoutMs`).
 - `readKvV2(opts): Promise<Record<string, string>>` — low-level: read a KV-v2
-  path and return its unwrapped `data.data` map.
+  path and return its unwrapped `data.data` map (optional `timeoutMs`).
+- `DEFAULT_VAULT_TIMEOUT_MS` — the 10 s default request timeout.
 - `parseSecretManifest(raw): VaultSecretManifest` — parse/validate the manifest
   env var (returns `[]` for unset/empty).
 - `VAULT_SECRET_MANIFEST_SCHEMA` — the Zod schema.

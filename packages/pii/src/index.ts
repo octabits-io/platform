@@ -4,10 +4,10 @@ export type { PiiEncryptionService, PiiEncryptionOnlyService, PiiEncryptionServi
 
 // Master key
 export { createEnvVarMasterKeyProvider, MIN_MASTER_KEY_SOURCE_LENGTH } from './master-key.ts';
-export type { MasterKeyProvider, MasterKeyError } from './master-key.ts';
+export type { MasterKeyProvider, MasterKeyError, MasterKeyUnsupportedPlaintextError, MasterKeyProviderError } from './master-key.ts';
 
 // Blind index
-export { createBlindIndex, createBlindIndexService } from './blind-index.ts';
+export { createBlindIndex, createBlindIndexService, MIN_BLIND_INDEX_KEY_LENGTH } from './blind-index.ts';
 export type { BlindIndexService } from './blind-index.ts';
 
 // Error types
@@ -32,4 +32,5 @@ export type {
   ScopedKeyError,
   ScopedKeyNotFoundError,
   ScopedKeyGenerationError,
+  ScopedKeyStorageError,
 } from './scoped-key-service.ts';

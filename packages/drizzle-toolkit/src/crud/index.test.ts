@@ -1,10 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
-import { pgTable, text, timestamp } from 'drizzle-orm/pg-core';
+import { PgDialect, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 import {
   createBaseCrudService,
   createScopedCrudService,
   type CrudDatabase,
 } from './index.ts';
+
+/** Render a captured Drizzle SQL condition to its Postgres text. */
+const dialect = new PgDialect();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const renderSql = (where: unknown) => dialect.sqlToQuery(where as any).sql;
 
 const amenity = pgTable('amenity', {
   id: text().primaryKey().notNull(),
@@ -27,10 +32,11 @@ function makeDb(rows: Array<Record<string, unknown>>) {
   const fromResult = () => Object.assign(Promise.resolve(countRows), {
     where: async (w: unknown) => { whereArgs.push(w); return countRows; },
   });
+  const updateWhereArgs: unknown[] = [];
   const db: CrudDatabase = {
     select: () => ({ from: fromResult }),
     insert: () => ({ values: insertValues }),
-    update: () => ({ set: (v: unknown) => { setArgs.push(v); return { where: () => ({ returning: updateReturning }) }; } }),
+    update: () => ({ set: (v: unknown) => { setArgs.push(v); return { where: (w: unknown) => { updateWhereArgs.push(w); return { returning: updateReturning }; } }; } }),
     delete: () => ({ where: () => ({ returning: updateReturning }) }),
     query: {
       amenity: {
@@ -39,19 +45,19 @@ function makeDb(rows: Array<Record<string, unknown>>) {
       },
     },
   };
-  return { db, insertValues, setArgs, whereArgs, findManyArgs };
+  return { db, insertValues, setArgs, whereArgs, updateWhereArgs, findManyArgs };
 }
 
 const dateProvider = { now: () => new Date('2026-01-01T00:00:00Z') };
 
 function makeService(rows: Array<Record<string, unknown>>, actorId?: string) {
-  const { db, insertValues, setArgs } = makeDb(rows);
+  const { db, insertValues, setArgs, updateWhereArgs } = makeDb(rows);
   const service = createScopedCrudService({
     db, dateProvider, scope: { column: 'tenantId', value: 't1' }, actorId,
     table: amenity, tableName: 'amenity', resourceName: 'amenity',
     mapToEntity: (r) => ({ id: r.id, name: r.name }),
   });
-  return { service, insertValues, setArgs };
+  return { service, insertValues, setArgs, updateWhereArgs };
 }
 
 describe('createScopedCrudService (bound scope)', () => {
@@ -84,6 +90,26 @@ describe('createScopedCrudService (bound scope)', () => {
     expect(setArgs[0]).toMatchObject({ name: 'New', updatedBy: 'user-9', updatedAt: dateProvider.now() });
     const miss = await makeService([]).service.update({ id: 'x', name: 'n' });
     expect(!miss.ok && miss.error.key).toBe('amenity_not_found');
+  });
+
+  it('update strips the scope column from the payload (scope-transfer regression)', async () => {
+    const { service, setArgs } = makeService([{ id: 'wifi' }]);
+    const r = await service.update({
+      id: 'wifi', name: 'New',
+      // A hostile/buggy caller smuggling the scope column past the type layer:
+      tenantId: 'other-tenant',
+    } as never);
+    expect(r.ok).toBe(true);
+    expect(setArgs[0]).not.toHaveProperty('tenantId');
+    expect(setArgs[0]).toMatchObject({ name: 'New' });
+  });
+
+  it('update WHERE carries the scope predicate (rendered SQL)', async () => {
+    const { service, updateWhereArgs } = makeService([{ id: 'wifi' }]);
+    await service.update({ id: 'wifi', name: 'New' });
+    const sql = renderSql(updateWhereArgs[0]);
+    expect(sql).toContain('"id" =');
+    expect(sql).toContain('"tenant_id" =');
   });
 
   it('delete succeeds on match and 404s on miss', async () => {

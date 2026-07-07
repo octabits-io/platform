@@ -101,12 +101,18 @@ export class IoC<T> implements ServiceResolver<T> {
    */
   resolve<K extends keyof T>(key: K): T[K] {
     let registration = this.registrations.get(key)
+    // The container whose registration wins — own registrations take
+    // precedence over anything cached higher up the chain.
+    let owner: IoC<any> = this
 
     // Walk up the parent chain to find registration
     if (!registration) {
       let currentParent: IoC<any> | null = this.parent
       while (currentParent && !registration) {
         registration = currentParent.registrations.get(key)
+        if (registration) {
+          owner = currentParent
+        }
         currentParent = currentParent.parent
       }
     }
@@ -119,18 +125,18 @@ export class IoC<T> implements ServiceResolver<T> {
 
     switch (lifetime) {
       case ServiceLifetime.Singleton: {
-        // For singletons, always use the root container's cache
-        const root = this.getRoot()
-
-        // Check singleton cache
-        if (root.singletons.has(key)) {
-          return root.singletons.get(key) as T[K]
+        // Singletons are cached on the container that OWNS the registration:
+        // root-registered services are shared across all scopes (owner = root),
+        // while a scope-level re-registration overrides — it must not be
+        // shadowed by an instance the root cached under the same key.
+        if (owner.singletons.has(key)) {
+          return owner.singletons.get(key) as T[K]
         }
 
-        // Create and cache at root level
+        // Create and cache at the owning container
         // Pass the current container (scope) to the factory for context
         const service = factory(this)
-        root.singletons.set(key, service)
+        owner.singletons.set(key, service)
         return service
       }
 
@@ -158,6 +164,22 @@ export class IoC<T> implements ServiceResolver<T> {
         throw new Error(`Unknown service lifetime: ${lifetime}`)
       }
     }
+  }
+
+  /**
+   * Find the lifetime of the registration that would resolve for a key
+   * (own registration first, then up the parent chain).
+   */
+  private lifetimeOf(key: keyof T): ServiceLifetime | undefined {
+    let container: IoC<any> | null = this
+    while (container) {
+      const registration = container.registrations.get(key)
+      if (registration) {
+        return registration.lifetime
+      }
+      container = container.parent
+    }
+    return undefined
   }
 
   /**
@@ -248,11 +270,17 @@ export class IoC<T> implements ServiceResolver<T> {
     return new Proxy(target, {
       get: (target, prop) => {
         if (typeof prop === 'string' && this.has(prop as keyof T)) {
-          // Cache resolved services in the target to avoid repeated resolution
-          if (!(prop in target)) {
-            target[prop] = this.resolve(prop as keyof T)
+          if (prop in target) {
+            return target[prop]
           }
-          return target[prop]
+          const value = this.resolve(prop as keyof T)
+          // Cache resolved services to avoid repeated resolution — but only for
+          // singleton/scoped lifetimes. Caching transients here would make them
+          // de-facto singletons for this proxy.
+          if (this.lifetimeOf(prop as keyof T) !== ServiceLifetime.Transient) {
+            target[prop] = value
+          }
+          return value
         }
         return undefined
       },
@@ -264,14 +292,20 @@ export class IoC<T> implements ServiceResolver<T> {
       },
       getOwnPropertyDescriptor: (target, prop) => {
         if (typeof prop === 'string' && this.has(prop as keyof T)) {
-          // Use cached value if available
-          if (!(prop in target)) {
-            target[prop] = this.resolve(prop as keyof T)
+          // Use cached value if available; cache only non-transient lifetimes
+          let value: unknown
+          if (prop in target) {
+            value = target[prop]
+          } else {
+            value = this.resolve(prop as keyof T)
+            if (this.lifetimeOf(prop as keyof T) !== ServiceLifetime.Transient) {
+              target[prop] = value
+            }
           }
           return {
             enumerable: true,
             configurable: true,
-            value: target[prop]
+            value
           }
         }
         return undefined

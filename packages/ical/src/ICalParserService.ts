@@ -62,7 +62,9 @@ export interface ParseEventRangesOptions {
   windowStart?: Date;
   /**
    * Hard cap on the number of occurrences expanded per event. Guards against
-   * pathological rules (e.g. `FREQ=SECONDLY`) spinning the CPU.
+   * pathological rules (e.g. `FREQ=SECONDLY`) spinning the CPU. Occurrences
+   * skipped because they end before `windowStart` do not count against this
+   * cap (a separate internal runaway guard bounds those).
    * @default 5000
    */
   maxOccurrencesPerEvent?: number;
@@ -72,6 +74,13 @@ export interface ParseEventRangesOptions {
 // yields ~365 occurrences; this gives 13× headroom for hourly events and caps
 // abusive rules (e.g. FREQ=SECONDLY) before they spin the CPU.
 const MAX_OCCURRENCES_PER_EVENT = 5000;
+
+// Runaway guard for occurrences that end before `windowStart`. Those are
+// skipped without counting against `maxOccurrencesPerEvent` (a DTSTART years
+// in the past must not exhaust the cap before the window is ever reached),
+// but a pathological rule could otherwise iterate forever, so a separate,
+// much larger bound stops the loop.
+const MAX_SKIPPED_PRE_WINDOW_OCCURRENCES = 500_000;
 
 // ============================================================================
 // Optional layer — day-blocking collapse
@@ -169,6 +178,14 @@ export interface ICalParserService {
    * This is the domain-free base API: it returns each VEVENT occurrence as-is
    * (start, exclusive end, summary, uid, all-day flag). Events missing
    * DTSTART, DTEND, or UID are skipped.
+   *
+   * **Timezone caveat:** ical.js bundles no IANA timezone data. A `TZID`
+   * reference is only honoured when the feed ships a matching `VTIMEZONE`
+   * component; otherwise ical.js interprets the timestamps in the **server's
+   * own zone**. The absolute instants in `start`/`end` are therefore only
+   * reliable for UTC (`...Z`) or floating times, or for feeds that include
+   * their `VTIMEZONE`s. The `startWallClock`/`endWallClock` components are
+   * always the event's own wall-clock reading and are safe regardless.
    */
   parseEventRanges(
     icalData: string,
@@ -204,7 +221,10 @@ export const createICalParserService = (_params: CreateICalParserServiceParams =
     try {
       const maxOccurrences = options.maxOccurrencesPerEvent ?? MAX_OCCURRENCES_PER_EVENT;
       const windowStartMs = options.windowStart ? options.windowStart.getTime() : null;
-      const rangeEnd = options.windowEnd ? ical.Time.fromJSDate(options.windowEnd) : null;
+      // `useUTC: true` — without it ical.js reads the Date via *local* getters
+      // and treats the result as UTC, shifting the boundary by the server's
+      // UTC offset.
+      const rangeEnd = options.windowEnd ? ical.Time.fromJSDate(options.windowEnd, true) : null;
 
       const comp = new ical.Component(ical.parse(icalData));
       const ranges: ICalEventRange[] = [];
@@ -220,31 +240,45 @@ export const createICalParserService = (_params: CreateICalParserServiceParams =
           return;
         }
 
+        // Always iterate from the real DTSTART. `Event.iterator(seed)` passes
+        // the seed straight into `RecurExpansion` as its `dtstart`, and ical.js
+        // anchors every RRULE's phase at that value (`rule.iterator(dtstart)`),
+        // so seeding at/near `windowStart` silently shifts INTERVAL>1 rules
+        // (and BYxxx-relative rules) onto wrong dates. Pre-window occurrences
+        // are skipped below instead, without counting against the cap.
         const iterator = iCalEvent.iterator(dtstart);
 
         let occurrenceCount = 0;
+        let skippedCount = 0;
         for (
           let next = iterator.next();
           next && (rangeEnd === null || next.compare(rangeEnd) < 0);
           next = iterator.next()
         ) {
-          if (++occurrenceCount > maxOccurrences) break;
-
           const currentEvent = iCalEvent.getOccurrenceDetails(next);
           const eventStart = currentEvent.startDate.toJSDate();
           const eventEnd = currentEvent.endDate.toJSDate();
 
           // Drop occurrences that already ended before the window opened.
+          // These do NOT count against `maxOccurrences` — otherwise a daily
+          // event with a DTSTART years in the past would exhaust the cap
+          // before ever reaching the window. A separate, much larger skip
+          // counter still bounds runaway rules.
           if (windowStartMs !== null && eventEnd.getTime() <= windowStartMs) {
+            if (++skippedCount > MAX_SKIPPED_PRE_WINDOW_OCCURRENCES) break;
             continue;
           }
+
+          if (++occurrenceCount > maxOccurrences) break;
 
           ranges.push({
             start: eventStart,
             end: eventEnd,
             startWallClock: toWallClock(currentEvent.startDate),
             endWallClock: toWallClock(currentEvent.endDate),
-            summary: iCalEvent.summary ?? '',
+            // Use the occurrence's own item: a RECURRENCE-ID override may
+            // carry a different SUMMARY than the master event.
+            summary: currentEvent.item.summary ?? '',
             uid,
             allDay: currentEvent.endDate.isDate,
           });

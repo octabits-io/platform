@@ -60,4 +60,38 @@ describe('registerGracefulShutdown', () => {
     await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0));
     exit.mockRestore(); on.mockRestore();
   });
+
+  it('logs and exits 1 when stop rejects (never swallowed)', async () => {
+    const error = vi.fn();
+    const logger: Logger = { ...silentLogger, error, child: () => logger };
+    const stop = vi.fn(async () => { throw new Error('teardown failed'); });
+    const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+    const on = vi.spyOn(process, 'on');
+    registerGracefulShutdown({ logger, stop, signals: ['SIGUSR1'] });
+    const handler = on.mock.calls.find(([s]) => s === 'SIGUSR1')?.[1] as () => void;
+    handler();
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1));
+    expect(error).toHaveBeenCalledWith('Graceful shutdown failed', expect.any(Error));
+    exit.mockRestore(); on.mockRestore();
+  });
+
+  it('force-exits 1 when stop hangs past the timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const error = vi.fn();
+      const logger: Logger = { ...silentLogger, error, child: () => logger };
+      const stop = vi.fn(() => new Promise<void>(() => {})); // never resolves
+      const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+      const on = vi.spyOn(process, 'on');
+      registerGracefulShutdown({ logger, stop, signals: ['SIGHUP'], timeoutMs: 5_000 });
+      const handler = on.mock.calls.find(([s]) => s === 'SIGHUP')?.[1] as () => void;
+      handler();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('timed out'));
+      exit.mockRestore(); on.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

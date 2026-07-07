@@ -1,4 +1,4 @@
-import type { OctError } from './error';
+import type { OctError } from './error.ts';
 
 export type Result<T = never, E = OctError> =
     | { ok: true; value: T }

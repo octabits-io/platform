@@ -43,12 +43,10 @@ export const withRetry = async <T>(
         throw error;
       }
 
-      // Calculate delay with exponential backoff and jitter
-      const delay = Math.min(
-        config.baseDelayMs * Math.pow(config.backoffMultiplier, attempt - 1),
-        config.maxDelayMs
-      );
-      const jitteredDelay = delay + Math.random() * delay * 0.1; // Add 10% jitter
+      // Calculate delay with exponential backoff and jitter; clamp AFTER
+      // jitter so the delay never exceeds the configured maxDelayMs
+      const delay = config.baseDelayMs * Math.pow(config.backoffMultiplier, attempt - 1);
+      const jitteredDelay = Math.min(delay + Math.random() * delay * 0.1, config.maxDelayMs); // Add 10% jitter
 
       if (logger) {
         logger.warn('Operation failed, retrying', { operationName, attempt, maxAttempts: config.maxAttempts, delayMs: Math.round(jitteredDelay), ...context });

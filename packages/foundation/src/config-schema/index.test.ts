@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   nonEmptyString,
   nonEmptyUrl,
+  booleanFromEnv,
   DATABASE_CONFIG_SCHEMA,
   createRlsSchema,
   LOGGING_CONFIG_SCHEMA,
@@ -16,6 +17,40 @@ describe('nonEmptyString / nonEmptyUrl', () => {
   it('requires URL format', () => {
     expect(nonEmptyUrl().safeParse('not-a-url').success).toBe(false);
     expect(nonEmptyUrl().safeParse('https://a.com').success).toBe(true);
+  });
+
+  it('wires the custom message through', () => {
+    const parsed = nonEmptyUrl('custom url message').safeParse('not-a-url');
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0]?.message).toBe('custom url message');
+    }
+  });
+});
+
+describe('booleanFromEnv', () => {
+  it('passes booleans through as-is', () => {
+    expect(booleanFromEnv().parse(true)).toBe(true);
+    expect(booleanFromEnv().parse(false)).toBe(false);
+  });
+
+  it('parses truthy env spellings', () => {
+    expect(booleanFromEnv().parse('true')).toBe(true);
+    expect(booleanFromEnv().parse('TRUE')).toBe(true);
+    expect(booleanFromEnv().parse('1')).toBe(true);
+  });
+
+  it('parses "false", "0", and "" as false (regression: z.coerce.boolean made these true)', () => {
+    expect(booleanFromEnv().parse('false')).toBe(false);
+    expect(booleanFromEnv().parse('FALSE')).toBe(false);
+    expect(booleanFromEnv().parse('0')).toBe(false);
+    expect(booleanFromEnv().parse('')).toBe(false);
+  });
+
+  it('rejects other strings and non-string/boolean input', () => {
+    expect(booleanFromEnv().safeParse('yes').success).toBe(false);
+    expect(booleanFromEnv().safeParse('2').success).toBe(false);
+    expect(booleanFromEnv().safeParse(1).success).toBe(false);
   });
 });
 
@@ -33,6 +68,16 @@ describe('DATABASE_CONFIG_SCHEMA', () => {
   it('coerces numeric pool knobs', () => {
     const parsed = DATABASE_CONFIG_SCHEMA.safeParse({ url: 'postgres://x/db', poolMaxConnections: '20' });
     expect(parsed.success && parsed.data.poolMaxConnections).toBe(20);
+  });
+
+  it('treats logger: "false" and "0" as false', () => {
+    for (const raw of ['false', '0']) {
+      const parsed = DATABASE_CONFIG_SCHEMA.safeParse({ url: 'postgres://x/db', logger: raw });
+      expect(parsed.success).toBe(true);
+      expect(parsed.success && parsed.data.logger).toBe(false);
+    }
+    const truthy = DATABASE_CONFIG_SCHEMA.safeParse({ url: 'postgres://x/db', logger: 'true' });
+    expect(truthy.success && truthy.data.logger).toBe(true);
   });
 });
 

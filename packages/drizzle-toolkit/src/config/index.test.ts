@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { pgTable, text, jsonb, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, text, jsonb, boolean, timestamp } from 'drizzle-orm/pg-core';
 import { ok, err, type Result, type OctError } from '@octabits-io/foundation/result';
 import {
   createScopedConfigService,
@@ -17,17 +17,24 @@ import {
 // ---------------------------------------------------------------------------
 
 /**
- * A concrete config table built from the shipped `scopedConfigColumns` shape,
- * with a consumer-declared scope column added.
+ * A concrete config table built from the shipped `scopedConfigColumns` shape
+ * (incl. the audit columns), with a consumer-declared scope column added.
  */
 const tenantConfig = pgTable('tenant_config', {
   tenantId: text('tenant_id').notNull(),
   key: text().notNull(),
   value: jsonb().notNull(),
   encrypted: boolean().notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
+  createdBy: text('created_by'),
+  updatedBy: text('updated_by'),
 });
 
-/** An unscoped (single-tenant) config table — `key` is the sole primary key. */
+/**
+ * An unscoped (single-tenant) config table — `key` is the sole primary key.
+ * Deliberately has no audit columns, covering the guarded upsert-set path.
+ */
 const singleConfig = pgTable('single_config', {
   key: text().notNull(),
   value: jsonb().notNull(),
@@ -154,9 +161,19 @@ describe('writeConfig upsert + encryption envelope', () => {
     expect(r.ok).toBe(true);
     const values = getValues();
     expect(values[0]).toMatchObject({ tenantId: 't1', key: 'tenant_name', value: 'Acme', encrypted: false });
-    // Conflict updates value + encrypted from the excluded row.
-    expect(Object.keys(getConflict().set)).toEqual(['value', 'encrypted']);
+    // Conflict updates value + encrypted from the excluded row and keeps the
+    // audit columns current (updated_at would otherwise never change on upsert).
+    expect(Object.keys(getConflict().set)).toEqual(['value', 'encrypted', 'updatedAt', 'updatedBy']);
     expect(getConflict().target).toHaveLength(2);
+  });
+
+  it('omits the audit columns from the conflict set when the table lacks them', async () => {
+    const { db, getConflict } = makeDb();
+    const service = createScopedConfigService<ConfigMap>({
+      db, table: singleConfig, schema, keys: ['tenant_name', 'page_size', 'api_key'],
+    });
+    await service.writeConfig({ tenant_name: 'Acme' });
+    expect(Object.keys(getConflict().set)).toEqual(['value', 'encrypted']);
   });
 
   it('wraps an encrypted key in a { __encrypted } base64 envelope', async () => {
@@ -325,6 +342,20 @@ describe('readAll', () => {
     const out = await service.readAll();
     expect(out).toEqual({ tenant_name: 'Acme', page_size: 20, api_key: '' });
   });
+
+  it('returns a copy — caller mutations cannot poison the internal cache', async () => {
+    const { service } = makeService([{ key: 'tenant_name', value: 'Acme', encrypted: false }]);
+    const first = await service.readAll();
+    first.tenant_name = 'MUTATED';
+    delete first.page_size;
+
+    const second = await service.readAll(); // served from the internal cache
+    expect(second).toEqual({ tenant_name: 'Acme', page_size: 20, api_key: '' });
+
+    // The cache-hit path must also hand out a fresh object each time.
+    second.tenant_name = 'MUTATED-AGAIN';
+    expect((await service.readAll()).tenant_name).toBe('Acme');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -385,6 +416,23 @@ describe('cross-scope cache', () => {
     cache.set('t1', 'page_size', 50);
     cache.invalidate('t1');
     expect(store.size).toBe(0);
+  });
+
+  it("cache keys cannot collide across the scope/key boundary ('a'+'b:c' vs 'a:b'+'c')", () => {
+    type CollisionMap = { 'b:c': string; c: string };
+    const { lru } = makeLru();
+    const cache = createScopedConfigCache<CollisionMap>({ cache: lru, cacheableKeys: ['b:c', 'c'] });
+
+    cache.set('a', 'b:c', 'first');
+    cache.set('a:b', 'c', 'second');
+
+    expect(cache.get('a', 'b:c')).toBe('first'); // not clobbered by the second write
+    expect(cache.get('a:b', 'c')).toBe('second');
+
+    // Invalidating one scope must not evict the other pair either.
+    cache.invalidate('a:b');
+    expect(cache.get('a', 'b:c')).toBe('first');
+    expect(cache.get('a:b', 'c')).toBeUndefined();
   });
 });
 

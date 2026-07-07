@@ -28,6 +28,12 @@ export interface MailMessage {
     name?: string;
   };
   to: string[];
+  /**
+   * Blind-carbon-copy recipients. Delivered the message but never shown in the
+   * visible headers. Transports without a BCC concept must still deliver to
+   * these addresses without exposing them in `To`.
+   */
+  bcc?: string[];
   /** Address replies should go to. Useful when sending on behalf of another sender. */
   replyTo?: {
     address: string;
@@ -57,6 +63,16 @@ export interface MailMessage {
  * Simple transport interface - only handles delivery.
  * All business logic (config validation, template fetching, recipient
  * resolution) is expected to live in a higher-level mail service.
+ *
+ * Sanitization contract: transports trust the `MailMessage` they receive and
+ * pass its fields to the provider verbatim. The dispatch layer
+ * (`createBaseMailService`) rejects recipient addresses containing separators
+ * (`,` `;` `<` `>`), whitespace, or control characters and strips CR/LF from
+ * header-bound display strings (subject, from name, reply-to name) before a
+ * message ever reaches a transport. Callers invoking a transport directly
+ * with untrusted input must apply equivalent sanitization themselves —
+ * otherwise a crafted address can smuggle extra recipients (nodemailer treats
+ * a comma-containing string as a list) or inject headers via CR/LF.
  */
 export interface MailTransport {
   readonly type: string;

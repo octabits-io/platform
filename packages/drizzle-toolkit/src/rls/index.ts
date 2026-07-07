@@ -50,7 +50,29 @@ export interface RlsDatabase {
  * *without* the GUCs — meaning the scope GUC is unset and RLS policies that
  * compare against `current_setting(..., true)` silently match zero rows.
  */
-export const QUERY_BUILDER_METHODS = new Set(['select', 'selectDistinct', 'selectDistinctOn', 'insert', 'update', 'delete']);
+export const QUERY_BUILDER_METHODS = new Set([
+  'select',
+  'selectDistinct',
+  'selectDistinctOn',
+  'insert',
+  'update',
+  'delete',
+  // CTE entry point (`db.with(...ctes).select()…`) — the chain executes SQL
+  // when awaited, so it must replay inside the GUC transaction like the rest.
+  'with',
+  // `db.$count(table, filter?)` is awaitable like a select.
+  '$count',
+  'refreshMaterializedView',
+]);
+
+/**
+ * Synchronous builder APIs that cannot work on the deferred-replay proxy: they
+ * must return a concrete value *now*, but the proxy only executes the recorded
+ * chain (inside the GUC transaction) when it is awaited. Accessing one of these
+ * throws a clear error instead of silently handing back a recorder proxy.
+ * Use `runWithGucs(db, gucs, (tx) => …)` for chains that need them.
+ */
+const UNSUPPORTED_SYNC_BUILDER_METHODS = new Set(['toSQL', 'getSQL', 'prepare', 'as']);
 
 type AnyRecord = Record<string, unknown>;
 type AnyFn = (...args: unknown[]) => unknown;
@@ -126,6 +148,14 @@ function createDeferredBuilder<TDb extends RlsDatabase>(
           return (onFinally?: () => void) => exec().finally(onFinally);
         }
         if (typeof prop === 'symbol') return undefined;
+        if (UNSUPPORTED_SYNC_BUILDER_METHODS.has(prop)) {
+          throw new TypeError(
+            `scopedDb: '${prop}' is a synchronous builder API and cannot run on the ` +
+              `deferred GUC-scoped proxy (the chain only executes when awaited). ` +
+              `Use runWithGucs(db, gucs, (tx) => ...) and call '${prop}' on the ` +
+              `transaction-bound builder instead.`,
+          );
+        }
         // Record the next call in the chain and return another proxy.
         return (...args: unknown[]) => {
           calls.push({ method: prop, args });
@@ -213,7 +243,16 @@ export function createScopedDb<TDb extends RlsDatabase>(
       }
 
       if (typeof prop === 'string') {
-        // Wrap top-level builder entries (select/insert/update/delete).
+        // `$with` never executes SQL — it only builds a CTE alias
+        // (`db.$with('sq').as(qb)`) that is later passed to `with(...)`. Hand
+        // it straight to the raw db, bound so internal `this` access does not
+        // re-enter this proxy.
+        if (prop === '$with') {
+          const fn = Reflect.get(target, prop) as AnyFn | undefined;
+          return typeof fn === 'function' ? fn.bind(target) : fn;
+        }
+
+        // Wrap top-level builder entries (select/insert/update/delete/with/…).
         if (QUERY_BUILDER_METHODS.has(prop)) {
           return (...args: unknown[]) =>
             createDeferredBuilder(rd, gucs, prop, args);
@@ -306,9 +345,15 @@ export async function acquireScopedClient<TDb>(opts: {
 
 /**
  * Commit (default) or roll back the request transaction, then release the
- * client back to the pool. Errors during COMMIT/ROLLBACK are swallowed so the
- * client is always returned to the pool — pg destroys broken clients on
- * release-with-error anyway.
+ * client back to the pool.
+ *
+ * - **COMMIT failure** is a real write failure: the client is released *with*
+ *   the error (so pg destroys the possibly-broken connection instead of
+ *   recycling it) and the error is **rethrown** — callers must not treat the
+ *   request as successfully persisted.
+ * - **ROLLBACK failure** is swallowed (dispose paths run during error
+ *   handling and the work is being discarded anyway), but the client is still
+ *   released with the error so the broken connection is destroyed.
  */
 export async function releaseScopedClient(opts: {
   client: PoolClient;
@@ -317,8 +362,12 @@ export async function releaseScopedClient(opts: {
   const { client, commit } = opts;
   try {
     await client.query(commit ? 'COMMIT' : 'ROLLBACK');
-  } catch {
-    // Connection may be broken — release-with-error below will destroy it.
+  } catch (err) {
+    // Release WITH the error so pg destroys the connection rather than
+    // returning a client with unknown transaction state to the pool.
+    client.release(err as Error);
+    if (commit) throw err;
+    return;
   }
   client.release();
 }

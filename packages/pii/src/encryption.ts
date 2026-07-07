@@ -33,15 +33,19 @@ export function isAgeFormat(data: Buffer): boolean {
 
 
 export function encryptSymmetric(value: string, symmetricKey: Buffer): Result<Buffer, SymmetricEncryptionError> {
-  const iv = crypto.randomBytes(IV_SIZE);
-  const cipher = crypto.createCipheriv(ALGORITHM, symmetricKey, iv, {
-    authTagLength: AUTH_TAG_SIZE,
-  });
-  let encData = cipher.update(value, 'utf8');
-  encData = Buffer.concat([encData, cipher.final()]);
-  const authTag = cipher.getAuthTag();
-  const buffer = Buffer.concat([iv, authTag, encData]);
-  return ok(buffer);
+  try {
+    const iv = crypto.randomBytes(IV_SIZE);
+    const cipher = crypto.createCipheriv(ALGORITHM, symmetricKey, iv, {
+      authTagLength: AUTH_TAG_SIZE,
+    });
+    let encData = cipher.update(value, 'utf8');
+    encData = Buffer.concat([encData, cipher.final()]);
+    const authTag = cipher.getAuthTag();
+    const buffer = Buffer.concat([iv, authTag, encData]);
+    return ok(buffer);
+  } catch (e) {
+    return err({ key: 'symmetric_encryption_error' as const, message: e instanceof Error ? e.message : String(e) });
+  }
 }
 
 export function decryptSymmetric(encrypted: Buffer, symmetricKey: Buffer): Result<string, SymmetricEncryptionError> {

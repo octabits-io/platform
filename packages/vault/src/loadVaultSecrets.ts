@@ -10,18 +10,20 @@
  *   1. Authenticates against Vault (kubernetes or static-token).
  *   2. Reads each KV-v2 path declared in the manifest.
  *   3. Sets `process.env[envVar] = value` for each `(vaultKey -> envVar)`
- *      mapping — but only if the env var is currently `undefined` so that
- *      local overrides and break-glass values in `.env` always win.
+ *      mapping — but only if the env var is currently unset **or empty** so
+ *      that local overrides and break-glass values in `.env` always win.
+ *      (Empty strings count as unset: `FOO=` in an env file is a common
+ *      accident and never a meaningful secret override.)
  *
- * Any failure (auth, network, missing key, malformed manifest) throws
- * synchronously. The entrypoint's `await loadVaultSecrets()` propagates
- * the error and the process refuses to start. This is intentional — a
- * silent fallback to env vars where Vault is meant to be the source of
- * truth would mask configuration bugs.
+ * Any failure (auth, network, timeout, missing key, malformed manifest)
+ * throws synchronously. The entrypoint's `await loadVaultSecrets()`
+ * propagates the error and the process refuses to start. This is
+ * intentional — a silent fallback to env vars where Vault is meant to be
+ * the source of truth would mask configuration bugs.
  */
 
-import { authenticate, readKvV2, type VaultAuthOptions } from './vaultClient';
-import { parseSecretManifest } from './secretManifest';
+import { authenticate, readKvV2, type VaultAuthOptions } from './vaultClient.ts';
+import { parseSecretManifest } from './secretManifest.ts';
 
 const DEFAULT_K8S_JWT_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token';
 
@@ -33,31 +35,51 @@ export async function loadVaultSecrets(): Promise<void> {
   if (manifest.length === 0) return;
 
   const namespace = process.env.VAULT_NAMESPACE || undefined;
-  const authOptions = resolveAuthOptions(addr, namespace);
+  const timeoutMs = resolveTimeoutMs();
+  const authOptions = resolveAuthOptions(addr, namespace, timeoutMs);
   const token = await authenticate(authOptions);
 
   for (const entry of manifest) {
-    const data = await readKvV2({ addr, namespace, token, path: entry.path });
+    const data = await readKvV2({ addr, namespace, token, path: entry.path, timeoutMs });
     for (const [vaultKey, envVar] of Object.entries(entry.map)) {
       const value = data[vaultKey];
       if (value === undefined) {
         throw new Error(`Vault path ${entry.path} is missing key "${vaultKey}" required by VAULT_SECRETS_MANIFEST`);
       }
-      if (process.env[envVar] === undefined) {
+      // Empty string counts as unset — a blank `FOO=` line in an env file
+      // must not shadow the Vault value. Non-empty values are never clobbered.
+      const current = process.env[envVar];
+      if (current === undefined || current === '') {
         process.env[envVar] = value;
       }
     }
   }
 }
 
-function resolveAuthOptions(addr: string, namespace: string | undefined): VaultAuthOptions {
-  const explicit = process.env.VAULT_AUTH_METHOD?.toLowerCase();
+function resolveTimeoutMs(): number | undefined {
+  const raw = process.env.VAULT_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`VAULT_TIMEOUT_MS must be a positive number of milliseconds, got "${raw}"`);
+  }
+  return parsed;
+}
+
+function resolveAuthOptions(
+  addr: string,
+  namespace: string | undefined,
+  timeoutMs: number | undefined,
+): VaultAuthOptions {
+  const rawMethod = process.env.VAULT_AUTH_METHOD;
+  // Empty/whitespace-only counts as unset (fall back to inference).
+  const explicit = rawMethod?.trim().toLowerCase() || undefined;
+  if (explicit !== undefined && explicit !== 'token' && explicit !== 'k8s') {
+    throw new Error(`unknown VAULT_AUTH_METHOD "${rawMethod}" (expected "token" or "k8s")`);
+  }
+
   const role = process.env.VAULT_K8S_ROLE;
-  const method: 'token' | 'k8s' = explicit === 'token' || explicit === 'k8s'
-    ? explicit
-    : role
-      ? 'k8s'
-      : 'token';
+  const method: 'token' | 'k8s' = explicit ?? (role ? 'k8s' : 'token');
 
   if (method === 'token') {
     const token = process.env.VAULT_TOKEN;
@@ -71,5 +93,6 @@ function resolveAuthOptions(addr: string, namespace: string | undefined): VaultA
     throw new Error('VAULT_AUTH_METHOD=k8s but VAULT_K8S_ROLE is not set');
   }
   const jwtPath = process.env.VAULT_K8S_JWT_PATH || DEFAULT_K8S_JWT_PATH;
-  return { method: 'k8s', addr, namespace, role, jwtPath };
+  const mount = process.env.VAULT_K8S_MOUNT || undefined;
+  return { method: 'k8s', addr, namespace, role, jwtPath, mount, timeoutMs };
 }

@@ -49,6 +49,29 @@ describe('withRetry', () => {
     expect(op).toHaveBeenCalledTimes(1);
   });
 
+  it('never exceeds maxDelayMs even with jitter applied', async () => {
+    // Regression: jitter was added AFTER the maxDelayMs clamp, so the actual
+    // delay could exceed the configured maximum by up to 10%.
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.999);
+    try {
+      const warn = vi.fn();
+      const logger = { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn(), child: vi.fn() };
+      const config = { maxAttempts: 2, baseDelayMs: 100, maxDelayMs: 100, backoffMultiplier: 1 };
+      let attempts = 0;
+      const op = async () => {
+        attempts += 1;
+        if (attempts < 2) throw new Error('transient');
+        return 'ok';
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await withRetry(op, 'op', undefined, undefined, { config, logger: logger as any });
+      const { delayMs } = warn.mock.calls[0]?.[1] as { delayMs: number };
+      expect(delayMs).toBeLessThanOrEqual(config.maxDelayMs);
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
   it('logs a warning on each retry when a logger is injected', async () => {
     const warn = vi.fn();
     const logger = { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn(), child: vi.fn() };

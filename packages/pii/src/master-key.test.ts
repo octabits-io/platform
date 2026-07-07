@@ -97,6 +97,28 @@ describe('createEnvVarMasterKeyProvider', () => {
     expect(() => createEnvVarMasterKeyProvider(exact)).not.toThrow();
   });
 
+  test('rejects non-UTF-8 binary plaintext instead of silently corrupting it', async () => {
+    // Raw binary (invalid UTF-8) used to round-trip through U+FFFD replacement
+    // and come back corrupted with ok:true. It must fail loudly instead.
+    const binary = Buffer.from('00fffe8980c3', 'hex');
+    const result = await provider.encrypt(binary);
+
+    expect(result.ok).toBe(false);
+    assert(!result.ok);
+    expect(result.error.key).toBe('master_key_unsupported_plaintext');
+    expect(result.error.message).toContain('UTF-8');
+  });
+
+  test('ASCII payloads keep round-tripping unchanged (happy-path encoding untouched)', async () => {
+    const plaintext = Buffer.from('AGE-SECRET-KEY-1QQPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L');
+    const encrypted = await provider.encrypt(plaintext);
+    assert(encrypted.ok);
+
+    const decrypted = await provider.decrypt(encrypted.value);
+    assert(decrypted.ok);
+    expect(decrypted.value).toEqual(plaintext);
+  });
+
   test('handles large payloads', async () => {
     const plaintext = Buffer.from('x'.repeat(10_000));
     const encrypted = await provider.encrypt(plaintext);

@@ -140,9 +140,13 @@ The scope seam (`QueueScope` / `QueueScopeFactory`) is intentionally narrow —
 foundation's IoC `DisposableServiceResolver` / `SystemScopeFactory`, so you can
 pass a foundation scope factory directly. Each dead-lettered job is logged, run
 through the optional `onDlq` hook, then handed to `onDlqAudit` with a
-`DlqAuditRecord` (`queueName`, `jobId`, `payload`, `errorMessage`,
-`attemptCount`, `completedAt`, `validPayload`, `scopeKey?`); a sink that throws
-is caught and logged, and the scope is always disposed.
+`DlqAuditRecord` (`queueName`, `jobId`, `errorMessage`, `attemptCount`,
+`completedAt`, `scopeKey?`), discriminated on `validPayload`: when `true` the
+record carries the typed `payload` and `attemptCount` is the exhausted retry
+limit; when `false` (schema-invalid — dead-lettered on the first attempt,
+without retry) it carries the raw value as `rawPayload: unknown` and
+`attemptCount: 1`. A sink that throws is caught and logged, and the scope is
+always disposed.
 
 ### Base payload types
 

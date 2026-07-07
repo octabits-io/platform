@@ -29,6 +29,7 @@ const validPayload: TestJob = { scopeKey: 't1', to: 'a@b.com' };
 function createMockBoss() {
   return {
     createQueue: vi.fn().mockResolvedValue(undefined),
+    updateQueue: vi.fn().mockResolvedValue(undefined),
     send: vi.fn().mockResolvedValue('job-123'),
     work: vi.fn().mockResolvedValue('worker-1'),
     offWork: vi.fn().mockResolvedValue(undefined),
@@ -65,6 +66,29 @@ describe('createQueueDomain.enqueue', () => {
       2,
       'email',
       expect.objectContaining({ deadLetter: 'email-dlq' })
+    );
+  });
+
+  it('syncs settings via updateQueue after createQueue (v12 createQueue is ON CONFLICT DO NOTHING)', async () => {
+    // An existing queue would otherwise keep stale settings (e.g. an old
+    // deadLetter) forever — createQueue never updates an existing row.
+    const domain = domainWith(boss);
+    await domain.enqueue(validPayload);
+
+    expect(boss.updateQueue).toHaveBeenNthCalledWith(1, 'email-dlq', { retryLimit: 0 });
+    expect(boss.updateQueue).toHaveBeenNthCalledWith(
+      2,
+      'email',
+      expect.objectContaining({
+        deadLetter: 'email-dlq',
+        retryLimit: 3,
+        retryDelay: 10,
+        expireInSeconds: 60,
+      })
+    );
+    // createQueue always runs before the corresponding updateQueue.
+    expect(boss.createQueue.mock.invocationCallOrder[0]!).toBeLessThan(
+      boss.updateQueue.mock.invocationCallOrder[0]!
     );
   });
 
@@ -217,7 +241,7 @@ describe('createQueueDomain.startWorker', () => {
     expect(handler).toHaveBeenCalledTimes(3);
   });
 
-  it('marks a job failed when the handler throws', async () => {
+  it('marks a job failed when the handler throws, including a truncated stack in the output', async () => {
     const boss = createMockBoss();
     const domain = domainWith(boss);
     const handler = vi.fn().mockRejectedValue(new Error('exploded'));
@@ -228,8 +252,97 @@ describe('createQueueDomain.startWorker', () => {
       { id: 'j1', name: 'email', data: validPayload, retryCount: 0 },
     ]);
     expect(results).toEqual([
-      { id: 'j1', status: 'failed', output: { message: 'exploded' } },
+      {
+        id: 'j1',
+        status: 'failed',
+        output: expect.objectContaining({ message: 'exploded', stack: expect.any(String) }),
+      },
     ]);
+    const output = (results[0] as { output: { stack: string } }).output;
+    expect(output.stack).toContain('exploded');
+    // Stack summary is truncated, not the full trace.
+    expect(output.stack.split('\n').length).toBeLessThanOrEqual(6);
+  });
+
+  it('propagates JobFailedError cause/jobId/queue into the failure output (JSON-safe)', async () => {
+    const boss = createMockBoss();
+    const domain = domainWith(boss);
+    const handler = vi.fn().mockResolvedValue({
+      ok: false,
+      error: {
+        key: 'job_failed',
+        message: 'smtp send failed',
+        jobId: 'j1',
+        queue: 'email',
+        cause: new TypeError('socket hang up'),
+      },
+    });
+    await domain.startWorker(handler);
+
+    const batchHandler = boss.work.mock.calls[0]![2] as BatchHandler;
+    const results = await batchHandler([
+      { id: 'j1', name: 'email', data: validPayload, retryCount: 0 },
+    ]);
+    expect(results).toEqual([
+      {
+        id: 'j1',
+        status: 'failed',
+        output: {
+          message: 'smtp send failed',
+          jobId: 'j1',
+          queue: 'email',
+          cause: 'TypeError: socket hang up',
+        },
+      },
+    ]);
+    // The whole output must survive JSON round-tripping (pg-boss persists it).
+    const output = (results[0] as { output: unknown }).output;
+    expect(JSON.parse(JSON.stringify(output))).toEqual(output);
+  });
+
+  it('propagates a thrown error cause summary into the failure output', async () => {
+    const boss = createMockBoss();
+    const domain = domainWith(boss);
+    const handler = vi
+      .fn()
+      .mockRejectedValue(new Error('wrapper', { cause: new Error('root cause') }));
+    await domain.startWorker(handler);
+
+    const batchHandler = boss.work.mock.calls[0]![2] as BatchHandler;
+    const results = await batchHandler([
+      { id: 'j1', name: 'email', data: validPayload, retryCount: 0 },
+    ]);
+    expect(results).toEqual([
+      {
+        id: 'j1',
+        status: 'failed',
+        output: expect.objectContaining({ message: 'wrapper', cause: 'Error: root cause' }),
+      },
+    ]);
+  });
+
+  it('returns a queue_error when startWorker is called twice without stop (no leaked registration)', async () => {
+    const boss = createMockBoss();
+    const domain = domainWith(boss);
+    const handler = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+
+    const first = await domain.startWorker(handler);
+    expect(first.ok).toBe(true);
+
+    const second = await domain.startWorker(handler);
+    expect(second.ok).toBe(false);
+    if (!second.ok) {
+      expect(second.error.key).toBe('queue_error');
+      expect(second.error.message).toContain('already started');
+    }
+    // The first registration is untouched — no second boss.work call.
+    expect(boss.work).toHaveBeenCalledTimes(1);
+
+    // After stop() the domain can start a fresh worker again.
+    await domain.stop();
+    const third = await domain.startWorker(handler);
+    expect(third.ok).toBe(true);
+    expect(boss.work).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -264,7 +377,7 @@ describe('createQueueDomain.schedule / stop', () => {
     expect(boss.schedule).not.toHaveBeenCalled();
   });
 
-  it('stops the worker only when one is running', async () => {
+  it('stops the worker by QUEUE NAME only when one is running', async () => {
     const boss = createMockBoss();
     const domain = domainWith(boss);
 
@@ -274,7 +387,21 @@ describe('createQueueDomain.schedule / stop', () => {
 
     await domain.startWorker(vi.fn().mockResolvedValue({ ok: true, value: undefined }));
     await domain.stop();
-    expect(boss.offWork).toHaveBeenCalledWith('worker-1');
+    // pg-boss v12 offWork matches by queue name; passing the worker id as the
+    // first argument matches nothing (silent no-op). Regression guard: exact args.
+    expect(boss.offWork).toHaveBeenCalledTimes(1);
+    expect(boss.offWork).toHaveBeenCalledWith('email');
+  });
+
+  it('treats the worker as stopped after stop(): a repeat stop() never calls offWork again', async () => {
+    const boss = createMockBoss();
+    const domain = domainWith(boss);
+
+    await domain.startWorker(vi.fn().mockResolvedValue({ ok: true, value: undefined }));
+    await domain.stop();
+    await domain.stop(); // idempotent — the registry is already empty
+    expect(boss.offWork).toHaveBeenCalledTimes(1);
+    expect(boss.offWork).toHaveBeenCalledWith('email');
   });
 });
 
@@ -314,6 +441,166 @@ describe('createBossManager', () => {
     const boss = manager.getBoss();
     expect(boss).toBeDefined();
     expect(typeof boss.start).toBe('function');
+  });
+});
+
+// ===========================================================================
+// createBossManager — monitoring methods return Results (no raw pg throws)
+// ===========================================================================
+
+describe('createBossManager monitoring — Result conversion', () => {
+  const logger = {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    child: vi.fn(),
+  };
+
+  function makeManager() {
+    const manager = createBossManager({
+      connectionString: 'postgres://user:pass@localhost:5432/db',
+      logger,
+    });
+    return { manager, boss: manager.getBoss() };
+  }
+
+  const jobRow = {
+    id: 'j1',
+    name: 'email',
+    data: { to: 'a@b.com' },
+    state: 'completed',
+    retryCount: 1,
+    retryLimit: 3,
+    startedOn: new Date('2026-01-01T00:00:00Z'),
+    completedOn: new Date('2026-01-01T00:00:05Z'),
+    createdOn: new Date('2026-01-01T00:00:00Z'),
+    expireInSeconds: 60,
+    output: { done: true },
+  };
+
+  it('getJobById returns ok(JobDetails) when the job exists', async () => {
+    const { manager, boss } = makeManager();
+    vi.spyOn(boss, 'findJobs').mockResolvedValue([jobRow] as never);
+
+    const result = await manager.getJobById('email', 'j1');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toMatchObject({
+        id: 'j1',
+        name: 'email',
+        state: 'completed',
+        retryCount: 1,
+        createdOn: '2026-01-01T00:00:00.000Z',
+      });
+    }
+  });
+
+  it('getJobById returns err(job_not_found) instead of null when the job is missing', async () => {
+    const { manager, boss } = makeManager();
+    vi.spyOn(boss, 'findJobs').mockResolvedValue([] as never);
+
+    const result = await manager.getJobById('email', 'nope');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual({
+        key: 'job_not_found',
+        message: 'Job nope not found in queue email',
+        jobId: 'nope',
+        queueName: 'email',
+      });
+    }
+  });
+
+  it('getJobById maps a thrown pg error to a queue_error Result instead of throwing', async () => {
+    const { manager, boss } = makeManager();
+    vi.spyOn(boss, 'findJobs').mockRejectedValue(new Error('connection refused'));
+
+    const result = await manager.getJobById('email', 'j1');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.key).toBe('queue_error');
+      expect(result.error.message).toContain('connection refused');
+    }
+  });
+
+  it('getQueues returns ok with mapped + filtered stats, and queue_error on a throw', async () => {
+    const { manager, boss } = makeManager();
+    vi.spyOn(boss, 'getQueues').mockResolvedValue([
+      { name: 'a', deferredCount: 1, queuedCount: 2, activeCount: 3 },
+      { name: 'b', deferredCount: 0, queuedCount: 0, activeCount: 0 },
+    ] as never);
+
+    const result = await manager.getQueues(['a']);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual([
+        { name: 'a', deferredCount: 1, queuedCount: 2, activeCount: 3, totalCount: 6 },
+      ]);
+    }
+
+    vi.spyOn(boss, 'getQueues').mockRejectedValue(new Error('boom'));
+    const failed = await manager.getQueues();
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) expect(failed.error.key).toBe('queue_error');
+  });
+
+  it('getQueueStats returns err(queue_not_found) instead of null for a missing queue', async () => {
+    const { manager, boss } = makeManager();
+    vi.spyOn(boss, 'getQueue').mockResolvedValue(null);
+
+    const result = await manager.getQueueStats('ghost');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toEqual({
+        key: 'queue_not_found',
+        message: 'Queue ghost not found',
+        queueName: 'ghost',
+      });
+    }
+  });
+
+  it('getQueueStats returns ok stats for an existing queue', async () => {
+    const { manager, boss } = makeManager();
+    vi.spyOn(boss, 'getQueue').mockResolvedValue({
+      name: 'email',
+      deferredCount: 1,
+      queuedCount: 1,
+      activeCount: 1,
+    } as never);
+
+    const result = await manager.getQueueStats('email');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value).toEqual({
+        name: 'email',
+        deferredCount: 1,
+        queuedCount: 1,
+        activeCount: 1,
+        totalCount: 3,
+      });
+    }
+  });
+
+  it('cancelJob returns ok(undefined) on success and err(job_cancel_error) with the reason on failure', async () => {
+    const { manager, boss } = makeManager();
+    const cancelSpy = vi.spyOn(boss, 'cancel').mockResolvedValue(undefined as never);
+
+    const okResult = await manager.cancelJob('email', 'j1');
+    expect(okResult.ok).toBe(true);
+    expect(cancelSpy).toHaveBeenCalledWith('email', 'j1');
+
+    cancelSpy.mockRejectedValue(new Error('job is active'));
+    const failed = await manager.cancelJob('email', 'j1');
+    expect(failed.ok).toBe(false);
+    if (!failed.ok) {
+      expect(failed.error).toEqual({
+        key: 'job_cancel_error',
+        message: 'job is active',
+        jobId: 'j1',
+        queueName: 'email',
+      });
+    }
   });
 });
 

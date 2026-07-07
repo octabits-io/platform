@@ -50,6 +50,14 @@ describe('PG_ERROR_CODE_MAP', () => {
     expect(PG_ERROR_CODE_MAP['23514']).toBe('check_violation');
   });
 
+  it('maps 40001 to serialization_failure', () => {
+    expect(PG_ERROR_CODE_MAP['40001']).toBe('serialization_failure');
+  });
+
+  it('maps 40P01 to deadlock_detected', () => {
+    expect(PG_ERROR_CODE_MAP['40P01']).toBe('deadlock_detected');
+  });
+
   it('returns undefined for unknown codes', () => {
     expect(PG_ERROR_CODE_MAP['99999']).toBeUndefined();
   });
@@ -98,6 +106,29 @@ describe('extractPgError', () => {
 
     const result = extractPgError(drizzleError);
     expect(result).toEqual({ code: '23502', constraint: undefined });
+  });
+
+  it('returns null for a Node system error (code is not a SQLSTATE)', () => {
+    const sysError = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), {
+      code: 'ECONNREFUSED',
+      errno: -61,
+      syscall: 'connect',
+    });
+    expect(extractPgError(sysError)).toBeNull();
+  });
+
+  it('returns null for ETIMEDOUT wrapped in a cause', () => {
+    const wrapped = new Error('query failed');
+    (wrapped as any).cause = Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' });
+    expect(extractPgError(wrapped)).toBeNull();
+  });
+
+  it('returns null when code is not a string (numeric errno-style code)', () => {
+    expect(extractPgError({ code: 23505 })).toBeNull();
+  });
+
+  it('recognizes alphanumeric SQLSTATE codes like 40P01', () => {
+    expect(extractPgError({ code: '40P01' })).toEqual({ code: '40P01', constraint: undefined });
   });
 });
 
@@ -175,6 +206,39 @@ describe('withDbErrorHandling', () => {
     ).rejects.toThrow('network timeout');
   });
 
+  it('re-throws Node system errors instead of mapping them to database_error', async () => {
+    const sysError = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), {
+      code: 'ECONNREFUSED',
+      errno: -61,
+      syscall: 'connect',
+    });
+    await expect(
+      withDbErrorHandling(async () => {
+        throw sysError;
+      }),
+    ).rejects.toBe(sysError);
+  });
+
+  it('maps serialization failures (40001) to a distinct code', async () => {
+    const result = await withDbErrorHandling(async () => {
+      const error = new Error('could not serialize access');
+      (error as any).cause = { code: '40001' };
+      throw error;
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect((result.error as OctDatabaseError).code).toBe('serialization_failure');
+  });
+
+  it('maps deadlocks (40P01) to a distinct code', async () => {
+    const result = await withDbErrorHandling(async () => {
+      const error = new Error('deadlock detected');
+      (error as any).cause = { code: '40P01' };
+      throw error;
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect((result.error as OctDatabaseError).code).toBe('deadlock_detected');
+  });
+
   it('uses "Database operation failed" as message for non-Error throws', async () => {
     const result = await withDbErrorHandling(async () => {
       const obj = { code: '23505' };
@@ -224,5 +288,10 @@ describe('handleTransactionError', () => {
 
   it('re-throws non-Error objects without PG code', () => {
     expect(() => handleTransactionError('string error')).toThrow();
+  });
+
+  it('re-throws Node system errors instead of mapping them', () => {
+    const sysError = Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT' });
+    expect(() => handleTransactionError(sysError)).toThrow('connect ETIMEDOUT');
   });
 });

@@ -21,7 +21,14 @@ thrown); every error `key` is `ical_*`.
 ```ts
 import { createICalFetcherService } from '@octabits-io/ical';
 
-const fetcher = createICalFetcherService({ logger });
+const fetcher = createICalFetcherService({
+  logger,
+  // all optional:
+  fetch: myPinnedFetch,        // default globalThis.fetch
+  timeoutMs: 30_000,           // default 30s
+  maxResponseBytes: 5_242_880, // default 5 MB
+  allowPrivateNetwork: false,  // default false
+});
 
 const result = await fetcher.fetch('webcal://example.com/cal.ics', previousHash);
 if (!result.ok) {
@@ -31,20 +38,40 @@ if (!result.ok) {
 const { data, hash, hasChanged } = result.value;
 ```
 
-- `webcal://` is rewritten to `https://`.
-- 30-second timeout via `AbortController`; a 5 MB response cap (checked against
-  `Content-Length` and again against the actual body).
-- `DTSTAMP` lines are stripped before hashing — calendar servers regenerate them
-  on every export, so keeping them would make every fetch look like a change.
+- `webcal://` is rewritten to `https://`; after that only `http:`/`https:`
+  schemes are accepted — everything else (e.g. `file:`) is rejected.
+- URLs whose hostname is a **literal** private, loopback, or link-local IP
+  (127.0.0.0/8, 10/8, 172.16/12, 192.168/16, 169.254/16, `::1`, `fc00::/7`,
+  `fe80::/10`, IPv4-mapped forms) are rejected unless `allowPrivateNetwork:
+  true` is set.
+- **SSRF note:** the private-IP check only sees literal IPs. It cannot see
+  what a DNS name resolves to (DNS rebinding), and redirects are followed for
+  feed portability — a public URL may redirect to a private address. If you
+  need DNS-rebinding or redirect-to-private protection, inject a `fetch`
+  bound to a safe dispatcher (e.g. an undici Agent with a filtering
+  `lookup`/`connect`).
+- Configurable timeout (default 30 s) via `AbortController` — it covers both
+  headers and body download.
+- Response cap (default 5 MB) counted in **bytes**: rejected early from
+  `Content-Length` when present, and enforced again while streaming the body —
+  the download is aborted as soon as the cap is exceeded, never buffered in
+  full.
+- `DTSTAMP` lines (including RFC 5545 folded continuation lines) are stripped
+  before hashing — calendar servers regenerate them on every export, so
+  keeping them would make every fetch look like a change.
+- Userinfo (`user:pass@`) is redacted from URLs before they appear in error
+  messages or log metadata.
 - The hash is a fast **non-cryptographic** cyrb53 digest, used only for change
   detection. Pass the previous hash to get `hasChanged`; pass `null`/omit to
   always report changed.
 
 | Error key | When |
 | --- | --- |
+| `ical_url_invalid` | Unparsable URL, or a scheme other than http(s)/webcal. |
+| `ical_url_private_network` | Literal private/loopback/link-local IP hostname (without `allowPrivateNetwork`). |
 | `ical_fetch_failed` | Non-2xx response (carries `status`). |
-| `ical_fetch_timeout` | Request exceeded the 30-second timeout. |
-| `ical_too_large` | Response exceeded 5 MB. |
+| `ical_fetch_timeout` | Request exceeded the timeout (default 30 s). |
+| `ical_too_large` | Response exceeded the byte cap (default 5 MB). |
 | _(passthrough)_ | Network/other failures map through `toOctError`. |
 
 ## Parser
@@ -72,8 +99,19 @@ for (const r of ranges.value) {
 ```
 
 `windowEnd` bounds recurrence expansion and is strongly recommended for
-recurring feeds. `windowStart` drops occurrences that already ended.
-`maxOccurrencesPerEvent` (default 5000) overrides the safety cap.
+recurring feeds. `windowStart` drops occurrences that already ended — those
+pre-window occurrences do **not** count against the occurrence cap, so a
+DTSTART years in the past still yields the current window (a separate internal
+runaway guard bounds the skipping). `maxOccurrencesPerEvent` (default 5000)
+overrides the safety cap.
+
+**Timezone caveat:** ical.js bundles no IANA timezone data. `TZID` references
+are only honoured when the feed ships a matching `VTIMEZONE`; otherwise the
+timestamps are interpreted in the **server's own zone**. Absolute instants
+(`start`/`end`) are therefore only reliable for UTC/floating times or feeds
+that include their `VTIMEZONE`s — the `startWallClock`/`endWallClock`
+components are always the event's own wall-clock reading and are safe
+regardless.
 
 ### Optional layer — day-blocking collapse
 

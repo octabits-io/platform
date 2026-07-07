@@ -24,6 +24,7 @@ import {
   type RecipientsResult,
 } from './email-builder';
 import { createDevOverrideMailTransport } from './devOverride';
+import { isValidRecipientAddress, stripHeaderUnsafeChars } from './sanitize';
 
 // ============================================================================
 // onSend hook
@@ -35,10 +36,17 @@ export interface SendMailMetadata {
   viaPlatformFallback: boolean;
 }
 
-/** Invoked after each send attempt (logging, analytics, delivery-log persistence). */
+/**
+ * Invoked after each send attempt (logging, analytics, delivery-log
+ * persistence) — including refusals: when the service refuses to send
+ * (missing template, `mail_not_configured`, invalid recipient, fallback
+ * disabled) the hook fires with the error result and `message: undefined`
+ * (no deliverable message was ever built), so refused mail still reaches the
+ * delivery log.
+ */
 export type OnSendCallback<TParams> = (
   params: TParams,
-  message: MailMessage,
+  message: MailMessage | undefined,
   result: SendMailResult,
   metadata: SendMailMetadata,
 ) => Promise<void>;
@@ -79,6 +87,12 @@ export interface BaseMailServiceConfig<
    * scoped-server path — when omitted, a resolved `mailServerConfig` is ignored
    * and routing falls through to the platform fallback. Vendor wiring lives here,
    * keeping this module vendor-free.
+   *
+   * Lifecycle note: the service calls this on EVERY scoped-server send and
+   * never closes the returned transport. Implementations should memoize by
+   * config identity (e.g. host/user or a config hash) and return the cached
+   * transport, so per-send calls don't leak connections/pools; the
+   * implementation owns closing transports it evicts.
    */
   transportFactory?: (config: TServerConfig) => MailTransport;
   /** Global transport (platform identity / dev / test). */
@@ -222,10 +236,55 @@ export function createBaseMailService<
     });
   }
 
+  /** Fire the onSend hook, swallowing (but logging) hook failures. */
+  async function fireOnSend(
+    params: TParams,
+    message: MailMessage | undefined,
+    result: SendMailResult,
+    metadata: SendMailMetadata,
+  ): Promise<void> {
+    if (!onSend) return;
+    try {
+      await onSend(params, message, result, metadata);
+    } catch (hookErr) {
+      logger.error('onSend callback failed', hookErr instanceof Error ? hookErr : new Error(String(hookErr)));
+    }
+  }
+
   async function send(params: TParams): Promise<SendMailResult> {
     const preparedResult = await prepareEmail(params);
-    if (!preparedResult.ok) return preparedResult;
+    if (!preparedResult.ok) {
+      // Refusals must still reach the delivery log — fire the hook with the
+      // error result (there is no message to report yet).
+      if (preparedResult.error.key === 'mail_not_configured') {
+        logger.warn('Mail refused: not configured', { type: params.type, reason: preparedResult.error.message });
+      }
+      await fireOnSend(params, undefined, preparedResult, { viaPlatformFallback: false });
+      return preparedResult;
+    }
     const { subject: finalSubject, html, text, recipientsResult, scopeConfig } = preparedResult.value;
+
+    // Recipient-smuggling / header-injection guard: refuse any address a
+    // transport could misread as a list (comma/semicolon), an angle-bracket
+    // route, or a header break. Applied to every address that reaches a
+    // provider: To, Bcc, Reply-To, and the envelope sender.
+    const addressesToCheck: string[] = [
+      ...recipientsResult.recipients,
+      ...(recipientsResult.bcc ?? []),
+      ...(params.replyTo ? [params.replyTo.address] : []),
+      ...(params.returnPath ? [params.returnPath.address] : []),
+    ];
+    const badAddress = addressesToCheck.find((a) => !isValidRecipientAddress(a));
+    if (badAddress !== undefined) {
+      const refusal: SendMailResult = err({
+        key: 'invalid_recipient',
+        message: `Refusing to send ${params.type}: recipient address failed sanitization (separators, whitespace, control characters, or not email-shaped).`,
+        address: badAddress,
+      });
+      logger.warn('Mail refused: invalid recipient address', { type: params.type });
+      await fireOnSend(params, undefined, refusal, { viaPlatformFallback: false });
+      return refusal;
+    }
 
     if (recipientsResult.degradedToDefault) {
       logger.warn(
@@ -279,7 +338,12 @@ export function createBaseMailService<
         : undefined;
     } else {
       logger.warn('Scope has no active mail server and platform fallback is disabled — skipping delivery', { type: params.type });
-      return err({ key: 'mail_not_configured', message: 'Scope has no mail server configured and platform fallback is disabled' });
+      const refusal: SendMailResult = err({
+        key: 'mail_not_configured',
+        message: 'Scope has no mail server configured and platform fallback is disabled',
+      });
+      await fireOnSend(params, undefined, refusal, { viaPlatformFallback: false });
+      return refusal;
     }
 
     // Dev-only nuclear override: applied uniformly at the transport-selection
@@ -291,13 +355,22 @@ export function createBaseMailService<
     }
 
     // A caller-supplied Reply-To/Return-Path (e.g. tagged inbound addresses) wins
-    // over the computed fallback.
+    // over the computed fallback. Header-bound display strings (subject, from
+    // name, reply-to name — which carry scope-derived values like scopeName and
+    // subjectBrand) are stripped of CR/LF so they can't inject headers.
+    const effectiveReplyTo = params.replyTo ?? replyTo;
     const message: MailMessage = {
-      from: { address: fromAddress, name: fromName },
+      from: { address: fromAddress, name: stripHeaderUnsafeChars(fromName) },
       to: recipientsResult.recipients,
-      replyTo: params.replyTo ?? replyTo,
+      bcc: recipientsResult.bcc,
+      replyTo: effectiveReplyTo
+        ? {
+            address: effectiveReplyTo.address,
+            name: effectiveReplyTo.name ? stripHeaderUnsafeChars(effectiveReplyTo.name) : undefined,
+          }
+        : undefined,
       returnPath: params.returnPath,
-      subject: finalSubject,
+      subject: stripHeaderUnsafeChars(finalSubject),
       text,
       html,
     };
@@ -307,15 +380,7 @@ export function createBaseMailService<
     }
 
     const result = await effectiveTransport.send(message);
-
-    if (onSend) {
-      try {
-        await onSend(params, message, result, { viaPlatformFallback });
-      } catch (hookErr) {
-        logger.error('onSend callback failed', hookErr instanceof Error ? hookErr : new Error(String(hookErr)));
-      }
-    }
-
+    await fireOnSend(params, message, result, { viaPlatformFallback });
     return result;
   }
 
@@ -328,6 +393,7 @@ export function createBaseMailService<
       html,
       text,
       recipients: recipientsResult.recipients,
+      bcc: recipientsResult.bcc,
       primaryRecipient: recipientsResult.primaryRecipient,
     });
   }

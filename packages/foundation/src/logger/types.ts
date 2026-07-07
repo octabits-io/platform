@@ -106,7 +106,7 @@ export interface LoggingConfig {
 
   /**
    * Whether to enable console output in addition to OTLP.
-   * @default true in development, false in production
+   * @default true
    */
   consoleOutput?: boolean;
 }

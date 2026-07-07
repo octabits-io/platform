@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { Elysia } from 'elysia';
 import { z } from 'zod';
 import { createSecurityHeadersPlugin } from './security-headers';
-import { createClientIpPlugin } from './client-ip';
+import { createClientIpPlugin, createClientIpResolver, normalizeIp } from './client-ip';
 import {
   SCHEMA_ERROR_RESPONSE,
   CommonErrorResponses,
@@ -23,6 +23,7 @@ import {
   getEnv,
   getEnvOptional,
   getEnvNumber,
+  getEnvNumberOptional,
   getEnvBoolean,
   isProduction,
   parseCsv,
@@ -55,6 +56,8 @@ describe('getStatusCodeForError', () => {
 });
 
 describe('statusErrorWithSet', () => {
+  afterEach(() => { delete process.env.PRODUCTION; delete process.env.NODE_ENV; });
+
   it('sets status and returns a copy of the error body', () => {
     const set: { status?: number | string } = {};
     const body = statusErrorWithSet(set, { key: 'listing_not_found', message: 'nope' });
@@ -66,6 +69,47 @@ describe('statusErrorWithSet', () => {
     const set: { status?: number | string } = {};
     statusErrorWithSet(set, { key: 'tenant_not_found', message: 'x' }, { tenant_not_found: 403 });
     expect(set.status).toBe(403);
+  });
+
+  it('whitelists response fields — extra enumerable props are never serialized', () => {
+    const set: { status?: number | string } = {};
+    const body = statusErrorWithSet(set, {
+      key: 'invalid_email',
+      message: 'bad email',
+      cause: { stack: 'internal' },
+      dbQuery: 'SELECT secret',
+    } as { key: string; message: string });
+    expect(body).toEqual({ key: 'invalid_email', message: 'bad email' });
+    expect(Object.keys(body)).toEqual(['key', 'message']);
+  });
+
+  it('keeps the documented fields property for validation errors', () => {
+    const set: { status?: number | string } = {};
+    const body = statusErrorWithSet(set, {
+      key: 'validation_error',
+      message: 'Validation failed',
+      fields: [{ path: 'email', message: 'invalid' }],
+    } as { key: string; message: string });
+    expect(body).toEqual({
+      key: 'validation_error',
+      message: 'Validation failed',
+      fields: [{ path: 'email', message: 'invalid' }],
+    });
+  });
+
+  it('redacts 5xx messages in production (PRODUCTION=true, no NODE_ENV), keeping the key', () => {
+    process.env.PRODUCTION = 'true';
+    const set: { status?: number | string } = {};
+    const body = statusErrorWithSet(set, { key: 'weird_internal_failure', message: 'pg://user:pass@host exploded' });
+    expect(set.status).toBe(500);
+    expect(body).toEqual({ key: 'weird_internal_failure', message: 'Internal error' });
+  });
+
+  it('does not redact 4xx messages in production', () => {
+    process.env.PRODUCTION = 'true';
+    const set: { status?: number | string } = {};
+    const body = statusErrorWithSet(set, { key: 'invalid_email', message: 'bad email' });
+    expect(body.message).toBe('bad email');
   });
 });
 
@@ -103,12 +147,18 @@ describe('response schemas', () => {
 });
 
 describe('security-headers plugin', () => {
+  afterEach(() => { delete process.env.PRODUCTION; delete process.env.NODE_ENV; });
+
   it('sets hardening headers on responses', async () => {
     const app = new Elysia().use(createSecurityHeadersPlugin({ production: false })).get('/', () => 'ok');
     const res = await app.handle(new Request('http://localhost/'));
     expect(res.headers.get('X-Frame-Options')).toBe('DENY');
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
+    expect(res.headers.get('X-XSS-Protection')).toBe('0'); // legacy filter disabled
+    expect(res.headers.get('Permissions-Policy')).toContain('geolocation=()');
+    expect(res.headers.get('Cross-Origin-Opener-Policy')).toBe('same-origin');
+    expect(res.headers.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
     expect(res.headers.get('Strict-Transport-Security')).toBeNull(); // not production
   });
 
@@ -116,6 +166,43 @@ describe('security-headers plugin', () => {
     const app = new Elysia().use(createSecurityHeadersPlugin({ production: true })).get('/', () => 'ok');
     const res = await app.handle(new Request('http://localhost/'));
     expect(res.headers.get('Strict-Transport-Security')).toContain('max-age=');
+  });
+
+  it('emits HSTS when PRODUCTION=true without NODE_ENV', async () => {
+    process.env.PRODUCTION = 'true';
+    const app = new Elysia().use(createSecurityHeadersPlugin()).get('/', () => 'ok');
+    const res = await app.handle(new Request('http://localhost/'));
+    expect(res.headers.get('Strict-Transport-Security')).toContain('max-age=');
+  });
+
+  it('applies headers to error responses (thrown errors and 404s)', async () => {
+    const app = new Elysia()
+      .use(createSecurityHeadersPlugin({ production: false }))
+      .get('/boom', () => { throw new Error('kaput'); });
+
+    const errRes = await app.handle(new Request('http://localhost/boom'));
+    expect(errRes.status).toBe(500);
+    expect(errRes.headers.get('X-Frame-Options')).toBe('DENY');
+    expect(errRes.headers.get('Content-Security-Policy')).toContain("default-src 'none'");
+
+    const missing = await app.handle(new Request('http://localhost/nowhere'));
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get('X-Frame-Options')).toBe('DENY');
+  });
+
+  it('supports overriding / disabling the new headers', async () => {
+    const app = new Elysia()
+      .use(createSecurityHeadersPlugin({
+        production: false,
+        permissionsPolicy: 'camera=()',
+        crossOriginOpenerPolicy: false,
+        crossOriginResourcePolicy: 'cross-origin',
+      }))
+      .get('/', () => 'ok');
+    const res = await app.handle(new Request('http://localhost/'));
+    expect(res.headers.get('Permissions-Policy')).toBe('camera=()');
+    expect(res.headers.get('Cross-Origin-Opener-Policy')).toBeNull();
+    expect(res.headers.get('Cross-Origin-Resource-Policy')).toBe('cross-origin');
   });
 });
 
@@ -130,6 +217,65 @@ describe('client-ip plugin', () => {
     const app = new Elysia().use(createClientIpPlugin(['*'])).get('/', ({ clientIp }) => clientIp);
     const res = await app.handle(new Request('http://localhost/', { headers: { 'x-forwarded-for': '9.9.9.9, 10.0.0.1' } }));
     expect(await res.text()).toBe('9.9.9.9');
+  });
+});
+
+describe('normalizeIp', () => {
+  it('normalizes IPv6-mapped IPv4 to dotted-quad and lowercases IPv6', () => {
+    expect(normalizeIp('::ffff:203.0.113.7')).toBe('203.0.113.7');
+    expect(normalizeIp('::FFFF:203.0.113.7')).toBe('203.0.113.7');
+    expect(normalizeIp('2001:DB8::1')).toBe('2001:db8::1');
+    expect(normalizeIp(' 10.0.0.1 ')).toBe('10.0.0.1');
+  });
+
+  it('returns null for non-IPs', () => {
+    expect(normalizeIp('not-an-ip')).toBeNull();
+    expect(normalizeIp('10.0.0')).toBeNull();
+    expect(normalizeIp('')).toBeNull();
+  });
+});
+
+describe('createClientIpResolver (rightmost-untrusted)', () => {
+  it('ignores a spoofed leftmost entry: one trusted hop returns the real client', () => {
+    const resolve = createClientIpResolver(['10.0.0.1']);
+    // Client sent a forged XFF ('1.2.3.4'); the trusted proxy appended the real
+    // peer (203.0.113.7). Rightmost-untrusted must pick the appended entry.
+    expect(resolve('10.0.0.1', '1.2.3.4, 203.0.113.7')).toBe('203.0.113.7');
+  });
+
+  it('walks past a chain of two trusted proxies', () => {
+    const resolve = createClientIpResolver(['10.0.0.1', '10.0.0.2']);
+    // client → proxy2 → proxy1 (direct peer): XFF = client, proxy2
+    expect(resolve('10.0.0.1', '198.51.100.9, 10.0.0.2')).toBe('198.51.100.9');
+  });
+
+  it('falls back to the direct peer on garbage XFF entries', () => {
+    const resolve = createClientIpResolver(['10.0.0.1']);
+    expect(resolve('10.0.0.1', 'garbage-value')).toBe('10.0.0.1');
+    expect(resolve('10.0.0.1', '203.0.113.7, <script>')).toBe('10.0.0.1');
+  });
+
+  it('normalizes an IPv6-mapped direct peer for the trusted check', () => {
+    const resolve = createClientIpResolver(['10.0.0.1']);
+    // Peer address reported as ::ffff:10.0.0.1 must still count as trusted.
+    expect(resolve('::ffff:10.0.0.1', '203.0.113.7')).toBe('203.0.113.7');
+    // And IPv6-mapped candidates normalize to dotted-quad.
+    expect(resolve('10.0.0.1', '::ffff:203.0.113.7')).toBe('203.0.113.7');
+  });
+
+  it('never honours XFF when the direct peer is untrusted', () => {
+    const resolve = createClientIpResolver(['10.0.0.1']);
+    expect(resolve('203.0.113.50', '1.2.3.4')).toBe('203.0.113.50');
+  });
+
+  it('returns the leftmost entry when the whole chain is trusted proxies', () => {
+    const resolve = createClientIpResolver(['10.0.0.1', '10.0.0.2']);
+    expect(resolve('10.0.0.1', '10.0.0.2')).toBe('10.0.0.2');
+  });
+
+  it('falls back to unknown when nothing is resolvable', () => {
+    const resolve = createClientIpResolver([]);
+    expect(resolve(undefined, '9.9.9.9')).toBe('unknown');
   });
 });
 
@@ -169,6 +315,38 @@ describe('createErrorHandler', () => {
     expect(((await res.json()) as { message: string }).message).toBe('Internal Server Error');
   });
 
+  it('redacts an unknown-key OctError (mapped to 500) in production, keeping the key', async () => {
+    const app = new Elysia()
+      .use(createErrorHandler(silentLogger, { production: true }))
+      .get('/', () => { throw mapResultError({ key: 'weird_internal_thing', message: 'pg://user:pass@host exploded' }); });
+    const res = await app.handle(new Request('http://localhost/'));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ key: 'weird_internal_thing', message: 'Internal error' });
+  });
+
+  it('keeps 4xx ApiError messages in production', async () => {
+    const app = new Elysia()
+      .use(createErrorHandler(silentLogger, { production: true }))
+      .get('/', () => { throw mapResultError({ key: 'invalid_email', message: 'bad email' }); });
+    const res = await app.handle(new Request('http://localhost/'));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ key: 'invalid_email', message: 'bad email' });
+  });
+
+  it('redacts via PRODUCTION=true env detection (no NODE_ENV)', async () => {
+    process.env.PRODUCTION = 'true';
+    try {
+      const app = new Elysia()
+        .use(createErrorHandler(silentLogger))
+        .get('/', () => { throw new Error('secret internals'); });
+      const res = await app.handle(new Request('http://localhost/'));
+      expect(res.status).toBe(500);
+      expect(((await res.json()) as { message: string }).message).toBe('Internal Server Error');
+    } finally {
+      delete process.env.PRODUCTION;
+    }
+  });
+
   it('validation schema accepts a generic error body', () => {
     expect(SCHEMA_ERROR_RESPONSE.safeParse({ key: 'x', message: 'y' }).success).toBe(true);
     const _z = z; // keep z import used
@@ -198,6 +376,19 @@ describe('config helpers', () => {
     expect(getEnvBoolean(KEY, false)).toBe(true);
     process.env[KEY] = 'no';
     expect(getEnvBoolean(KEY, true)).toBe(false);
+  });
+
+  it('getEnvNumber throws on garbage instead of returning NaN', () => {
+    process.env[KEY] = 'not-a-number';
+    expect(() => getEnvNumber(KEY, 7)).toThrow(/not a number/);
+  });
+
+  it('getEnvNumberOptional returns undefined on garbage or unset', () => {
+    expect(getEnvNumberOptional('__MISSING__')).toBeUndefined();
+    process.env[KEY] = 'not-a-number';
+    expect(getEnvNumberOptional(KEY)).toBeUndefined();
+    process.env[KEY] = '42';
+    expect(getEnvNumberOptional(KEY)).toBe(42);
   });
 
   it('isProduction honors NODE_ENV and PRODUCTION', () => {

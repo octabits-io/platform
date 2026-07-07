@@ -10,12 +10,32 @@ import type {
   CaptchaChallengeCreationError,
   CaptchaRedeemError,
   CaptchaValidateError,
+  CaptchaTokenOptions,
 } from './base/contract';
 
 const DEFAULT_COST = 50_000;
 const DEFAULT_EXPIRES_MS = 600_000;
 const DEFAULT_VERIFIED_TOKEN_TTL_MS = 1_200_000;
 const DEFAULT_NONCE_CACHE_MAX = 10_000;
+
+/**
+ * Pluggable nonce store for challenge replay protection.
+ *
+ * Implementations MUST make `markRedeemed` an atomic check-and-set — a
+ * separate has()-then-set() with an await in between reopens the
+ * double-redemption race this seam exists to close. A Redis-backed store maps
+ * naturally onto `SET <nonce> 1 NX PX <ttlMs>` (returns true on first set,
+ * false on replay). The default store is a per-process synchronous LRU.
+ */
+export interface CaptchaNonceStore {
+  /**
+   * Atomically record `nonce` as redeemed for at least `ttlMs` milliseconds
+   * (the challenge expiry window — after that, altcha's own expiry check
+   * rejects the payload anyway). Returns `true` when the nonce was fresh
+   * (this call redeemed it) and `false` when it was already redeemed.
+   */
+  markRedeemed(nonce: string, ttlMs: number): boolean | Promise<boolean>;
+}
 
 export interface AltchaCaptchaServiceConfig {
   dateProvider: DateProvider;
@@ -28,14 +48,35 @@ export interface AltchaCaptchaServiceConfig {
   expiresMs?: number;
   /** Minted verified-token TTL in ms (returned by redeemChallenge). Default 20 min. */
   verifiedTokenTtlMs?: number;
-  /** Max nonces to remember for replay protection. Default 10_000. */
+  /** Max nonces the DEFAULT in-process store remembers for replay protection. Default 10_000. Ignored when `nonceStore` is provided. */
   nonceCacheMaxSize?: number;
+  /**
+   * Replay-protection store. Defaults to a per-process LRU built from
+   * `lruCacheService` — see the deployment caveats on
+   * `createAltchaCaptchaService`. Provide a shared store (e.g. Redis-backed)
+   * for multi-instance deployments.
+   */
+  nonceStore?: CaptchaNonceStore;
 }
 
 export interface AltchaCaptchaService extends CaptchaService {
   readonly type: 'altcha';
 }
 
+/**
+ * ALTCHA proof-of-work captcha service.
+ *
+ * Replay protection — deployment caveats for the DEFAULT nonce store:
+ * - It is **per-process**. In a multi-instance deployment each instance keeps
+ *   its own nonce set, so a solved challenge can be redeemed once *per
+ *   instance* (N instances → up to N redemptions). Provide a shared
+ *   `nonceStore` (e.g. Redis `SET NX PX`) when that matters.
+ * - It is an **LRU capped at `nonceCacheMaxSize`** (default 10_000). More
+ *   redemptions than that within one `expiresMs` window can evict live nonces
+ *   early, re-enabling replay of the evicted ones. Exposure is bounded by the
+ *   challenge expiry (`expiresMs`): altcha's own expiry check rejects stale
+ *   payloads regardless of the nonce store.
+ */
 export const createAltchaCaptchaService = (
   config: AltchaCaptchaServiceConfig,
 ): AltchaCaptchaService => {
@@ -49,11 +90,25 @@ export const createAltchaCaptchaService = (
     nonceCacheMaxSize = DEFAULT_NONCE_CACHE_MAX,
   } = config;
 
-  // Replay protection: a nonce can only be redeemed once within its expiry window.
-  const seenNonces = lruCacheService.createCache<string, true>({
-    maxSize: nonceCacheMaxSize,
-    ttlMs: expiresMs,
-  });
+  // Replay protection: a nonce can only be redeemed once within its expiry
+  // window. Default store: per-process synchronous LRU (caveats on the
+  // factory jsdoc above).
+  const nonceStore: CaptchaNonceStore = config.nonceStore ?? (() => {
+    const seenNonces = lruCacheService.createCache<string, true>({
+      maxSize: nonceCacheMaxSize,
+      ttlMs: expiresMs,
+    });
+    return {
+      markRedeemed(nonce: string): boolean {
+        // Synchronous check-and-set — no await may ever sit between the
+        // has() and the set(), or two concurrent redemptions of the same
+        // nonce could both pass.
+        if (seenNonces.has(nonce)) return false;
+        seenNonces.set(nonce, true);
+        return true;
+      },
+    };
+  })();
 
   // Domain-separated key for derived-key signatures, mirroring altcha-lib's
   // framework helpers (HMAC-SHA256 of the master secret, keyed with the literal
@@ -87,12 +142,15 @@ export const createAltchaCaptchaService = (
             expires: expiresAt.getTime(),
           },
         };
-      } catch {
+      } catch (error) {
+        // Surface the underlying failure reason (never the secret — error
+        // messages from altcha-lib / WebCrypto do not contain key material).
+        const detail = error instanceof Error ? error.message : String(error);
         return {
           ok: false,
           error: {
             key: 'challenge_creation_failed',
-            message: 'Failed to create captcha challenge',
+            message: `Failed to create captcha challenge: ${detail}`,
           },
         };
       }
@@ -100,6 +158,7 @@ export const createAltchaCaptchaService = (
 
     async redeemChallenge(
       rawPayload: string,
+      options?: CaptchaTokenOptions,
     ): Promise<Result<CaptchaRedeemSuccess, CaptchaRedeemError>> {
       const payload = decodePayload(rawPayload);
       if (!payload) {
@@ -123,26 +182,30 @@ export const createAltchaCaptchaService = (
         return invalidSolution();
       }
 
+      // Redemption-order invariant: verify the solution FIRST (the slow,
+      // awaited part), THEN atomically check-and-set the nonce. Doing the
+      // nonce check before/around the awaited verification would open a
+      // TOCTOU window in which two concurrent redemptions both pass.
       const nonce = payload.challenge.parameters.nonce;
-      if (seenNonces.has(nonce)) {
+      const fresh = await nonceStore.markRedeemed(nonce, expiresMs);
+      if (!fresh) {
         return invalidSolution();
       }
-      seenNonces.set(nonce, true);
 
       const expires = dateProvider.now().getTime() + verifiedTokenTtlMs;
-      const verifiedToken = await mintVerifiedToken(expires, hmacSecret);
+      const verifiedToken = await mintVerifiedToken(expires, hmacSecret, options?.bind);
       return {
         ok: true,
         value: { token: verifiedToken, expires },
       };
     },
 
-    async validateToken(token: string): Promise<Result<void, CaptchaValidateError>> {
+    async validateToken(token: string, options?: CaptchaTokenOptions): Promise<Result<void, CaptchaValidateError>> {
       const parsed = parseVerifiedToken(token);
       if (!parsed) {
         return tokenInvalid();
       }
-      const expectedSig = await hmacHex(String(parsed.expires), hmacSecret);
+      const expectedSig = await hmacHex(tokenSigningInput(parsed.expires, options?.bind), hmacSecret);
       if (!constantTimeEquals(expectedSig, parsed.signature)) {
         return tokenInvalid();
       }
@@ -214,8 +277,19 @@ function parseVerifiedToken(token: string): ParsedVerifiedToken | null {
   }
 }
 
-async function mintVerifiedToken(expires: number, secret: string): Promise<string> {
-  const sig = await hmacHex(String(expires), secret);
+/**
+ * HMAC input for verified tokens. Without a bind this is exactly the legacy
+ * input (`String(expires)`), so unbound tokens stay wire-compatible. With a
+ * bind, the bind string is mixed in behind a NUL separator (which cannot
+ * appear in the decimal `expires`), domain-separating bound from unbound
+ * tokens. An empty-string bind is treated as "no bind".
+ */
+function tokenSigningInput(expires: number, bind?: string): string {
+  return bind ? `${expires}\u0000bind\u0000${bind}` : String(expires);
+}
+
+async function mintVerifiedToken(expires: number, secret: string, bind?: string): Promise<string> {
+  const sig = await hmacHex(tokenSigningInput(expires, bind), secret);
   return base64UrlEncode(`${expires}.${sig}`);
 }
 

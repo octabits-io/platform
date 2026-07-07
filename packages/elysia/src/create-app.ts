@@ -89,19 +89,45 @@ export interface GracefulShutdownOptions {
   stop: (signal: string) => Promise<void>;
   /** Signals to handle. Default: SIGTERM + SIGINT. */
   signals?: NodeJS.Signals[];
+  /** Max time `stop` may take before the process force-exits with code 1. Default 10s. */
+  timeoutMs?: number;
 }
 
 /**
  * Wire SIGTERM/SIGINT to a graceful teardown: log, run `stop`, exit 0.
  * Replaces the identical `shutdown` tail duplicated in every `main()`.
+ *
+ * `stop` is bounded by `timeoutMs` (default 10s) — if it hangs, the timeout
+ * logs and force-exits with code 1 so the process cannot wedge on teardown.
+ * A rejected `stop` is logged and exits with code 1 (never silently swallowed).
  */
-export function registerGracefulShutdown({ logger, stop, signals = ['SIGTERM', 'SIGINT'] }: GracefulShutdownOptions): void {
+export function registerGracefulShutdown({
+  logger,
+  stop,
+  signals = ['SIGTERM', 'SIGINT'],
+  timeoutMs = 10_000,
+}: GracefulShutdownOptions): void {
   const shutdown = async (signal: string) => {
     logger.info(`${signal} received, shutting down gracefully...`);
-    await stop(signal);
-    process.exit(0);
+    const forceExitTimer = setTimeout(() => {
+      logger.error(`Graceful shutdown timed out after ${timeoutMs}ms, forcing exit`);
+      process.exit(1);
+    }, timeoutMs);
+    // Don't let the watchdog itself keep the process alive.
+    forceExitTimer.unref?.();
+    try {
+      await stop(signal);
+      clearTimeout(forceExitTimer);
+      process.exit(0);
+    } catch (error) {
+      clearTimeout(forceExitTimer);
+      logger.error('Graceful shutdown failed', error instanceof Error ? error : new Error(String(error)));
+      process.exit(1);
+    }
   };
   for (const signal of signals) {
+    // `shutdown` handles its own rejections (see catch above), so `void` here
+    // cannot swallow errors.
     process.on(signal, () => void shutdown(signal));
   }
 }

@@ -11,7 +11,7 @@ import type { PostgresErrorCode, OctDatabaseError } from './errors.ts';
  * @example
  * ```ts
  * await db.transaction(async (tx) => {
- *   const result = await paymentService.create(tenantId, params, tx);
+ *   const result = await orderService.create(params, tx);
  *   if (!result.ok) {
  *     throw new TransactionRollbackError(result.error);
  *   }
@@ -34,6 +34,8 @@ export const PG_ERROR_CODE_MAP: Record<string, PostgresErrorCode> = {
   '23503': 'foreign_key_violation',
   '23502': 'not_null_violation',
   '23514': 'check_violation',
+  '40001': 'serialization_failure',
+  '40P01': 'deadlock_detected',
 };
 
 interface ExtractedPgError {
@@ -42,15 +44,33 @@ interface ExtractedPgError {
 }
 
 /**
+ * PostgreSQL SQLSTATE codes are exactly five uppercase alphanumeric
+ * characters. Node system errors (`ECONNREFUSED`, `ETIMEDOUT`, …) also carry a
+ * `code` property but must NOT be treated as database errors — they signal
+ * infrastructure failure and should propagate as thrown exceptions.
+ */
+const SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+
+/**
  * Extracts PostgreSQL error details from a Drizzle-wrapped error.
  * Drizzle wraps PostgreSQL errors in the .cause property.
+ *
+ * Only objects whose `code` matches the SQLSTATE shape (five uppercase
+ * alphanumerics) are recognized; anything else (e.g. Node system errors with
+ * `code: 'ECONNREFUSED'`) returns `null` so callers rethrow.
  */
 export function extractPgError(error: unknown): ExtractedPgError | null {
   const pgError = error instanceof Error && 'cause' in error ? error.cause : error;
 
-  if (pgError && typeof pgError === 'object' && 'code' in pgError) {
+  if (
+    pgError &&
+    typeof pgError === 'object' &&
+    'code' in pgError &&
+    typeof pgError.code === 'string' &&
+    SQLSTATE_PATTERN.test(pgError.code)
+  ) {
     return {
-      code: String(pgError.code),
+      code: pgError.code,
       constraint: 'constraint' in pgError ? String(pgError.constraint) : undefined,
     };
   }
@@ -109,7 +129,7 @@ export async function withDbErrorHandling<T, E extends OctError>(
  * ```ts
  * try {
  *   await db.transaction(async (tx) => {
- *     const result = await paymentService.create(tenantId, params, tx);
+ *     const result = await orderService.create(params, tx);
  *     if (!result.ok) throw new TransactionRollbackError(result.error);
  *     // ... more operations
  *   });

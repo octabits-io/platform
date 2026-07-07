@@ -1,5 +1,6 @@
 import type { Result } from '@octabits-io/foundation/result';
 import type { DateProvider } from '@octabits-io/foundation/utils';
+import type { Logger } from '@octabits-io/foundation/logger';
 import type {
   CaptchaService,
   CaptchaChallenge,
@@ -17,9 +18,22 @@ export interface NoopCaptchaService extends CaptchaService {
   readonly type: 'noop';
 }
 
-export const createNoopCaptchaService = (config?: { dateProvider?: DateProvider }): NoopCaptchaService => {
+/**
+ * No-op captcha for dev/test: every challenge auto-passes and every token
+ * validates. It provides ZERO protection — never wire it up in production.
+ * Construction logs a warning (via `config.logger` when provided, otherwise
+ * `console.warn`) so an accidentally active no-op is visible in logs.
+ */
+export const createNoopCaptchaService = (config?: { dateProvider?: DateProvider; logger?: Logger }): NoopCaptchaService => {
   const dateProvider = config?.dateProvider;
   const getNow = () => dateProvider ? dateProvider.now().getTime() : Date.now();
+
+  const warning = 'captcha no-op provider active — all challenges auto-pass';
+  if (config?.logger) {
+    config.logger.warn(warning);
+  } else {
+    console.warn(warning);
+  }
 
   return {
     type: 'noop',

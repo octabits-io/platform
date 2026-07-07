@@ -268,6 +268,13 @@ export interface ScopedConfigService<
    * encrypted keys are ciphered into a `{ __encrypted }` envelope; all entries
    * are upserted in one statement. Returns the first validation error (nothing
    * is written) or a cipher error.
+   *
+   * **Cache-invalidation caveat:** a successful write invalidates only the
+   * **in-process** caches (the request-scoped cache and the injected
+   * cross-scope cache of *this* process). In multi-instance deployments other
+   * processes keep serving their cached values until they expire — pair the
+   * cross-scope cache with the recommended short TTL (e.g. 60s, see
+   * {@link createScopedConfigCache}) to bound the staleness window.
    */
   writeConfig(config: Partial<TConfigMap>): Promise<Result<void, InvalidConfigValueError | TCipherError>>;
   /**
@@ -390,6 +397,12 @@ export function createScopedConfigService<
         set: {
           value: sql`excluded.value`,
           encrypted: sql`excluded.encrypted`,
+          // Keep the audit columns honest on the update path — column defaults
+          // only fire on INSERT, so without these an upserted row keeps its
+          // original updated_at forever. Guarded so tables without the
+          // audit columns (not built from `scopedConfigColumns`) still work.
+          ...(t.updatedAt ? { updatedAt: sql`now()` } : {}),
+          ...(t.updatedBy ? { updatedBy: sql`excluded.updated_by` } : {}),
         },
       });
 
@@ -528,7 +541,9 @@ export function createScopedConfigService<
   }
 
   async function readAll(): Promise<Partial<TConfigMap>> {
-    if (allConfigsCache) return allConfigsCache;
+    // Return a shallow copy — handing out the internal cache object by
+    // reference would let a caller's mutation poison every later readAll().
+    if (allConfigsCache) return { ...allConfigsCache };
 
     const rows = (await db
       .select({ key: t.key, value: t.value, encrypted: t.encrypted })
@@ -551,7 +566,7 @@ export function createScopedConfigService<
     }
 
     allConfigsCache = result;
-    return result;
+    return { ...result };
   }
 
   return { writeConfig, readConfig, readAll };
@@ -585,7 +600,10 @@ export function createScopedConfigCache<TConfigMap extends Record<string, unknow
   cacheableKeys: Iterable<keyof TConfigMap>;
 }): ScopedConfigCache<TConfigMap> {
   const cacheable = new Set<keyof TConfigMap>(cacheableKeys);
-  const cacheKey = (scopeValue: string, key: keyof TConfigMap) => `${scopeValue}:${String(key)}`;
+  // Encode both parts so a scope/key pair can never collide with another pair
+  // across the ':' boundary (e.g. scope 'a' + key 'b:c' vs scope 'a:b' + key 'c').
+  const cacheKey = (scopeValue: string, key: keyof TConfigMap) =>
+    `${encodeURIComponent(scopeValue)}:${encodeURIComponent(String(key))}`;
 
   return {
     get<K extends keyof TConfigMap>(scopeValue: string, key: K): TConfigMap[K] | undefined {

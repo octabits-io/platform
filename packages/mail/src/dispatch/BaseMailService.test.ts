@@ -245,7 +245,7 @@ describe('createBaseMailService', () => {
       expect(transport.getLastMessage()!.to).toEqual(['admin@acme.example']);
     });
 
-    it('sends to both in customer_and_notifications mode', async () => {
+    it('BCCs the notifications address in customer_and_notifications mode (never visible in to)', async () => {
       const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
         platformFromAddress: 'noreply@example.com',
         templates: registry(),
@@ -255,7 +255,10 @@ describe('createBaseMailService', () => {
       });
 
       await service.send(userParams());
-      expect(transport.getLastMessage()!.to).toEqual(['customer@example.com', 'admin@acme.example']);
+      const message = transport.getLastMessage()!;
+      expect(message.to).toEqual(['customer@example.com']);
+      expect(message.to).not.toContain('admin@acme.example');
+      expect(message.bcc).toEqual(['admin@acme.example']);
     });
 
     it('degrades customer_and_notifications to default (user only) when no notifications address', async () => {
@@ -417,6 +420,26 @@ describe('createBaseMailService', () => {
       expect(message.from).toEqual({ address: 'noreply@example.com', name: 'Example' });
     });
 
+    it('drops the notifications BCC when redirecting (no leak through the blind copy)', async () => {
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        configReader: configReaderOf({
+          scopeName: 'Acme',
+          deliveryMode: 'customer_and_notifications',
+          notificationsAddress: 'admin@acme.example',
+        }),
+        transport,
+        logger: mockLogger,
+        devOverrideRecipient: 'dev@example.com',
+      });
+
+      await service.send(userParams());
+      const message = transport.getLastMessage()!;
+      expect(message.to).toEqual(['dev@example.com']);
+      expect(message.bcc).toBeUndefined();
+    });
+
     it('redirects platform-fallback mail to the override recipient', async () => {
       const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
         platformFromAddress: 'noreply@example.com',
@@ -433,6 +456,119 @@ describe('createBaseMailService', () => {
       // Delivered via the platform fallback, but redirected to the override.
       expect(message.to).toEqual(['dev@example.com']);
       expect(message.from).toEqual({ address: 'noreply@example.com', name: 'Acme via Example' });
+    });
+  });
+
+  describe('recipient sanitization + header-injection guard', () => {
+    it('rejects a comma-smuggled recipient (invalid_recipient) without touching the transport', async () => {
+      const onSend = vi.fn();
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        transport,
+        logger: mockLogger,
+        onSend,
+      });
+
+      const result = await service.send(userParams({ email: 'victim@example.com,attacker@evil.example' }));
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.key).toBe('invalid_recipient');
+      expect(transport.count()).toBe(0);
+      // The refusal still reaches the delivery log.
+      expect(onSend).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined,
+        expect.objectContaining({ ok: false, error: expect.objectContaining({ key: 'invalid_recipient' }) }),
+        { viaPlatformFallback: false },
+      );
+    });
+
+    it('rejects recipients with semicolons, angle brackets, whitespace, or a non-email shape', async () => {
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        transport,
+        logger: mockLogger,
+      });
+
+      for (const email of [
+        'a@example.com;b@example.com',
+        '<attacker@evil.example>',
+        'a b@example.com',
+        'a@example.com\r\nBcc: x@evil.example',
+        'not-an-email',
+      ]) {
+        const result = await service.send(userParams({ email }));
+        expect(result.ok, email).toBe(false);
+        if (!result.ok) expect(result.error.key).toBe('invalid_recipient');
+      }
+      expect(transport.count()).toBe(0);
+    });
+
+    it('rejects a smuggled caller-supplied replyTo address', async () => {
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        transport,
+        logger: mockLogger,
+      });
+
+      const result = await service.send(userParams({
+        replyTo: { address: 'reply@ok.example,evil@evil.example' },
+      }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.key).toBe('invalid_recipient');
+      expect(transport.count()).toBe(0);
+    });
+
+    it('strips CRLF from the subject before it reaches the transport', async () => {
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry({ 'user-mail': mockBuilder({ subject: 'Hello\r\nBcc: evil@evil.example' }) }),
+        transport,
+        logger: mockLogger,
+      });
+
+      const result = await service.send(userParams());
+      expect(result.ok).toBe(true);
+      const message = transport.getLastMessage()!;
+      expect(message.subject).toBe('Hello Bcc: evil@evil.example');
+      expect(message.subject).not.toMatch(/[\r\n]/);
+    });
+
+    it('strips CRLF from scope-derived display strings (scopeName in from name and reply-to name)', async () => {
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        platformFromName: 'Example',
+        templates: registry(),
+        configReader: configReaderOf({
+          scopeName: 'Acme\r\nX-Evil: 1',
+          notificationsAddress: 'admin@acme.example',
+        }),
+        transport,
+        logger: mockLogger,
+      });
+
+      await service.send(userParams());
+      const message = transport.getLastMessage()!;
+      expect(message.from.name).toBe('Acme X-Evil: 1 via Example');
+      expect(message.from.name).not.toMatch(/[\r\n]/);
+      expect(message.replyTo!.name).not.toMatch(/[\r\n]/);
+    });
+
+    it('refuses user mail whose params carry no email (never sends to: [undefined])', async () => {
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        transport,
+        logger: mockLogger,
+      });
+
+      const result = await service.send(userParams({ email: undefined as unknown as string }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.key).toBe('invalid_recipient');
+      expect(transport.count()).toBe(0);
     });
   });
 
@@ -527,6 +663,94 @@ describe('createBaseMailService', () => {
       );
     });
 
+    it('fires with the refusal (message undefined) when the template is missing', async () => {
+      const onSend = vi.fn();
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry({ 'user-mail': undefined as never }),
+        transport,
+        logger: mockLogger,
+        onSend,
+      });
+
+      const params = userParams();
+      const result = await service.send(params);
+      expect(result.ok).toBe(false);
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onSend).toHaveBeenCalledWith(
+        params,
+        undefined,
+        expect.objectContaining({ ok: false, error: expect.objectContaining({ key: 'mail_template_error' }) }),
+        { viaPlatformFallback: false },
+      );
+    });
+
+    it('fires with the refusal and logs a warning for a mail_not_configured refusal (notifications_only, no address)', async () => {
+      const onSend = vi.fn();
+      const warn = vi.fn();
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        configReader: configReaderOf({ scopeName: 'Acme', deliveryMode: 'notifications_only' }),
+        transport,
+        logger: { ...mockLogger, warn },
+        onSend,
+      });
+
+      const result = await service.send(userParams());
+      expect(result.ok).toBe(false);
+      expect(onSend).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined,
+        expect.objectContaining({ ok: false, error: expect.objectContaining({ key: 'mail_not_configured' }) }),
+        { viaPlatformFallback: false },
+      );
+      expect(warn).toHaveBeenCalledWith(
+        'Mail refused: not configured',
+        expect.objectContaining({ type: 'user-mail' }),
+      );
+    });
+
+    it('fires with the refusal when platform fallback is disabled', async () => {
+      const onSend = vi.fn();
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        configReader: configReaderOf({ platformFallbackEnabled: false }),
+        transport,
+        logger: mockLogger,
+        onSend,
+      });
+
+      const result = await service.send(userParams());
+      expect(result.ok).toBe(false);
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onSend).toHaveBeenCalledWith(
+        expect.anything(),
+        undefined,
+        expect.objectContaining({ ok: false, error: expect.objectContaining({ key: 'mail_not_configured' }) }),
+        { viaPlatformFallback: false },
+      );
+    });
+
+    it('swallows onSend errors on a refusal path and still returns the refusal', async () => {
+      const onSend: OnSendCallback<Params> = vi.fn().mockRejectedValue(new Error('hook boom'));
+      const error = vi.fn();
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        configReader: configReaderOf({ platformFallbackEnabled: false }),
+        transport,
+        logger: { ...mockLogger, error },
+        onSend,
+      });
+
+      const result = await service.send(userParams());
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.key).toBe('mail_not_configured');
+      expect(error).toHaveBeenCalledWith('onSend callback failed', expect.any(Error));
+    });
+
     it('swallows onSend errors and still resolves successfully', async () => {
       const onSend: OnSendCallback<Params> = vi.fn().mockRejectedValue(new Error('hook boom'));
       const error = vi.fn();
@@ -610,6 +834,22 @@ describe('createBaseMailService', () => {
       expect(result.value.primaryRecipient).toBe('customer@example.com');
       // Nothing was actually delivered.
       expect(transport.count()).toBe(0);
+    });
+
+    it('surfaces the notifications BCC in customer_and_notifications mode', async () => {
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        configReader: configReaderOf({ scopeName: 'Acme', deliveryMode: 'customer_and_notifications', notificationsAddress: 'admin@acme.example' }),
+        transport,
+        logger: mockLogger,
+      });
+
+      const result = await service.render(userParams());
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.value.recipients).toEqual(['customer@example.com']);
+      expect(result.value.bcc).toEqual(['admin@acme.example']);
     });
   });
 });

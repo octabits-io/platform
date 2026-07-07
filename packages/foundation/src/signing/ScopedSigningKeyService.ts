@@ -17,9 +17,15 @@ export interface ScopedSigningSignatureInvalidError extends OctError {
   key: 'scoped_signing_signature_invalid';
 }
 
+/** An invalid `bytes` option was passed to `shortTag`/`verifyShortTag`. */
+export interface ScopedSigningInvalidBytesError extends OctError {
+  key: 'scoped_signing_invalid_bytes';
+}
+
 export type ScopedSigningError =
   | ScopedSigningKeyNotFoundError
-  | ScopedSigningSignatureInvalidError;
+  | ScopedSigningSignatureInvalidError
+  | ScopedSigningInvalidBytesError;
 
 /**
  * Persistence seam for per-purpose signing keys. The service is agnostic to
@@ -37,8 +43,10 @@ export interface SigningKeyStore {
 export interface ScopedSigningServiceConfig {
   /**
    * Domain-separation prefix baked into every HKDF info string, so keys derived
-   * by one product/context can never collide with another's. Becomes
-   * `${infoPrefix}-${purpose}-signing-key-v1`.
+   * by one product/context can never collide with another's. Both `infoPrefix`
+   * and `purpose` are length-prefixed in the info string
+   * (`${len}:${infoPrefix}|${len}:${purpose}|signing-key-v1`) so distinct
+   * (prefix, purpose) pairs can never encode to the same bytes.
    */
   infoPrefix: string;
   /**
@@ -64,6 +72,17 @@ export interface ScopedSigningServiceConfig {
  * comfortable margin under length-constrained identifiers.
  */
 const DEFAULT_TAG_BYTES = 12;
+
+/** Valid `bytes` range for `shortTag`/`verifyShortTag`: 1..32 (SHA-256 digest size). */
+function validateTagBytes(bytes: number): ScopedSigningInvalidBytesError | null {
+  if (!Number.isInteger(bytes) || bytes < 1 || bytes > 32) {
+    return {
+      key: 'scoped_signing_invalid_bytes',
+      message: `shortTag bytes must be an integer between 1 and 32, got: ${bytes}`,
+    };
+  }
+  return null;
+}
 
 // =============================================================================
 // Service Factory
@@ -105,21 +124,42 @@ export function createScopedSigningService({
    */
   function deriveKey(purpose: string): Buffer {
     if (!masterSecret) throw new Error('Key derivation requires a master secret');
-    const info = Buffer.from(`${infoPrefix}-${purpose}-signing-key-v1`);
+    // Length-prefix both variable parts: a bare `${infoPrefix}-${purpose}`
+    // is delimiter-ambiguous — ('a', 'b-c') and ('a-b', 'c') would encode to
+    // the same info bytes and derive identical keys.
+    const info = Buffer.from(
+      `${infoPrefix.length}:${infoPrefix}|${purpose.length}:${purpose}|signing-key-v1`,
+    );
     return Buffer.from(crypto.hkdfSync('sha256', masterSecret, scopeKey, info, 32));
   }
+
+  // Serializes provisioning read-modify-write cycles within this process so
+  // two concurrent `ensureProvisioned` calls cannot read the same map and
+  // clobber each other's purpose on write. Rejections are swallowed on the
+  // chain itself (each caller still sees its own task's rejection).
+  let provisionChain: Promise<void> = Promise.resolve();
 
   /**
    * Ensure a signing key for the given purpose is stored in `keyStore`. Derives
    * and stores the key if not already present. Preserves existing keys for
    * other purposes.
+   *
+   * In-process calls are serialized (see `provisionChain`). Cross-process races
+   * against the same store can still drop a concurrently-added purpose, but are
+   * recoverable: with `masterSecret` set, keys are deterministically re-derived,
+   * so the next `ensureProvisioned` for the dropped purpose restores the exact
+   * same key bytes.
    */
-  async function ensureProvisioned(purpose: string): Promise<void> {
-    const map = await keyStore.read();
-    if (map[purpose]) return;
+  function ensureProvisioned(purpose: string): Promise<void> {
+    const task = provisionChain.then(async () => {
+      const map = await keyStore.read();
+      if (map[purpose]) return;
 
-    const key = deriveKey(purpose);
-    await keyStore.write({ ...map, [purpose]: key.toString('base64') });
+      const key = deriveKey(purpose);
+      await keyStore.write({ ...map, [purpose]: key.toString('base64') });
+    });
+    provisionChain = task.catch(() => {});
+    return task;
   }
 
   /**
@@ -198,9 +238,12 @@ export function createScopedSigningService({
     message: string,
     opts: { bytes?: number } = {},
   ): Promise<Result<string, ScopedSigningError>> {
+    const bytes = opts.bytes ?? DEFAULT_TAG_BYTES;
+    const bytesError = validateTagBytes(bytes);
+    if (bytesError) return err(bytesError);
     const key = await resolveKey(purpose);
     if (!key.ok) return key;
-    return ok(computeShortTag(message, key.value, opts.bytes ?? DEFAULT_TAG_BYTES));
+    return ok(computeShortTag(message, key.value, bytes));
   }
 
   /**
@@ -215,9 +258,14 @@ export function createScopedSigningService({
     tag: string,
     opts: { bytes?: number } = {},
   ): Promise<Result<boolean, ScopedSigningError>> {
+    // Reject invalid bytes up front — with bytes: 0 an empty expected tag
+    // would otherwise "verify" against an empty provided tag.
+    const bytes = opts.bytes ?? DEFAULT_TAG_BYTES;
+    const bytesError = validateTagBytes(bytes);
+    if (bytesError) return err(bytesError);
     const key = await resolveKey(purpose);
     if (!key.ok) return key;
-    const expected = Buffer.from(computeShortTag(message, key.value, opts.bytes ?? DEFAULT_TAG_BYTES));
+    const expected = Buffer.from(computeShortTag(message, key.value, bytes));
     const provided = Buffer.from(tag.toLowerCase());
     const valid = expected.length === provided.length && crypto.timingSafeEqual(expected, provided);
     return ok(valid);
@@ -270,7 +318,8 @@ export function createScopedSigningService({
 
     try {
       const { jwtVerify } = await import('jose');
-      const { payload } = await jwtVerify(token, key.value);
+      // Pin the algorithm: this service only ever signs HS256.
+      const { payload } = await jwtVerify(token, key.value, { algorithms: ['HS256'] });
       return ok(payload);
     } catch {
       return err({ key: 'scoped_signing_signature_invalid', message: 'Invalid or expired token' });

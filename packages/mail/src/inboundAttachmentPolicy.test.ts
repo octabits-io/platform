@@ -25,6 +25,12 @@ describe('fileExtension', () => {
     expect(fileExtension('trailing.')).toBe('');
   });
 
+  it('strips trailing dots/spaces before extracting (Windows drops them on save)', () => {
+    expect(fileExtension('invoice.exe.')).toBe('exe');
+    expect(fileExtension('invoice.exe ')).toBe('exe');
+    expect(fileExtension('invoice.exe. . ')).toBe('exe');
+  });
+
   it('ignores directory separators in the name', () => {
     expect(fileExtension('a/b/c.exe')).toBe('exe');
     expect(fileExtension('a\\b\\c.bat')).toBe('bat');
@@ -48,6 +54,28 @@ describe('screenInboundAttachment', () => {
       expect(r.blocked, name).toBe(true);
       expect(r.code).toBe('blocked_extension');
     }
+  });
+
+  it('blocks the extended carrier set (add-ins, disk images, chm, url)', () => {
+    for (const name of ['addin.xll', 'image.iso', 'disk.img', 'help.chm', 'link.url', 'disk.vhd', 'disk.vhdx']) {
+      const r = screenInboundAttachment(ok({ name, contentType: 'application/octet-stream' }));
+      expect(r.blocked, name).toBe(true);
+      expect(r.code).toBe('blocked_extension');
+    }
+  });
+
+  it('blocks trailing-dot/space bypass attempts (invoice.exe. / invoice.exe )', () => {
+    for (const name of ['invoice.exe.', 'invoice.exe ', 'run.bat. ']) {
+      const r = screenInboundAttachment(ok({ name, contentType: 'application/octet-stream' }));
+      expect(r.blocked, JSON.stringify(name)).toBe(true);
+      expect(r.code).toBe('blocked_extension');
+    }
+  });
+
+  it('blocks double extensions by their final extension (name.pdf.exe)', () => {
+    const r = screenInboundAttachment(ok({ name: 'name.pdf.exe', contentType: 'application/pdf' }));
+    expect(r.blocked).toBe(true);
+    expect(r.code).toBe('blocked_extension');
   });
 
   it('blocks dangerous MIME types even with an innocuous name', () => {

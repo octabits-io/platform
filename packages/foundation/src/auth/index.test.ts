@@ -129,7 +129,25 @@ describe('createJwtValidationService', () => {
       expect(jwtVerifyMock).toHaveBeenCalledWith('a.real.jwt', 'MOCK_JWKS', {
         issuer: 'https://auth.example.com',
         audience: 'project-123',
+        algorithms: expect.arrayContaining(['RS256', 'ES256']),
       });
+    });
+
+    it('pins the accepted algorithms to asymmetric families by default', async () => {
+      stubDiscoveryOk();
+      jwtVerifyMock.mockResolvedValue({ payload: { sub: 'user-1' } });
+      const svc = createJwtValidationService<DomainToken>(baseConfig);
+      await svc.validateToken('a.real.jwt');
+      const options = jwtVerifyMock.mock.calls[0]?.[2] as { algorithms: string[] };
+      expect(options.algorithms).not.toContain('HS256');
+    });
+
+    it('passes caller-supplied algorithms through to jwtVerify', async () => {
+      stubDiscoveryOk();
+      jwtVerifyMock.mockResolvedValue({ payload: { sub: 'user-1' } });
+      const svc = createJwtValidationService<DomainToken>({ ...baseConfig, algorithms: ['ES256'] });
+      await svc.validateToken('a.real.jwt');
+      expect(jwtVerifyMock).toHaveBeenCalledWith('a.real.jwt', 'MOCK_JWKS', expect.objectContaining({ algorithms: ['ES256'] }));
     });
 
     it('returns missing_claims when the claimMapper rejects the payload', async () => {
@@ -144,13 +162,37 @@ describe('createJwtValidationService', () => {
       }
     });
 
-    it('returns expired_token when jose reports expiry', async () => {
+    it('returns expired_token when jose reports expiry via code ERR_JWT_EXPIRED', async () => {
+      stubDiscoveryOk();
+      const expiredError = Object.assign(new Error('JWT is expired'), { code: 'ERR_JWT_EXPIRED' });
+      jwtVerifyMock.mockRejectedValue(expiredError);
+      const svc = createJwtValidationService<DomainToken>(baseConfig);
+      const result = await svc.validateToken('a.real.jwt');
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.key).toBe('expired_token');
+    });
+
+    it('returns expired_token via the exact "exp" claim message fallback', async () => {
       stubDiscoveryOk();
       jwtVerifyMock.mockRejectedValue(new Error('"exp" claim timestamp check failed'));
       const svc = createJwtValidationService<DomainToken>(baseConfig);
       const result = await svc.validateToken('a.real.jwt');
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error.key).toBe('expired_token');
+    });
+
+    it('does NOT classify wrong-issuer errors as expired (jose message contains "iss")', async () => {
+      // Regression: `error.message.includes('exp')` matched the "unexpected"
+      // in jose's claim-mismatch wording and reported expired_token.
+      stubDiscoveryOk();
+      const issError = Object.assign(new Error('unexpected "iss" claim value'), {
+        code: 'ERR_JWT_CLAIM_VALIDATION_FAILED',
+      });
+      jwtVerifyMock.mockRejectedValue(issError);
+      const svc = createJwtValidationService<DomainToken>(baseConfig);
+      const result = await svc.validateToken('a.real.jwt');
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.key).toBe('invalid_token');
     });
 
     it('returns invalid_token on a generic verification failure', async () => {

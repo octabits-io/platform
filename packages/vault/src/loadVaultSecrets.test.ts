@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadVaultSecrets } from './loadVaultSecrets';
+import { loadVaultSecrets } from './loadVaultSecrets.ts';
 
 const VAULT_ENV_KEYS = [
   'VAULT_ADDR',
@@ -11,6 +11,8 @@ const VAULT_ENV_KEYS = [
   'VAULT_AUTH_METHOD',
   'VAULT_K8S_ROLE',
   'VAULT_K8S_JWT_PATH',
+  'VAULT_K8S_MOUNT',
+  'VAULT_TIMEOUT_MS',
   'VAULT_SECRETS_MANIFEST',
 ];
 
@@ -262,6 +264,194 @@ describe('loadVaultSecrets', () => {
     ]);
 
     await expect(loadVaultSecrets()).rejects.toThrow(/VAULT_TOKEN is not set/);
+    expect(getMockFetch()).not.toHaveBeenCalled();
+  });
+
+  it('throws on an unknown VAULT_AUTH_METHOD instead of silently inferring', async () => {
+    process.env.VAULT_ADDR = 'http://vault:8200';
+    process.env.VAULT_AUTH_METHOD = 'kubernetes'; // must be 'k8s'
+    process.env.VAULT_TOKEN = 'tok';
+    process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+      { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+    ]);
+
+    await expect(loadVaultSecrets()).rejects.toThrow(
+      /unknown VAULT_AUTH_METHOD "kubernetes" \(expected "token" or "k8s"\)/,
+    );
+    expect(getMockFetch()).not.toHaveBeenCalled();
+  });
+
+  it('trims VAULT_TOKEN like the k8s JWT', async () => {
+    process.env.VAULT_ADDR = 'http://vault:8200';
+    process.env.VAULT_AUTH_METHOD = 'token';
+    process.env.VAULT_TOKEN = '  static-token \n';
+    process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+      { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+    ]);
+
+    getMockFetch().mockResolvedValueOnce(jsonResponse({ data: { data: { foo: 'bar' } } }));
+
+    await loadVaultSecrets();
+
+    const headers = (getMockFetch().mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+    expect(headers['X-Vault-Token']).toBe('static-token');
+  });
+
+  it('uses VAULT_K8S_MOUNT for the kubernetes auth mount path', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'vault-test-'));
+    const jwtPath = join(tmpDir, 'token');
+    writeFileSync(jwtPath, 'jwt');
+
+    try {
+      process.env.VAULT_ADDR = 'http://vault:8200';
+      process.env.VAULT_AUTH_METHOD = 'k8s';
+      process.env.VAULT_K8S_ROLE = 'app-api';
+      process.env.VAULT_K8S_JWT_PATH = jwtPath;
+      process.env.VAULT_K8S_MOUNT = 'k8s-prod';
+      process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+        { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+      ]);
+
+      getMockFetch()
+        .mockResolvedValueOnce(jsonResponse({ auth: { client_token: 'k8s-issued-token' } }))
+        .mockResolvedValueOnce(jsonResponse({ data: { data: { foo: 'bar' } } }));
+
+      await loadVaultSecrets();
+
+      const [loginUrl] = getMockFetch().mock.calls[0]!;
+      expect(loginUrl).toBe('http://vault:8200/v1/auth/k8s-prod/login');
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('treats an empty-string target env var as unset and hydrates it', async () => {
+    process.env.VAULT_ADDR = 'http://vault:8200';
+    process.env.VAULT_AUTH_METHOD = 'token';
+    process.env.VAULT_TOKEN = 'tok';
+    process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+      { path: 'secret/data/x', map: { db_url: 'DATABASE_URL' } },
+    ]);
+    process.env.DATABASE_URL = ''; // blank `FOO=` line in an env file
+
+    getMockFetch().mockResolvedValueOnce(jsonResponse({
+      data: { data: { db_url: 'postgres://from-vault' } },
+    }));
+
+    await loadVaultSecrets();
+
+    expect(process.env.DATABASE_URL).toBe('postgres://from-vault');
+  });
+
+  it('coerces number/boolean KV scalars via String()', async () => {
+    process.env.VAULT_ADDR = 'http://vault:8200';
+    process.env.VAULT_AUTH_METHOD = 'token';
+    process.env.VAULT_TOKEN = 'tok';
+    process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+      { path: 'secret/data/x', map: { port: 'DATABASE_URL', flag: 'STRIPE_SECRET_KEY' } },
+    ]);
+
+    getMockFetch().mockResolvedValueOnce(jsonResponse({
+      data: { data: { port: 5432, flag: true } },
+    }));
+
+    await loadVaultSecrets();
+
+    expect(process.env.DATABASE_URL).toBe('5432');
+    expect(process.env.STRIPE_SECRET_KEY).toBe('true');
+  });
+
+  it('still fails loud on object/array/null KV values', async () => {
+    process.env.VAULT_ADDR = 'http://vault:8200';
+    process.env.VAULT_AUTH_METHOD = 'token';
+    process.env.VAULT_TOKEN = 'tok';
+    process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+      { path: 'secret/data/x', map: { nested: 'DATABASE_URL' } },
+    ]);
+
+    getMockFetch().mockResolvedValueOnce(jsonResponse({
+      data: { data: { nested: { deep: 'value' } } },
+    }));
+
+    await expect(loadVaultSecrets()).rejects.toThrow(
+      /Vault KV value for secret\/data\/x#nested is not a string\/number\/boolean/,
+    );
+  });
+
+  it('passes an AbortSignal to fetch (timeout wiring)', async () => {
+    process.env.VAULT_ADDR = 'http://vault:8200';
+    process.env.VAULT_AUTH_METHOD = 'token';
+    process.env.VAULT_TOKEN = 'tok';
+    process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+      { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+    ]);
+
+    getMockFetch().mockResolvedValueOnce(jsonResponse({ data: { data: { foo: 'bar' } } }));
+
+    await loadVaultSecrets();
+
+    const init = getMockFetch().mock.calls[0]![1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('maps a hung KV read to a clear boot error after VAULT_TIMEOUT_MS', async () => {
+    process.env.VAULT_ADDR = 'http://vault:8200';
+    process.env.VAULT_AUTH_METHOD = 'token';
+    process.env.VAULT_TOKEN = 'tok';
+    process.env.VAULT_TIMEOUT_MS = '20';
+    process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+      { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+    ]);
+
+    // Never resolves on its own; rejects only when the timeout signal aborts.
+    getMockFetch().mockImplementation((_url, init) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = (init as RequestInit).signal!;
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      }),
+    );
+
+    await expect(loadVaultSecrets()).rejects.toThrow(/KV read for secret\/data\/x timed out after 20ms/);
+  });
+
+  it('maps a hung kubernetes login to a clear boot error after VAULT_TIMEOUT_MS', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'vault-test-'));
+    const jwtPath = join(tmpDir, 'token');
+    writeFileSync(jwtPath, 'jwt');
+
+    try {
+      process.env.VAULT_ADDR = 'http://vault:8200';
+      process.env.VAULT_AUTH_METHOD = 'k8s';
+      process.env.VAULT_K8S_ROLE = 'app-api';
+      process.env.VAULT_K8S_JWT_PATH = jwtPath;
+      process.env.VAULT_TIMEOUT_MS = '20';
+      process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+        { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+      ]);
+
+      getMockFetch().mockImplementation((_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = (init as RequestInit).signal!;
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        }),
+      );
+
+      await expect(loadVaultSecrets()).rejects.toThrow(/kubernetes login timed out after 20ms/);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws on a non-numeric VAULT_TIMEOUT_MS', async () => {
+    process.env.VAULT_ADDR = 'http://vault:8200';
+    process.env.VAULT_AUTH_METHOD = 'token';
+    process.env.VAULT_TOKEN = 'tok';
+    process.env.VAULT_TIMEOUT_MS = 'soon';
+    process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+      { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+    ]);
+
+    await expect(loadVaultSecrets()).rejects.toThrow(/VAULT_TIMEOUT_MS must be a positive number/);
     expect(getMockFetch()).not.toHaveBeenCalled();
   });
 });

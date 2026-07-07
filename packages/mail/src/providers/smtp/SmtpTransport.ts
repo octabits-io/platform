@@ -58,15 +58,18 @@ export function createSmtpTransport(config: SmtpTransportCreateConfig): SmtpTran
           ? { name: message.from.name, address: message.from.address }
           : message.from.address,
         to: message.to,
+        bcc: message.bcc,
         replyTo: message.replyTo
           ? message.replyTo.name
             ? { name: message.replyTo.name, address: message.replyTo.address }
             : message.replyTo.address
           : undefined,
         // Set the SMTP envelope sender (MAIL FROM / Return-Path) without changing
-        // the visible From. Only when a tagged bounce address is supplied.
+        // the visible From. Only when a tagged bounce address is supplied. The
+        // envelope recipient list must include BCC addresses — they receive the
+        // message via RCPT TO even though they never appear in the headers.
         envelope: message.returnPath
-          ? { from: message.returnPath.address, to: message.to }
+          ? { from: message.returnPath.address, to: [...message.to, ...(message.bcc ?? [])] }
           : undefined,
         subject: message.subject,
         text: message.text,

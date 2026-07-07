@@ -21,6 +21,7 @@ describe('createLoggerTransport', () => {
     const result = await transport.send({
       from: { address: 'noreply@tenant.com', name: 'Tenant' },
       to: ['guest@example.com', 'other@example.com'],
+      bcc: ['notify@tenant.com'],
       replyTo: { address: 'reply@tenant.com', name: 'Reply' },
       returnPath: { address: 'bounce+abc@platform.com' },
       subject: 'Hello',
@@ -36,6 +37,7 @@ describe('createLoggerTransport', () => {
     expect(message).toBe('Mail sent (logger transport)');
     expect(attrs.from).toBe('Tenant <noreply@tenant.com>');
     expect(attrs.to).toBe('guest@example.com, other@example.com');
+    expect(attrs.bcc).toBe('notify@tenant.com');
     expect(attrs.replyTo).toBe('Reply <reply@tenant.com>');
     expect(attrs.returnPath).toBe('bounce+abc@platform.com');
     expect(attrs.subject).toBe('Hello');
@@ -54,6 +56,7 @@ describe('createLoggerTransport', () => {
 
     const [, attrs] = logger.info.mock.calls[0] as [string, Record<string, unknown>];
     expect(attrs.from).toBe('noreply@tenant.com');
+    expect(attrs.bcc).toBeUndefined();
     expect(attrs.replyTo).toBeUndefined();
     expect(attrs.body).toBe('<p>only html</p>');
   });

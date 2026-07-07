@@ -7,9 +7,9 @@
 // protocol client, not as an AWS service binding.
 import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client, type ObjectCannedACL } from '@aws-sdk/client-s3';
 import type { ObjectStorageService, ObjectStorageUrlProvider } from '../../base/interfaces';
-import type { ListObjectsResponse } from '../../base/types';
+import type { ListObjectsResponse, StorageObject, StorageObjectWithHead } from '../../base/types';
 import type { ObjectStorageError } from '../../base/errors';
-import { toOctError, isAbortError } from '@octabits-io/foundation/result';
+import { toOctError, isAbortError, type Result } from '@octabits-io/foundation/result';
 import type { Logger } from '@octabits-io/foundation/logger';
 import { withRetry } from '../../internal/retry';
 
@@ -28,6 +28,23 @@ const createObjectKeyBuilder = (namespacePrefix: NamespacePrefixFn = defaultName
   const objectKey = (namespace: string | undefined, key: string) => `${prefixFor(namespace)}${key}`;
   return { prefixFor, objectKey };
 };
+
+/**
+ * Defense-in-depth key check. Object keys are concatenated onto the namespace
+ * prefix, so a key containing `..` path segments or starting with `/` could
+ * escape its namespace once a CDN or browser normalizes the resulting URL
+ * (e.g. `ns-a/../ns-b/secret` → `ns-b/secret`). Such keys are rejected before
+ * any S3 call.
+ */
+const isUnsafeObjectKey = (key: string): boolean => {
+  if (!key || key.startsWith('/')) return true;
+  return key.split('/').some((segment) => segment === '..');
+};
+
+const invalidKeyError = (operation: string, key: string): ObjectStorageError => ({
+  key: 'invalid_key',
+  message: `Invalid object key during '${operation}': keys must be non-empty, must not start with '/', and must not contain '..' path segments (got '${key}')`,
+});
 
 export interface AWSObjectStorageUrlProviderConfig {
   readonly publicEndpoint: string;
@@ -85,7 +102,7 @@ const mapAWSErrorToRyError = (error: unknown, operation: string, context?: Recor
     switch (error.name) {
       case 'NoSuchBucket':
         return {
-          key: 'not_found',
+          key: 'not_found_bucket',
           message: `Bucket not found during '${operation}'${contextStr}: ${error.message}`
         };
       case 'NoSuchKey':
@@ -208,7 +225,16 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
   const { prefixFor, objectKey } = createObjectKeyBuilder(config.namespacePrefix);
   const nsContext = (namespace: string | undefined) => namespace ?? '(root)';
 
-  const headObject = async (namespace: string | undefined, params: { key: string }) => {
+  interface HeadObjectValue {
+    readonly contentType: string | undefined;
+    readonly contentLength: number | undefined;
+    readonly metadata: Record<string, string> | undefined;
+  }
+
+  const headObject = async (
+    namespace: string | undefined,
+    params: { key: string }
+  ): Promise<Result<HeadObjectValue, ObjectStorageError>> => {
     try {
       const result = await withRetry(
         () => client.send(new HeadObjectCommand({
@@ -220,9 +246,12 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
         { s3Bucket: config.bucket, namespace: nsContext(namespace), key: params.key }
       );
       return {
-        contentType: result.ContentType!,
-        contentLength: result.ContentLength!,
-        metadata: result.Metadata!,
+        ok: true,
+        value: {
+          contentType: result.ContentType,
+          contentLength: result.ContentLength,
+          metadata: result.Metadata,
+        },
       };
     } catch (error) {
       const ryError = mapAWSErrorToRyError(error, 'headObject', { s3Bucket: config.bucket, namespace: nsContext(namespace), key: params.key });
@@ -232,16 +261,20 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
     }
   };
 
-  const listObjects: ObjectStorageService['listObjects'] = async <T extends boolean>({ namespace, prefix, includeHead }: {
+  const listObjects: ObjectStorageService['listObjects'] = async <T extends boolean>({ namespace, prefix, includeHead, continuationToken, maxKeys }: {
     namespace?: string;
     prefix?: string;
     includeHead: T;
+    continuationToken?: string;
+    maxKeys?: number;
   }) => {
     try {
       const s3Prefix = objectKey(namespace, prefix || '');
       const listCommand = new ListObjectsV2Command({
         Bucket: config.bucket,
         Prefix: s3Prefix,
+        ...(continuationToken !== undefined ? { ContinuationToken: continuationToken } : {}),
+        ...(maxKeys !== undefined ? { MaxKeys: maxKeys } : {}),
       });
 
       const data = await withRetry(
@@ -251,58 +284,57 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
         { s3Bucket: config.bucket, namespace: nsContext(namespace), prefix: prefix || 'all' }
       );
 
+      // The token for the NEXT page is NextContinuationToken; ContinuationToken
+      // merely echoes the request. Undefined when this is the last page.
+      const nextContinuationToken = data.NextContinuationToken;
+
       // Strip the namespace prefix from returned keys so they match what callers uploaded
       const prefixToStrip = prefixFor(namespace);
-      const objects = data.Contents?.map((o) => ({
+      const objects: StorageObject[] = data.Contents?.map((o) => ({
         key: o.Key!.startsWith(prefixToStrip) ? o.Key!.slice(prefixToStrip.length) : o.Key!,
         size: o.Size!,
       })) || [];
 
       if (includeHead) {
-        try {
-          const augmentedObjects = await Promise.all(
-            objects.map(async (obj) => {
-              try {
-                const head = await headObject(namespace, { key: obj.key });
-                return {
-                  ...obj,
-                  metadata: head.metadata,
-                  contentType: head.contentType,
-                };
-              } catch (error) {
-                // Log error but continue with partial data
-                logger.warn('Failed to get head for object', { key: obj.key, s3Bucket: config.bucket, namespace: nsContext(namespace), error: error instanceof Error ? error.message : String(error) });
-                return {
-                  ...obj,
-                  metadata: {},
-                  contentType: 'application/octet-stream', // fallback
-                };
-              }
-            })
-          );
-          return {
-            ok: true,
-            value: {
-              continuationToken: data.ContinuationToken,
-              objects: augmentedObjects as unknown,
-            } as ListObjectsResponse<T>,
-          };
-        } catch (error) {
-          const ryError = mapAWSErrorToRyError(error, 'listObjects.includeHead', {
-            s3Bucket: config.bucket,
-            namespace: nsContext(namespace),
-            prefix: prefix || 'all'
-          });
-          return { ok: false, error: ryError };
-        }
+        const augmentedObjects: StorageObjectWithHead[] = await Promise.all(
+          objects.map(async (obj) => {
+            const head = await headObject(namespace, { key: obj.key });
+            if (!head.ok) {
+              // Log error but continue with the documented fallbacks
+              logger.warn('Failed to get head for object', { key: obj.key, s3Bucket: config.bucket, namespace: nsContext(namespace), error: head.error.message });
+              return {
+                ...obj,
+                metadata: {},
+                contentType: 'application/octet-stream', // fallback
+              };
+            }
+            return {
+              key: obj.key,
+              size: head.value.contentLength ?? obj.size,
+              metadata: head.value.metadata ?? {},
+              contentType: head.value.contentType ?? 'application/octet-stream',
+            };
+          })
+        );
+        return {
+          ok: true,
+          value: {
+            continuationToken: nextContinuationToken,
+            objects: augmentedObjects,
+          } as ListObjectsResponse<T>,
+        };
       }
 
+      // TS cannot correlate the runtime `includeHead` check with the
+      // conditional return type, so a fully-typed ListObjectsResponse<false>
+      // is built first and only then converted.
+      const response: ListObjectsResponse<false> = {
+        continuationToken: nextContinuationToken,
+        objects,
+      };
       return {
         ok: true,
-        value: {
-          continuationToken: data.ContinuationToken,
-          objects: objects as unknown,
-        } as ListObjectsResponse<T>,
+        value: response as unknown as ListObjectsResponse<T>,
       };
     } catch (error) {
       const ryError = mapAWSErrorToRyError(error, 'listObjects', {
@@ -320,6 +352,15 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
     metadata?: { readonly [key: string]: string };
     body: Uint8Array | ReadableStream<Uint8Array>;
   }) => {
+    if (isUnsafeObjectKey(key)) {
+      return { ok: false as const, error: invalidKeyError('uploadObject', key) };
+    }
+
+    // Same content-type convention as the Postgres provider: an explicit
+    // `content-type`/`contentType` metadata entry becomes the object's real
+    // Content-Type (served on GET), falling back to application/octet-stream.
+    const contentType = metadata?.['content-type'] || metadata?.['contentType'] || 'application/octet-stream';
+
     try {
       await withRetry(
         () => client.send(new PutObjectCommand({
@@ -327,6 +368,7 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
           Key: objectKey(namespace, key),
           Body: body,
           Metadata: metadata,
+          ContentType: contentType,
           ...(config.defaultACL ? { ACL: config.defaultACL } : {}),
         })),
         'uploadObject',
@@ -345,6 +387,9 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
   };
 
   const deleteObject: ObjectStorageService['deleteObject'] = async ({ namespace, key }: { namespace?: string; key: string }) => {
+    if (isUnsafeObjectKey(key)) {
+      return { ok: false as const, error: invalidKeyError('deleteObject', key) };
+    }
     try {
       await withRetry(
         () => client.send(new DeleteObjectCommand({
@@ -373,7 +418,19 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
   };
 
   const deleteObjectsByPrefix: ObjectStorageService['deleteObjectsByPrefix'] = async ({ namespace, prefix }: { namespace?: string; prefix?: string }) => {
-    const s3Prefix = objectKey(namespace, prefix || '');
+    // Safety: without a prefix this would delete the entire namespace (or the
+    // whole bucket when no namespace is set). Require an explicit prefix.
+    if (!prefix) {
+      return {
+        ok: false as const,
+        error: {
+          key: 'invalid_prefix' as const,
+          message: "deleteObjectsByPrefix requires a non-empty 'prefix' — a missing prefix would delete every object in the namespace/bucket",
+        },
+      };
+    }
+
+    const s3Prefix = objectKey(namespace, prefix);
     let continuationToken: string | undefined;
     let totalDeleted = 0;
 
@@ -427,6 +484,9 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
   };
 
   const getObjectData: ObjectStorageService['getObjectData'] = async ({ namespace, key }: { namespace?: string; key: string }) => {
+    if (isUnsafeObjectKey(key)) {
+      return { ok: false as const, error: invalidKeyError('getObjectData', key) };
+    }
     try {
       const result = await withRetry(
         () => client.send(new GetObjectCommand({

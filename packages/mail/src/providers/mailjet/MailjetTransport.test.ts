@@ -15,6 +15,7 @@ vi.mock('node-mailjet', () => ({
 }));
 
 import { createMailjetTransport } from './MailjetTransport';
+import { createMailjetClient, DEFAULT_MAILJET_TIMEOUT_MS } from './mailjet-client';
 
 const logger = {
   debug: vi.fn(),
@@ -40,6 +41,7 @@ describe('createMailjetTransport', () => {
     const result = await transport.send({
       from: { address: 'noreply@tenant.com', name: 'Tenant' },
       to: ['guest@example.com', 'other@example.com'],
+      bcc: ['notify@tenant.com'],
       replyTo: { address: 'reply@tenant.com', name: 'Reply' },
       subject: 'Hello',
       text: 'plain',
@@ -56,6 +58,7 @@ describe('createMailjetTransport', () => {
     const m = payload.Messages[0];
     expect(m.From).toEqual({ Email: 'noreply@tenant.com', Name: 'Tenant' });
     expect(m.To).toEqual([{ Email: 'guest@example.com' }, { Email: 'other@example.com' }]);
+    expect(m.Bcc).toEqual([{ Email: 'notify@tenant.com' }]);
     expect(m.ReplyTo).toEqual({ Email: 'reply@tenant.com', Name: 'Reply' });
     expect(m.Subject).toBe('Hello');
     expect(m.TextPart).toBe('plain');
@@ -80,6 +83,7 @@ describe('createMailjetTransport', () => {
 
     const m = (request.mock.calls[0]![0] as { Messages: any[] }).Messages[0];
     expect(m.ReplyTo).toBeUndefined();
+    expect(m.Bcc).toBeUndefined();
     expect(m.Attachments[0].ContentType).toBe('application/octet-stream');
   });
 
@@ -108,5 +112,17 @@ describe('createMailjetTransport', () => {
       expect(result.error.message).toContain('API key authentication failure');
     }
     expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('connects the client with a default request timeout (overridable via timeoutMs)', () => {
+    createMailjetClient(mailjet);
+    expect(apiConnect).toHaveBeenLastCalledWith('key', 'secret', {
+      options: { timeout: DEFAULT_MAILJET_TIMEOUT_MS },
+    });
+
+    createMailjetClient({ ...mailjet, timeoutMs: 5_000 });
+    expect(apiConnect).toHaveBeenLastCalledWith('key', 'secret', {
+      options: { timeout: 5_000 },
+    });
   });
 });

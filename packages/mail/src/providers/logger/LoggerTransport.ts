@@ -51,6 +51,7 @@ export function createLoggerTransport({ logger }: LoggerTransportDeps): LoggerTr
         ? `${message.from.name} <${message.from.address}>`
         : message.from.address,
       to: message.to.join(', '),
+      bcc: message.bcc?.join(', '),
       replyTo: message.replyTo
         ? message.replyTo.name
           ? `${message.replyTo.name} <${message.replyTo.address}>`

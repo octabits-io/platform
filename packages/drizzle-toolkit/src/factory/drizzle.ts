@@ -6,7 +6,18 @@ import type { Logger } from 'drizzle-orm';
 // returns int8 (incl. COUNT(*)) as string to guard against precision loss above
 // 2^53. App schemas that assume ids fit in a double want int8 parsed as number
 // everywhere. NUMERIC (OID 1700) intentionally stays string.
-types.setTypeParser(types.builtins.INT8, Number);
+//
+// Applied lazily (and idempotently) inside the factory functions rather than at
+// module load: importing this module must not mutate pg's global parser
+// registry as a side effect, and under pg version skew (two pg copies in the
+// tree) a load-time call could silently register on the wrong copy — the one
+// the consumer's Pool never uses.
+let int8ParserConfigured = false;
+function ensureInt8Parser(): void {
+  if (int8ParserConfigured) return;
+  types.setTypeParser(types.builtins.INT8, Number);
+  int8ParserConfigured = true;
+}
 
 /** Any Drizzle schema module — a record of table/relation definitions. */
 export type AnySchema = Record<string, unknown>;
@@ -93,6 +104,7 @@ export function createDrizzle<TSchema extends AnySchema>(
   schema: TSchema,
   opts: CreateDrizzleOptions,
 ): AppDatabase<TSchema> {
+  ensureInt8Parser();
   const d = drizzle({
     client: opts.pool,
     logger: opts.logger,
@@ -111,6 +123,7 @@ export function createDrizzleFromClient<TSchema extends AnySchema>(
   schema: TSchema,
   opts: CreateDrizzleFromClientOptions,
 ): AppDatabase<TSchema> {
+  ensureInt8Parser();
   const d = drizzle({
     client: opts.client,
     logger: opts.logger,

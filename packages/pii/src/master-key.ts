@@ -8,16 +8,35 @@ export interface MasterKeyError extends OctError {
 }
 
 /**
+ * The plaintext cannot be safely round-tripped by this provider version (the
+ * env-var provider stores plaintext through a UTF-8 text seam, so raw binary
+ * that is not valid UTF-8 would come back corrupted). Encode binary payloads
+ * (e.g. base64/hex) before encrypting.
+ */
+export interface MasterKeyUnsupportedPlaintextError extends OctError {
+  key: 'master_key_unsupported_plaintext';
+  message: string;
+}
+
+export type MasterKeyProviderError = MasterKeyError | MasterKeyUnsupportedPlaintextError;
+
+/**
  * Provider for master key operations (encrypting/decrypting data keys).
  *
  * The master key is used to encrypt data keys at rest.
  * This abstraction allows swapping implementations (env var, KMS, Vault, HSM).
+ *
+ * Limitation: implementations may only support UTF-8-representable plaintext
+ * (the built-in env-var provider does — its wire format is text-based). Such
+ * implementations must fail loudly with `master_key_unsupported_plaintext`
+ * rather than silently corrupt binary input; callers should pass encoded
+ * (base64/hex) key material rather than raw random bytes.
  */
 export interface MasterKeyProvider {
   /** Encrypt data with master key (for storing data keys) */
-  encrypt(plaintext: Buffer): Promise<Result<Buffer, MasterKeyError>>;
+  encrypt(plaintext: Buffer): Promise<Result<Buffer, MasterKeyProviderError>>;
   /** Decrypt data with master key (for retrieving data keys) */
-  decrypt(ciphertext: Buffer): Promise<Result<Buffer, MasterKeyError>>;
+  decrypt(ciphertext: Buffer): Promise<Result<Buffer, MasterKeyProviderError>>;
 }
 
 const DEFAULT_MASTER_KEY_INFO = 'oct-master-key-v1';
@@ -55,15 +74,27 @@ export function createEnvVarMasterKeyProvider(masterKeySource: string, info = DE
   const key = Buffer.from(derivedKey);
 
   return {
-    async encrypt(plaintext: Buffer): Promise<Result<Buffer, MasterKeyError>> {
-      const result = encryptSymmetric(plaintext.toString('utf8'), key);
+    async encrypt(plaintext: Buffer): Promise<Result<Buffer, MasterKeyProviderError>> {
+      // This provider round-trips plaintext through a UTF-8 string. Bytes that
+      // are not valid UTF-8 would be silently replaced with U+FFFD and come
+      // back corrupted with ok:true — fail loudly instead. The happy-path
+      // encoding is unchanged so existing stored data keeps decrypting.
+      const text = plaintext.toString('utf8');
+      if (!Buffer.from(text, 'utf8').equals(plaintext)) {
+        return err({
+          key: 'master_key_unsupported_plaintext' as const,
+          message:
+            'Plaintext is not valid UTF-8; this provider version only supports UTF-8-representable payloads. Encode binary key material (e.g. base64/hex) before encrypting.',
+        });
+      }
+      const result = encryptSymmetric(text, key);
       if (!result.ok) {
         return err({ key: 'master_key_error' as const, message: `Failed to encrypt with master key: ${result.error.message}` });
       }
       return ok(result.value);
     },
 
-    async decrypt(ciphertext: Buffer): Promise<Result<Buffer, MasterKeyError>> {
+    async decrypt(ciphertext: Buffer): Promise<Result<Buffer, MasterKeyProviderError>> {
       const result = decryptSymmetric(ciphertext, key);
       if (!result.ok) {
         return err({ key: 'master_key_error' as const, message: `Failed to decrypt with master key: ${result.error.message}` });

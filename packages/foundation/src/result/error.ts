@@ -15,13 +15,17 @@ export interface OctExceptionError extends OctErrorWithKey<'exception'> {
   cause?: unknown;
 }
 
+/** `TypeError` → `type_error`, matching the snake_case key convention. */
+const errorNameToKey = (name: string): string =>
+  name.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+
 export const toOctError = (error: unknown): OctError => {
   if (isOctError(error)) {
     return error;
   } else if (typeof error === 'string') {
     return {message: error, key: 'general'};
   } else if (error instanceof Error) {
-    return {message: error.message, key: error.name ?? 'general'};
+    return {message: error.message, key: errorNameToKey(error.name) || 'general'};
   } else {
     return {message: 'General error', key: 'general'};
   }

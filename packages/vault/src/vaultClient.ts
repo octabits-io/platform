@@ -11,23 +11,40 @@
 
 import { readFile } from 'node:fs/promises';
 
+/** Default per-request timeout for Vault HTTP calls (login and KV reads). */
+export const DEFAULT_VAULT_TIMEOUT_MS = 10_000;
+
 export type VaultAuthOptions =
   | { method: 'token'; token: string }
-  | { method: 'k8s'; addr: string; namespace?: string; role: string; jwtPath: string };
+  | {
+      method: 'k8s';
+      addr: string;
+      namespace?: string;
+      role: string;
+      jwtPath: string;
+      /** Kubernetes auth mount path (`/v1/auth/<mount>/login`). @default 'kubernetes' */
+      mount?: string;
+      /** Request timeout in milliseconds. @default 10_000 */
+      timeoutMs?: number;
+    };
 
 /**
  * Authenticate against Vault and return a client token.
  *
- * For `method: 'token'` this is a no-op — the static token is returned as-is.
+ * For `method: 'token'` this is a no-op — the static token is trimmed and
+ * returned as-is.
  * For `method: 'k8s'` the Kubernetes service-account JWT is read from
- * `jwtPath` and POSTed to `/v1/auth/kubernetes/login`.
+ * `jwtPath` and POSTed to `/v1/auth/<mount>/login` (mount defaults to
+ * `kubernetes`).
  */
 export async function authenticate(opts: VaultAuthOptions): Promise<string> {
   if (opts.method === 'token') {
-    if (!opts.token) {
+    // Trim like the k8s JWT — tokens from files/env often carry a trailing newline.
+    const token = opts.token.trim();
+    if (!token) {
       throw new Error('Vault token auth selected but VAULT_TOKEN is empty');
     }
-    return opts.token;
+    return token;
   }
 
   let jwt: string;
@@ -39,7 +56,9 @@ export async function authenticate(opts: VaultAuthOptions): Promise<string> {
   }
   const trimmedJwt = jwt.trim();
 
-  const url = `${stripTrailingSlash(opts.addr)}/v1/auth/kubernetes/login`;
+  const mount = opts.mount || 'kubernetes';
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_VAULT_TIMEOUT_MS;
+  const url = `${stripTrailingSlash(opts.addr)}/v1/auth/${mount}/login`;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (opts.namespace) headers['X-Vault-Namespace'] = opts.namespace;
 
@@ -47,7 +66,13 @@ export async function authenticate(opts: VaultAuthOptions): Promise<string> {
     method: 'POST',
     headers,
     body: JSON.stringify({ jwt: trimmedJwt, role: opts.role }),
+    signal: AbortSignal.timeout(timeoutMs),
   }).catch((cause: unknown) => {
+    if (isTimeoutError(cause)) {
+      throw new Error(
+        `Vault kubernetes login timed out after ${timeoutMs}ms (raise VAULT_TIMEOUT_MS if Vault is slow to respond)`,
+      );
+    }
     const reason = cause instanceof Error ? cause.message : String(cause);
     throw new Error(`Vault kubernetes login request failed: ${reason}`);
   });
@@ -75,20 +100,34 @@ export interface ReadKvV2Options {
    * this client passes the path through verbatim.
    */
   path: string;
+  /** Request timeout in milliseconds. @default 10_000 */
+  timeoutMs?: number;
 }
 
 /**
  * Read a KV-v2 secret and return its inner data map.
  *
  * KV-v2 wraps the user-set values under `data.data`; this helper unwraps that
- * one level so callers see a flat `Record<string, string>`.
+ * one level so callers see a flat `Record<string, string>`. Scalar number and
+ * boolean values are coerced via `String()`; objects, arrays, and `null`
+ * still fail loud — they have no sane env-var representation.
  */
 export async function readKvV2(options: ReadKvV2Options): Promise<Record<string, string>> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_VAULT_TIMEOUT_MS;
   const url = `${stripTrailingSlash(options.addr)}/v1/${stripLeadingSlash(options.path)}`;
   const headers: Record<string, string> = { 'X-Vault-Token': options.token };
   if (options.namespace) headers['X-Vault-Namespace'] = options.namespace;
 
-  const response = await fetch(url, { method: 'GET', headers }).catch((cause: unknown) => {
+  const response = await fetch(url, {
+    method: 'GET',
+    headers,
+    signal: AbortSignal.timeout(timeoutMs),
+  }).catch((cause: unknown) => {
+    if (isTimeoutError(cause)) {
+      throw new Error(
+        `Vault KV read for ${options.path} timed out after ${timeoutMs}ms (raise VAULT_TIMEOUT_MS if Vault is slow to respond)`,
+      );
+    }
     const reason = cause instanceof Error ? cause.message : String(cause);
     throw new Error(`Vault KV read for ${options.path} failed: ${reason}`);
   });
@@ -108,12 +147,24 @@ export async function readKvV2(options: ReadKvV2Options): Promise<Record<string,
 
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(data)) {
-    if (typeof value !== 'string') {
-      throw new Error(`Vault KV value for ${options.path}#${key} is not a string`);
+    if (typeof value === 'string') {
+      result[key] = value;
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      // Vault KV JSON may carry numeric/boolean scalars — env vars are
+      // strings, so coerce deterministically.
+      result[key] = String(value);
+    } else {
+      throw new Error(
+        `Vault KV value for ${options.path}#${key} is not a string/number/boolean scalar`,
+      );
     }
-    result[key] = value;
   }
   return result;
+}
+
+/** `AbortSignal.timeout` rejects with 'TimeoutError'; plain aborts with 'AbortError'. */
+function isTimeoutError(cause: unknown): boolean {
+  return cause instanceof Error && (cause.name === 'TimeoutError' || cause.name === 'AbortError');
 }
 
 function stripTrailingSlash(value: string): string {
