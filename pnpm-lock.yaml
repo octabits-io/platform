@@ -247,9 +247,6 @@ importers:
       '@octabits-io/foundation':
         specifier: workspace:^
         version: link:../foundation
-      drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(@types/pg@8.20.0)(bun-types@1.3.14)(pg@8.22.0)
       vitest:
         specifier: ^4.1.9
         version: 4.1.9(@types/node@26.1.0)(vite@7.3.1(@types/node@26.1.0)(jiti@2.6.1)(yaml@2.9.0))
@@ -290,9 +287,12 @@ importers:
       '@types/bun':
         specifier: ^1.3.14
         version: 1.3.14
-      drizzle-orm:
-        specifier: ^0.45.2
-        version: 0.45.2(@types/pg@8.20.0)(bun-types@1.3.14)(pg@8.22.0)
+      '@types/pg':
+        specifier: ^8.20.0
+        version: 8.20.0
+      pg:
+        specifier: ^8.22.0
+        version: 8.22.0
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.16)(typescript@6.0.3)(yaml@2.9.0)

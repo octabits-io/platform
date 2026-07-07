@@ -8,6 +8,7 @@ export default defineConfig({
     "scope/index": "src/scope/index.ts",
     "idempotency/index": "src/idempotency/index.ts",
     "crud/index": "src/crud/index.ts",
+    "scoped-key-store/index": "src/scoped-key-store/index.ts",
     "config/index": "src/config/index.ts",
     "rls/index": "src/rls/index.ts",
   },

@@ -134,6 +134,27 @@ consistent keyed errors and optional `created_by`/`updated_by` audit stamping:
   whatever column partitions your app (`{ column: 'tenantId', value }`,
   `{ column: 'workspaceId', value }`, …).
 
+### `@octabits-io/drizzle-toolkit/scoped-key-store`
+
+The Drizzle adapter behind [`@octabits-io/pii`](../pii)'s structural
+`ScopedKeyStore` seam. pii owns the encryption logic but knows nothing about
+SQL — it depends on a four-method store (`insert` / `find` / `exists` /
+`destroy`), scope-bound at construction — so it carries **no `drizzle-orm`
+peer**. This module is the Postgres/Drizzle implementation of that seam (the ORM
+query logic lives here, where Drizzle is already a hard dep).
+
+- `createDrizzleScopedKeyStore({ db, table, scope })` — binds to one
+  `{ column, value }` scope over an encryption-key table (spread
+  `encryptionKeyColumns` from `./scope` + a **unique** scope column).
+  `insert` stamps the scope column and maps a lost unique race (SQLSTATE 23505,
+  walked through the driver/ORM `cause` chain) to `scoped_key_store_conflict`;
+  `find` selects the four key fields for the scope (or `null`); `exists` /
+  `destroy` are scoped by construction. `store.withDb(tx)` re-binds the same
+  table + scope to a transaction so generation writes join the caller's tx.
+- The row/error types are structural **duplicates** of pii's — no cross-package
+  import (the same decoupling `./config`'s `ConfigCipher` uses). Wire it with
+  `createScopedKeyService({ store, scope, masterKeyProvider, cache })`.
+
 ### `@octabits-io/drizzle-toolkit/config`
 
 Generic **config store** over any key/value table (spread

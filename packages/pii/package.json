@@ -43,18 +43,11 @@
   },
   "devDependencies": {
     "vitest": "^4.1.9",
-    "drizzle-orm": "^0.45.2",
     "@octabits-io/foundation": "workspace:^"
   },
   "peerDependencies": {
     "typescript": "^5 || ^6",
     "zod": "^4",
-    "drizzle-orm": "^0.45.2",
     "@octabits-io/foundation": ">=0.2.0 <1"
-  },
-  "peerDependenciesMeta": {
-    "drizzle-orm": {
-      "optional": true
-    }
   }
 }

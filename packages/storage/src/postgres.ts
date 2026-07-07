@@ -1,16 +1,16 @@
 // @octabits-io/storage/postgres — Postgres blob provider + HTTP serve handlers.
 //
-// Stores blobs in a self-creating `object_storage` table. Requires the optional
-// peer dependency `drizzle-orm`. The provider accepts any standard drizzle-orm
-// Postgres database (`StorageDrizzle` = `PgDatabase<any, any, any>`) — it is not
-// bound to any host application's augmented Drizzle instance.
+// Stores blobs in a self-creating `object_storage` table on raw `pg`. Requires
+// the optional peer dependency `pg` (install `@types/pg` as a dev dependency for
+// the `Pool` type). The provider accepts a `pg` `Pool` — it owns its table and
+// never touches a host-application schema. Migration-managed setups can apply
+// `objectStorageDdl()` and pass `autoCreateTable: false`.
 export {
   createPostgresObjectStorageService,
   createPostgresObjectStorageUrlProvider,
-  objectStorageTable,
+  objectStorageDdl,
 } from './providers/postgres/PostgresObjectStorageService';
 export type {
-  StorageDrizzle,
   TableInitializerOptions,
   PostgresObjectStorageService,
   PostgresObjectStorageConfig,

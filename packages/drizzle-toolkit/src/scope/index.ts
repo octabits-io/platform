@@ -112,7 +112,11 @@ export const baseScopeColumns = {
  *
  * The scope column **must be unique** (one active key row per scope):
  * `@octabits-io/pii`'s `createScopedKeyService` relies on that uniqueness to
- * resolve exactly one key row per scope.
+ * resolve exactly one key row per scope, and the lost-race →
+ * `scoped_key_store_conflict` signal in
+ * [`@octabits-io/drizzle-toolkit/scoped-key-store`](./scoped-key-store) — the
+ * Drizzle adapter behind pii's `ScopedKeyStore` seam — relies on the resulting
+ * unique-violation (SQLSTATE 23505).
  *
  * **Pairs with `@octabits-io/pii`**: the column shapes (Age recipient,
  * master-key-encrypted Age identity, blind-index HMAC key) are specific to that

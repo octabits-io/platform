@@ -18,7 +18,8 @@ namespace value.
 pnpm add @octabits-io/storage
 # plus the SDK for each vendor provider you actually use:
 pnpm add @aws-sdk/client-s3   # for @octabits-io/storage/s3
-pnpm add drizzle-orm          # for @octabits-io/storage/postgres
+pnpm add pg                   # for @octabits-io/storage/postgres
+pnpm add -D @types/pg         # Pool type for the Postgres provider
 ```
 
 `@octabits-io/foundation` (`Result`, `OctError`, `Logger`) is a runtime peer.
@@ -60,7 +61,7 @@ prefix would wipe the whole namespace (or bucket) and yields an
 | Factory | Import from | SDK peer | Notes |
 | --- | --- | --- | --- |
 | `createAWSObjectStorageService(config)` | `@octabits-io/storage/s3` | `@aws-sdk/client-s3` | `type: 's3'`. **S3-compatible**, not AWS-bound — explicit `endpoint` + `forcePathStyle` (production: Hetzner Object Storage, EU). Keys are namespace-prefixed (`<namespace>/<key>` by default, unprefixed when the namespace is omitted); customize the prefix with `namespacePrefix`. Transient failures are retried with backoff. |
-| `createPostgresObjectStorageService(config)` | `@octabits-io/storage/postgres` | `drizzle-orm` | `type: 'postgres'`. Stores blobs in a self-creating `object_storage` table. Accepts any standard drizzle-orm Postgres db (`StorageDrizzle = PgDatabase<any, any, any>`). |
+| `createPostgresObjectStorageService(config)` | `@octabits-io/storage/postgres` | `pg` | `type: 'postgres'`. Stores blobs in a self-creating `object_storage` table on raw `pg`. Accepts a `pg` `Pool`. Migration-managed setups apply `objectStorageDdl()` and pass `autoCreateTable: false`. |
 
 Each also ships a lighter URL-only provider factory
 (`createAWSObjectStorageUrlProvider` / `createPostgresObjectStorageUrlProvider`)
@@ -128,13 +129,13 @@ legacy.getPublicUrl({ namespace: 't1', key: 'a/b.jpg' });
 ### Postgres blob store (`@octabits-io/storage/postgres`)
 
 ```ts
-import { drizzle } from 'drizzle-orm/node-postgres';
+import { Pool } from 'pg'; // install `pg` and, as a dev dep, `@types/pg`
 import { createPostgresObjectStorageService } from '@octabits-io/storage/postgres';
 
-const db = drizzle(pool); // any standard drizzle-orm Postgres db
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const storage = createPostgresObjectStorageService({
-  drizzle: db, // typed as StorageDrizzle = PgDatabase<any, any, any>
+  pool, // a pg Pool
   // build the public URL your app serves blobs from (see serve handler below).
   // `namespace` is `string | undefined` — undefined = root namespace (stored as '').
   createPublicUrl: (namespace, key) =>
@@ -142,20 +143,48 @@ const storage = createPostgresObjectStorageService({
 });
 
 // The `object_storage` table is created on first use (CREATE TABLE IF NOT EXISTS);
-// a legacy `tenant_id` column is migrated to `namespace` automatically.
+// a legacy `tenant_id` column is migrated to `namespace` automatically, and the
+// (namespace, key) unique constraint that uploads upsert on is added.
 // NOTE: with this default (`autoCreateTable: true`) the connected role needs
 // DDL privileges — even a plain read can trigger the bootstrap. Pass
-// `autoCreateTable: false` when the table is managed by migrations, and
-// `advisoryLockId` to change the bootstrap's pg_advisory_xact_lock id
-// (default 123456789) if it collides with one of yours.
+// `autoCreateTable: false` when the table is managed by migrations (see
+// `objectStorageDdl()` below), and `advisoryLockId` to change the bootstrap's
+// pg_advisory_xact_lock id (default 123456789) if it collides with one of yours.
 await storage.uploadObject({ namespace: 't1', key: 'docs/f.pdf', body: bytes });
 
 const obj = await storage.getObjectData({ namespace: 't1', key: 'docs/f.pdf' });
 if (obj.ok) console.log(obj.value.contentType, obj.value.size);
+// obj.value.lastModified is an ISO 8601 string (e.g. '2026-01-02T03:04:05.000Z').
 
 // Single-tenant: omit the namespace (stored under the '' root namespace).
 await storage.uploadObject({ key: 'docs/f.pdf', body: bytes });
 ```
+
+#### Migration-managed schema (`objectStorageDdl()`)
+
+Prefer to own the schema in your migrations? Apply `objectStorageDdl()` once and
+pass `autoCreateTable: false` so the provider never issues DDL at runtime:
+
+```ts
+import { objectStorageDdl } from '@octabits-io/storage/postgres';
+
+await pool.query(objectStorageDdl()); // CREATE TABLE + indexes + unique constraint
+
+const storage = createPostgresObjectStorageService({
+  pool,
+  createPublicUrl,
+  autoCreateTable: false,
+});
+```
+
+`objectStorageDdl()` emits the `object_storage` table, both indexes, and the
+`object_storage_namespace_key_unique` constraint on `(namespace, key)`. That
+constraint is **required**: `uploadObject` is a single `INSERT … ON CONFLICT
+(namespace, key) DO UPDATE` upsert, so a table without it (e.g. a legacy table
+plus `autoCreateTable: false`) fails uploads with a pointed `internal_error`.
+The default bootstrap adds the constraint automatically; the legacy
+`tenant_id → namespace` rename runs only in that bootstrap, not in
+`objectStorageDdl()`.
 
 Serve stored blobs over HTTP with a framework-agnostic handler (ETag / 304 /
 `Cache-Control` included):

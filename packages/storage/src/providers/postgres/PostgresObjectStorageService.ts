@@ -2,55 +2,125 @@ import { type Result, toOctError } from '@octabits-io/foundation/result';
 import type { ObjectStorageService, ObjectStorageUrlProvider } from '../../base/interfaces';
 import type { ListObjectsResponse } from '../../base/types';
 import type { ObjectStorageError } from '../../base/errors';
-import { pgTable, text, jsonb, bigint, timestamp, index, customType, type PgDatabase } from 'drizzle-orm/pg-core';
-import { eq, and, like, sql } from 'drizzle-orm';
+import type { Pool, PoolClient } from 'pg';
 
 /**
- * Minimal structural database type for the Postgres blob provider.
+ * Postgres blob provider on raw `pg` (nominal `Pool` type, optional peer).
  *
- * The provider only ever uses the standard drizzle-orm query builder
- * (`select` / `insert` / `update` / `delete` / `execute` / `transaction`) and
- * references its own in-package `objectStorageTable` — it never touches a
- * host-application schema or the relational (`db.query.*`) API. Using
- * `PgDatabase<any, any, any>` keeps full query-builder type inference while
- * dropping any coupling to a specific app's augmented Drizzle instance —
- * schema-typed and wrapped host instances are assignable here.
+ * Stores blobs in a self-owned `object_storage` table. `namespace` is the
+ * optional logical partition from the ObjectStorageService contract; the root
+ * namespace is stored as `''` (empty string) so the `(namespace, key)` unique
+ * constraint holds. Modeled on `packages/flow/src/store-pg/store.ts` — `$n`
+ * params, snake_case rows, `Number()` for `bigint`-as-string, `iso()` for Date.
  */
-export type StorageDrizzle = PgDatabase<any, any, any>;
 
-// Custom bytea type for storing binary data
-const bytea = customType<{ data: Buffer; driverData: Buffer }>({
-  dataType() {
-    return 'bytea';
-  },
-  fromDriver(value: Buffer): Buffer {
-    return value;
-  },
-  toDriver(value: Buffer): Buffer {
-    return value;
-  },
-});
-
-// Schema definition for object storage. `namespace` is the optional logical
-// partition from the ObjectStorageService contract; the root namespace is
-// stored as '' (empty string) so the (namespace, key) unique constraint holds.
-export const objectStorageTable = pgTable('object_storage', {
-  id: bigint({ mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
-  namespace: text('namespace').notNull().default(''),
-  key: text('key').notNull(),
-  data: bytea('data').notNull(),
-  size: bigint('size', { mode: 'number' }).notNull(),
-  contentType: text('content_type').notNull().default('application/octet-stream'),
-  metadata: jsonb('metadata').$type<Record<string, string>>().notNull().default({}),
-  createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
-}, (table) => [
-  index('object_storage_namespace_key_idx').on(table.namespace, table.key),
-  index('object_storage_namespace_idx').on(table.namespace),
-]);
+/** `timestamptz` comes back from `pg` as a `Date`; normalize to ISO 8601 text. */
+const iso = (v: Date | string): string => (v instanceof Date ? v.toISOString() : v);
 
 /** Root-namespace sentinel used only inside the table — never exposed to callers. */
-const namespaceColumnValue = (namespace: string | undefined) => namespace ?? '';
+const namespaceColumnValue = (namespace: string | undefined): string => namespace ?? '';
+
+// --- schema (DDL) ----------------------------------------------------------
+
+/** `CREATE TABLE IF NOT EXISTS` for the blob table. */
+const CREATE_TABLE = `
+CREATE TABLE IF NOT EXISTS object_storage (
+  id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  namespace TEXT NOT NULL DEFAULT '',
+  key TEXT NOT NULL,
+  data BYTEA NOT NULL,
+  size BIGINT NOT NULL,
+  content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
+);`;
+
+/**
+ * Migrate tables created before the namespace rename (column was `tenant_id`);
+ * data is preserved, only identifiers change. Kept **private** — it runs only
+ * inside the lazy initializer, never in the migration-managed `objectStorageDdl()`.
+ */
+const RENAME_MIGRATION = `
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'object_storage' AND column_name = 'tenant_id'
+  ) THEN
+    ALTER TABLE object_storage RENAME COLUMN tenant_id TO namespace;
+    ALTER TABLE object_storage ALTER COLUMN namespace SET DEFAULT '';
+    ALTER INDEX IF EXISTS object_storage_tenant_id_key_idx RENAME TO object_storage_namespace_key_idx;
+    ALTER INDEX IF EXISTS object_storage_tenant_id_idx RENAME TO object_storage_namespace_idx;
+    IF EXISTS (
+      SELECT 1 FROM pg_constraint WHERE conname = 'object_storage_tenant_id_key_unique'
+    ) THEN
+      ALTER TABLE object_storage RENAME CONSTRAINT object_storage_tenant_id_key_unique TO object_storage_namespace_key_unique;
+    END IF;
+  END IF;
+END $$;`;
+
+/** Lookup index on `(namespace, key)`. */
+const INDEX_A = `
+CREATE INDEX IF NOT EXISTS object_storage_namespace_key_idx
+ON object_storage (namespace, key);`;
+
+/** Listing index on `(namespace)`. */
+const INDEX_B = `
+CREATE INDEX IF NOT EXISTS object_storage_namespace_idx
+ON object_storage (namespace);`;
+
+/**
+ * The `(namespace, key)` unique constraint that `uploadObject`'s upsert
+ * (`ON CONFLICT (namespace, key)`) depends on. Added idempotently.
+ */
+const UNIQUE_CONSTRAINT = `
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'object_storage_namespace_key_unique'
+  ) THEN
+    ALTER TABLE object_storage
+    ADD CONSTRAINT object_storage_namespace_key_unique
+    UNIQUE (namespace, key);
+  END IF;
+END $$;`;
+
+/** Statements the lazy initializer runs, in order (includes the legacy rename). */
+const INITIALIZER_STATEMENTS = [CREATE_TABLE, RENAME_MIGRATION, INDEX_A, INDEX_B, UNIQUE_CONSTRAINT];
+
+/**
+ * Full schema for the Postgres blob store, for migration-managed setups that
+ * disable the lazy bootstrap (`autoCreateTable: false`). Emits the
+ * `CREATE TABLE`, both indexes, and the `(namespace, key)` unique constraint —
+ * the last is **required** for `uploadObject`'s upsert. Excludes the private
+ * legacy `tenant_id → namespace` rename (initializer-only).
+ */
+export function objectStorageDdl(): string {
+  return [CREATE_TABLE, INDEX_A, INDEX_B, UNIQUE_CONSTRAINT].join('\n');
+}
+
+// --- row types -------------------------------------------------------------
+
+/** Raw `object_storage` row from a full-object read (`bigint`→string, `timestamptz`→Date). */
+type ObjectRow = {
+  data: Buffer;
+  size: string;
+  content_type: string;
+  metadata: Record<string, string> | null;
+  updated_at: Date;
+};
+
+/** Raw `object_storage` row from a list read. */
+type ListRow = {
+  key: string;
+  size: string;
+  content_type: string;
+  metadata: Record<string, string> | null;
+};
+
+// --- config ----------------------------------------------------------------
 
 /**
  * Options controlling the lazy `CREATE TABLE IF NOT EXISTS` bootstrap that
@@ -62,8 +132,8 @@ export interface TableInitializerOptions {
    *
    * When enabled, EVERY operation — including plain reads — may trigger DDL
    * on first use, so the connected role needs DDL privileges. Set to `false`
-   * when the `object_storage` table is managed by migrations; the provider
-   * then never issues DDL at runtime.
+   * when the `object_storage` table is managed by migrations (apply
+   * `objectStorageDdl()`); the provider then never issues DDL at runtime.
    */
   readonly autoCreateTable?: boolean;
   /**
@@ -74,31 +144,50 @@ export interface TableInitializerOptions {
   readonly advisoryLockId?: number;
 }
 
-// Configuration
+// Configuration — a raw `pg` Pool for both the full service and the URL provider.
 export interface PostgresObjectStorageConfig extends TableInitializerOptions {
-  readonly drizzle: StorageDrizzle;
+  readonly pool: Pool;
   createPublicUrl: (namespace: string | undefined, key: string) => string;
 }
 
-// URL provider config
+// URL provider config — same `{ pool }` shape as the full service config.
 export interface PostgresObjectStorageUrlProviderConfig extends TableInitializerOptions {
   createPublicUrl: (namespace: string | undefined, key: string) => string;
-  db: StorageDrizzle;
+  readonly pool: Pool;
 }
 
 export interface PostgresObjectStorageUrlProvider extends ObjectStorageUrlProvider {
   readonly type: 'postgres';
-  /** Available when drizzle was provided to the factory */
+  /** Reads the stored blob (available on the URL provider too). */
   readonly getObjectData?: ObjectStorageService['getObjectData'];
 }
 
-/**
- * Creates table initialization helper for a drizzle instance.
- * Extracted to be reusable by both URL provider and full service.
- */
+// --- transaction + initializer helpers -------------------------------------
+
+/** Run `fn` inside a BEGIN/COMMIT transaction on a dedicated client (copied from flow). */
+async function withTx<T>(pool: Pool, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
 const DEFAULT_ADVISORY_LOCK_ID = 123456789;
 
-const createTableInitializer = (db: StorageDrizzle, options?: TableInitializerOptions) => {
+/**
+ * Builds a memoized lazy table initializer. The first call runs the full DDL
+ * bootstrap (advisory-locked, in one transaction); subsequent calls are no-ops.
+ * Skipped entirely when `autoCreateTable: false`.
+ */
+const createTableInitializer = (pool: Pool, options?: TableInitializerOptions) => {
   const autoCreateTable = options?.autoCreateTable ?? true;
   const lockId = options?.advisoryLockId ?? DEFAULT_ADVISORY_LOCK_ID;
   let initialized = false;
@@ -109,68 +198,11 @@ const createTableInitializer = (db: StorageDrizzle, options?: TableInitializerOp
     }
 
     try {
-      await db.transaction(async (tx) => {
-        await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockId})`);
-
-        await tx.execute(sql`
-          CREATE TABLE IF NOT EXISTS object_storage (
-            id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-            namespace TEXT NOT NULL DEFAULT '',
-            key TEXT NOT NULL,
-            data BYTEA NOT NULL,
-            size BIGINT NOT NULL,
-            content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
-            metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() NOT NULL
-          )
-        `);
-
-        // Migrate tables created before the namespace rename (column was
-        // tenant_id); data is preserved, only identifiers change.
-        await tx.execute(sql`
-          DO $$
-          BEGIN
-            IF EXISTS (
-              SELECT 1 FROM information_schema.columns
-              WHERE table_name = 'object_storage' AND column_name = 'tenant_id'
-            ) THEN
-              ALTER TABLE object_storage RENAME COLUMN tenant_id TO namespace;
-              ALTER TABLE object_storage ALTER COLUMN namespace SET DEFAULT '';
-              ALTER INDEX IF EXISTS object_storage_tenant_id_key_idx RENAME TO object_storage_namespace_key_idx;
-              ALTER INDEX IF EXISTS object_storage_tenant_id_idx RENAME TO object_storage_namespace_idx;
-              IF EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = 'object_storage_tenant_id_key_unique'
-              ) THEN
-                ALTER TABLE object_storage RENAME CONSTRAINT object_storage_tenant_id_key_unique TO object_storage_namespace_key_unique;
-              END IF;
-            END IF;
-          END $$;
-        `);
-
-        await tx.execute(sql`
-          CREATE INDEX IF NOT EXISTS object_storage_namespace_key_idx
-          ON object_storage (namespace, key)
-        `);
-
-        await tx.execute(sql`
-          CREATE INDEX IF NOT EXISTS object_storage_namespace_idx
-          ON object_storage (namespace)
-        `);
-
-        await tx.execute(sql`
-          DO $$
-          BEGIN
-            IF NOT EXISTS (
-              SELECT 1 FROM pg_constraint
-              WHERE conname = 'object_storage_namespace_key_unique'
-            ) THEN
-              ALTER TABLE object_storage
-              ADD CONSTRAINT object_storage_namespace_key_unique
-              UNIQUE (namespace, key);
-            END IF;
-          END $$;
-        `);
+      await withTx(pool, async (client) => {
+        await client.query('SELECT pg_advisory_xact_lock($1)', [lockId]);
+        for (const stmt of INITIALIZER_STATEMENTS) {
+          await client.query(stmt);
+        }
       });
 
       initialized = true;
@@ -189,9 +221,13 @@ const createTableInitializer = (db: StorageDrizzle, options?: TableInitializerOp
 };
 
 /**
- * Creates getObjectData implementation for a drizzle instance.
+ * Creates a `getObjectData` implementation bound to a pool. Reusable by both
+ * the URL provider and the full service.
  */
-const createGetObjectData = (db: StorageDrizzle, ensureTableExists: () => Promise<Result<void, ObjectStorageError>>): ObjectStorageService['getObjectData'] => {
+const createGetObjectData = (
+  pool: Pool,
+  ensureTableExists: () => Promise<Result<void, ObjectStorageError>>,
+): ObjectStorageService['getObjectData'] => {
   return async ({ namespace, key }: { namespace?: string; key: string }) => {
     const initResult = await ensureTableExists();
     if (!initResult.ok) {
@@ -199,24 +235,12 @@ const createGetObjectData = (db: StorageDrizzle, ensureTableExists: () => Promis
     }
 
     try {
-      const result = await db
-        .select({
-          data: objectStorageTable.data,
-          size: objectStorageTable.size,
-          contentType: objectStorageTable.contentType,
-          metadata: objectStorageTable.metadata,
-          updatedAt: objectStorageTable.updatedAt,
-        })
-        .from(objectStorageTable)
-        .where(
-          and(
-            eq(objectStorageTable.namespace, namespaceColumnValue(namespace)),
-            eq(objectStorageTable.key, key)
-          )
-        )
-        .limit(1);
+      const result = await pool.query<ObjectRow>(
+        `SELECT data, size, content_type, metadata, updated_at FROM object_storage WHERE namespace = $1 AND key = $2 LIMIT 1`,
+        [namespaceColumnValue(namespace), key],
+      );
 
-      if (result.length === 0) {
+      if (result.rows.length === 0) {
         return {
           ok: false,
           error: {
@@ -226,16 +250,16 @@ const createGetObjectData = (db: StorageDrizzle, ensureTableExists: () => Promis
         };
       }
 
-      const obj = result[0]!;
+      const obj = result.rows[0]!;
 
       return {
         ok: true,
         value: {
           data: obj.data,
-          size: obj.size,
-          contentType: obj.contentType,
-          metadata: obj.metadata as Record<string, string>,
-          lastModified: obj.updatedAt,
+          size: Number(obj.size),
+          contentType: obj.content_type,
+          metadata: obj.metadata ?? {},
+          lastModified: iso(obj.updated_at),
         },
       };
     } catch (error) {
@@ -251,7 +275,9 @@ const createGetObjectData = (db: StorageDrizzle, ensureTableExists: () => Promis
   };
 };
 
-export const createPostgresObjectStorageUrlProvider = (config: PostgresObjectStorageUrlProviderConfig): PostgresObjectStorageUrlProvider => {
+export const createPostgresObjectStorageUrlProvider = (
+  config: PostgresObjectStorageUrlProviderConfig,
+): PostgresObjectStorageUrlProvider => {
   const base = {
     type: 'postgres' as const,
     getPublicUrl: ({ namespace, key }: { namespace?: string; key: string }) => {
@@ -259,8 +285,8 @@ export const createPostgresObjectStorageUrlProvider = (config: PostgresObjectSto
     },
   };
 
-  const ensureTableExists = createTableInitializer(config.db, config);
-  const getObjectData = createGetObjectData(config.db, ensureTableExists);
+  const ensureTableExists = createTableInitializer(config.pool, config);
+  const getObjectData = createGetObjectData(config.pool, ensureTableExists);
   return { ...base, getObjectData };
 };
 
@@ -296,11 +322,13 @@ export interface PostgresObjectStorageService extends ObjectStorageService {
 }
 
 // Service implementation
-export const createPostgresObjectStorageService = (config: PostgresObjectStorageConfig): PostgresObjectStorageService => {
-  const { drizzle: db, createPublicUrl } = config;
+export const createPostgresObjectStorageService = (
+  config: PostgresObjectStorageConfig,
+): PostgresObjectStorageService => {
+  const { pool, createPublicUrl } = config;
 
   // Use shared table initializer
-  const ensureTableExists = createTableInitializer(db, config);
+  const ensureTableExists = createTableInitializer(pool, config);
 
   const getPublicUrl: ObjectStorageService['getPublicUrl'] = ({ namespace, key }) => {
     return createPublicUrl(namespace, key);
@@ -317,31 +345,24 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
     }
 
     try {
-      // Build query conditions
-      const conditions = [eq(objectStorageTable.namespace, namespaceColumnValue(namespace))];
-
+      const conds = ['namespace = $1'];
+      const args: unknown[] = [namespaceColumnValue(namespace)];
       if (prefix) {
-        conditions.push(like(objectStorageTable.key, `${prefix}%`));
+        args.push(`${prefix}%`);
+        conds.push(`key LIKE $${args.length}`);
       }
 
-      // Query objects
-      const results = await db
-        .select({
-          key: objectStorageTable.key,
-          size: objectStorageTable.size,
-          contentType: objectStorageTable.contentType,
-          metadata: objectStorageTable.metadata,
-        })
-        .from(objectStorageTable)
-        .where(and(...conditions))
-        .orderBy(objectStorageTable.key);
+      const results = await pool.query<ListRow>(
+        `SELECT key, size, content_type, metadata FROM object_storage WHERE ${conds.join(' AND ')} ORDER BY key`,
+        args,
+      );
 
       if (includeHead) {
-        const objects = results.map(row => ({
+        const objects = results.rows.map((row: ListRow) => ({
           key: row.key,
-          size: row.size,
-          contentType: row.contentType,
-          metadata: row.metadata as Record<string, string>,
+          size: Number(row.size),
+          contentType: row.content_type,
+          metadata: row.metadata ?? {},
         }));
 
         return {
@@ -353,9 +374,9 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
         };
       }
 
-      const objects = results.map(row => ({
+      const objects = results.rows.map((row: ListRow) => ({
         key: row.key,
-        size: row.size,
+        size: Number(row.size),
       }));
 
       return {
@@ -403,49 +424,34 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
       // Try to detect content type from metadata or default
       const contentType = metadata['content-type'] || metadata['contentType'] || 'application/octet-stream';
 
-      // Insert or update object
-      const existing = await db
-        .select({ id: objectStorageTable.id })
-        .from(objectStorageTable)
-        .where(
-          and(
-            eq(objectStorageTable.namespace, namespaceColumnValue(namespace)),
-            eq(objectStorageTable.key, key)
-          )
-        )
-        .limit(1);
-
-      if (existing.length > 0) {
-        // Update existing
-        await db
-          .update(objectStorageTable)
-          .set({
-            data: buffer,
-            size,
-            contentType,
-            metadata: metadata as Record<string, string>,
-            updatedAt: sql`NOW()`,
-          })
-          .where(
-            and(
-              eq(objectStorageTable.namespace, namespaceColumnValue(namespace)),
-              eq(objectStorageTable.key, key)
-            )
-          );
-      } else {
-        // Insert new
-        await db.insert(objectStorageTable).values({
-          namespace: namespaceColumnValue(namespace),
-          key,
-          data: buffer,
-          size,
-          contentType,
-          metadata: metadata as Record<string, string>,
-        });
-      }
+      // Single atomic upsert (also fixes the old select-then-write race). Relies
+      // on the object_storage_namespace_key_unique constraint from the initializer
+      // / objectStorageDdl().
+      await pool.query(
+        `INSERT INTO object_storage (namespace, key, data, size, content_type, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+         ON CONFLICT (namespace, key) DO UPDATE SET
+           data = EXCLUDED.data,
+           size = EXCLUDED.size,
+           content_type = EXCLUDED.content_type,
+           metadata = EXCLUDED.metadata,
+           updated_at = NOW()`,
+        [namespaceColumnValue(namespace), key, buffer, size, contentType, JSON.stringify(metadata)],
+      );
 
       return { ok: true, value: undefined };
     } catch (error) {
+      // 42P10 = there is no unique/exclusion constraint matching ON CONFLICT.
+      // A legacy table with autoCreateTable:false lacks the unique constraint.
+      if ((error as { code?: string } | null)?.code === '42P10') {
+        return {
+          ok: false,
+          error: {
+            key: 'internal_error',
+            message: `Failed to upload object '${key}': missing object_storage_namespace_key_unique constraint — apply objectStorageDdl() or enable autoCreateTable`,
+          },
+        };
+      }
       const octError = toOctError(error);
       return {
         ok: false,
@@ -464,14 +470,10 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
     }
 
     try {
-      await db
-        .delete(objectStorageTable)
-        .where(
-          and(
-            eq(objectStorageTable.namespace, namespaceColumnValue(namespace)),
-            eq(objectStorageTable.key, key)
-          )
-        );
+      await pool.query(
+        `DELETE FROM object_storage WHERE namespace = $1 AND key = $2`,
+        [namespaceColumnValue(namespace), key],
+      );
 
       // Treat as success even if object doesn't exist (idempotent delete)
       return { ok: true, value: undefined };
@@ -506,17 +508,12 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
     }
 
     try {
-      const whereClause = and(
-        eq(objectStorageTable.namespace, namespaceColumnValue(namespace)),
-        like(objectStorageTable.key, `${prefix}%`)
+      const result = await pool.query(
+        `DELETE FROM object_storage WHERE namespace = $1 AND key LIKE $2`,
+        [namespaceColumnValue(namespace), `${prefix}%`],
       );
 
-      const result = await db
-        .delete(objectStorageTable)
-        .where(whereClause)
-        .returning({ id: objectStorageTable.id });
-
-      return { ok: true, value: { deleted: result.length } };
+      return { ok: true, value: { deleted: result.rowCount ?? 0 } };
     } catch (error) {
       const octError = toOctError(error);
       return {
@@ -530,7 +527,7 @@ export const createPostgresObjectStorageService = (config: PostgresObjectStorage
   };
 
   // Use shared getObjectData implementation
-  const getObjectData = createGetObjectData(db, ensureTableExists);
+  const getObjectData = createGetObjectData(pool, ensureTableExists);
 
   return {
     type: 'postgres' as const,

@@ -7,7 +7,7 @@
 // consumers only install and load the SDKs they actually use:
 //
 //   @octabits-io/storage/s3        — S3-compatible provider (optional peer: @aws-sdk/client-s3)
-//   @octabits-io/storage/postgres  — Postgres blob provider + HTTP handlers (optional peer: drizzle-orm)
+//   @octabits-io/storage/postgres  — Postgres blob provider + HTTP handlers (optional peer: pg)
 //
 // All methods accept an optional `namespace` that partitions objects (key
 // prefix on S3, column on Postgres). Multi-tenant consumers pass a tenant id

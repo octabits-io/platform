@@ -35,6 +35,11 @@
       "import": "./dist/crud/index.js",
       "default": "./dist/crud/index.js"
     },
+    "./scoped-key-store": {
+      "types": "./dist/scoped-key-store/index.d.ts",
+      "import": "./dist/scoped-key-store/index.js",
+      "default": "./dist/scoped-key-store/index.js"
+    },
     "./config": {
       "types": "./dist/config/index.d.ts",
       "import": "./dist/config/index.js",
