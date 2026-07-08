@@ -83,7 +83,7 @@
     "@types/pg": "^8.20.0",
     "pg": "^8.22.0",
     "tsup": "^8.5.1",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "pg": "^8.22.0",

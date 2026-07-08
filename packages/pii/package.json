@@ -42,12 +42,12 @@
     "@scure/base": "^2.2.0"
   },
   "devDependencies": {
-    "vitest": "^4.1.9",
-    "@octabits-io/foundation": "workspace:^"
+    "@octabits-io/foundation": "workspace:^",
+    "vitest": "^4.1.10"
   },
   "peerDependencies": {
+    "@octabits-io/foundation": ">=0.2.0 <1",
     "typescript": "^5 || ^6",
-    "zod": "^4",
-    "@octabits-io/foundation": ">=0.2.0 <1"
+    "zod": "^4"
   }
 }

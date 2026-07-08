@@ -48,7 +48,7 @@
     "@octabits-io/foundation": "workspace:^",
     "elysia": "^1.4.29",
     "elysia-mcp": "^0.1.1",
-    "vitest": "^4.1.9",
+    "vitest": "^4.1.10",
     "zod": "^4.4.3"
   },
   "peerDependencies": {

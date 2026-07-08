@@ -58,7 +58,7 @@
     "nodemailer": "^9.0.3",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9",
+    "vitest": "^4.1.10",
     "wretch": "^3.0.9",
     "zod": "^4.4.3"
   },
