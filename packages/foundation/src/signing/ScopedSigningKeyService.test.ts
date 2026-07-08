@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { describe, it, expect } from 'vitest';
 import {
   createScopedSigningService,
@@ -52,6 +53,39 @@ describe('createScopedSigningService', () => {
     it('throws when deriving without a master secret', () => {
       const svc = createScopedSigningService({ infoPrefix: 'acme', scopeKey: 's1', keyStore: memoryStore() });
       expect(() => svc.deriveKey('email')).toThrow(/master secret/i);
+    });
+
+    it('reproduces a legacy key space verbatim via deriveInfo (adoption without rotation)', () => {
+      // A prior consumer derived keys with a bare, non-length-prefixed info
+      // string. `deriveInfo` lets this service reproduce those exact bytes so
+      // every already-issued signature stays verifiable — no key rotation.
+      const legacyScope = 'tenant-42';
+      const legacyInfo = (purpose: string) => `legacy-${purpose}-signing-key-v1`;
+
+      // Independently compute what the legacy code path produced.
+      const expected = Buffer.from(
+        crypto.hkdfSync('sha256', MASTER, legacyScope, Buffer.from(legacyInfo('email')), 32),
+      ).toString('base64');
+
+      const adopted = createScopedSigningService({
+        // No `infoPrefix` — the union forbids it alongside `deriveInfo`.
+        scopeKey: legacyScope,
+        keyStore: memoryStore(),
+        masterSecret: MASTER,
+        deriveInfo: legacyInfo,
+      });
+      expect(adopted.deriveKey('email').toString('base64')).toBe(expected);
+
+      // And it is NOT the default length-prefixed derivation.
+      const dflt = createScopedSigningService({
+        infoPrefix: 'legacy',
+        scopeKey: legacyScope,
+        keyStore: memoryStore(),
+        masterSecret: MASTER,
+      });
+      expect(adopted.deriveKey('email').toString('base64')).not.toBe(
+        dflt.deriveKey('email').toString('base64'),
+      );
     });
 
     it('is not delimiter-ambiguous across (infoPrefix, purpose) boundaries', () => {

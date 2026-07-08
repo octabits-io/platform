@@ -40,15 +40,7 @@ export interface SigningKeyStore {
   write(keys: Record<string, string>): Promise<void>;
 }
 
-export interface ScopedSigningServiceConfig {
-  /**
-   * Domain-separation prefix baked into every HKDF info string, so keys derived
-   * by one product/context can never collide with another's. Both `infoPrefix`
-   * and `purpose` are length-prefixed in the info string
-   * (`${len}:${infoPrefix}|${len}:${purpose}|signing-key-v1`) so distinct
-   * (prefix, purpose) pairs can never encode to the same bytes.
-   */
-  infoPrefix: string;
+interface ScopedSigningServiceBaseConfig {
   /**
    * Opaque scope identifier used as the HKDF salt for domain separation. Not a
    * database column and never interpreted — two different scope strings yield
@@ -65,6 +57,43 @@ export interface ScopedSigningServiceConfig {
    */
   masterSecret?: string;
 }
+
+/**
+ * Default derivation: the HKDF `info` string is built from `infoPrefix` in a
+ * safe, length-prefixed format. Use this everywhere except when adopting a
+ * legacy key space (see {@link ScopedSigningCustomDerivationConfig}).
+ */
+interface ScopedSigningDefaultDerivationConfig extends ScopedSigningServiceBaseConfig {
+  /**
+   * Domain-separation prefix baked into every HKDF info string, so keys derived
+   * by one product/context can never collide with another's. Both `infoPrefix`
+   * and `purpose` are length-prefixed in the info string
+   * (`${len}:${infoPrefix}|${len}:${purpose}|signing-key-v1`) so distinct
+   * (prefix, purpose) pairs can never encode to the same bytes.
+   */
+  infoPrefix: string;
+  deriveInfo?: never;
+}
+
+/**
+ * Custom derivation: `deriveInfo` fully controls the HKDF `info` string, so
+ * `infoPrefix` is neither needed nor allowed. Supply this **only** to reproduce
+ * a legacy consumer's exact derived bytes — i.e. to adopt this service without
+ * a key-rotation event, keeping every already-issued signature verifiable.
+ *
+ * WARNING: a custom format with two or more variable segments MUST length-
+ * prefix each of them, or distinct inputs can encode to the same `info` bytes
+ * and derive identical keys (the collision the default format guards against).
+ * A format with a single variable segment (just `purpose`) is unambiguous.
+ */
+interface ScopedSigningCustomDerivationConfig extends ScopedSigningServiceBaseConfig {
+  infoPrefix?: never;
+  deriveInfo: (purpose: string) => string;
+}
+
+export type ScopedSigningServiceConfig =
+  | ScopedSigningDefaultDerivationConfig
+  | ScopedSigningCustomDerivationConfig;
 
 /**
  * Default truncation for `shortTag` — 12 bytes / 96-bit tag (24 hex chars).
@@ -111,12 +140,19 @@ function validateTagBytes(bytes: number): ScopedSigningInvalidBytesError | null 
  *   half loads `jose` lazily (an optional peer): non-JWT primitives work even
  *   when `jose` is not installed.
  */
-export function createScopedSigningService({
-  infoPrefix,
-  scopeKey,
-  keyStore,
-  masterSecret,
-}: ScopedSigningServiceConfig) {
+export function createScopedSigningService(config: ScopedSigningServiceConfig) {
+  const { scopeKey, keyStore, masterSecret } = config;
+
+  // Resolve the HKDF info-string builder once. A caller-supplied `deriveInfo`
+  // reproduces a legacy key space verbatim; otherwise fall back to the safe,
+  // length-prefixed default. Length-prefixing both variable parts keeps them
+  // disjoint — a bare `${infoPrefix}-${purpose}` is delimiter-ambiguous, so
+  // ('a', 'b-c') and ('a-b', 'c') would encode to the same bytes.
+  const buildInfo: (purpose: string) => string = config.deriveInfo
+    ? config.deriveInfo
+    : (purpose) =>
+        `${config.infoPrefix.length}:${config.infoPrefix}|${purpose.length}:${purpose}|signing-key-v1`;
+
   /**
    * Derive a per-scope, per-purpose 256-bit signing key from the master secret
    * via HKDF-SHA256. Uses `scopeKey` as salt and `purpose` in the info string
@@ -124,12 +160,7 @@ export function createScopedSigningService({
    */
   function deriveKey(purpose: string): Buffer {
     if (!masterSecret) throw new Error('Key derivation requires a master secret');
-    // Length-prefix both variable parts: a bare `${infoPrefix}-${purpose}`
-    // is delimiter-ambiguous — ('a', 'b-c') and ('a-b', 'c') would encode to
-    // the same info bytes and derive identical keys.
-    const info = Buffer.from(
-      `${infoPrefix.length}:${infoPrefix}|${purpose.length}:${purpose}|signing-key-v1`,
-    );
+    const info = Buffer.from(buildInfo(purpose));
     return Buffer.from(crypto.hkdfSync('sha256', masterSecret, scopeKey, info, 32));
   }
 
