@@ -35,6 +35,21 @@ pnpm typecheck   # Type-check all packages
 pnpm clean       # Remove all build artifacts and node_modules
 ```
 
+## Versioning for consumers
+
+These packages are pre-1.0 and managed with Changesets. `foundation`,
+`drizzle-toolkit`, `pii`, and `flow` are **linked** — released together they
+share a version. Two things to know when depending on them:
+
+- A caret range on a `0.x` package (`^0.9.0`) resolves to `>=0.9.0 <0.10.0`, so
+  it will **not** auto-pull the next linked minor. Each release needs a
+  deliberate bump on the consumer side.
+- Every `@octabits-io/*` package declares `@octabits-io/foundation` as a **peer**
+  (its `Result`/`OctError`/`Logger` types appear in their public APIs). Install
+  `foundation` yourself and bump the linked packages you use **together** — a
+  mismatch can resolve two `foundation` instances and surface as TS2883
+  duplicate-identity errors on those shared types.
+
 ## License
 
 MIT

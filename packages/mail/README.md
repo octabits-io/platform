@@ -154,7 +154,10 @@ wraps any transport to redirect every recipient to a single dev address.
 Return-Path). It is pure string handling — no crypto; produce/verify the `<tag>`
 with your own signing service over `replyAddressMessage(scopeKey, resourceId)`.
 `scopeKey` selects the signing key/partition (may contain `.`); `resourceId` is
-an opaque application id (must not contain `.`).
+an opaque application id (must not contain `.`). Because `parseReplyAddress`
+treats `resourceId` as an opaque string, a consumer whose id is more constrained
+(e.g. a positive integer) should re-apply its own validation/coercion on the
+parsed value — the package will not reject a well-formed-but-out-of-domain id.
 
 ```ts
 import { buildReplyAddress, parseReplyAddress } from '@octabits-io/mail';
@@ -178,6 +181,13 @@ import { parseBrevoInbound, parseBrevoEvents, mapBrevoEventToDeliveryStatus } fr
 const inbound = parseBrevoInbound(webhookBody);   // Result<NormalizedInboundMessage[], MailInboundParseError>
 const events = parseBrevoEvents(webhookBody);      // Result<NormalizedDeliveryEvent[], MailEventParseError>
 ```
+
+These parsers emit the **package-native** `NormalizedInboundMessage` /
+`DeliveryStatus` shapes, not your persistence model. A consumer with its own
+delivery-status enum, extra fields (e.g. a provider download token on an
+attachment), or a different inbound shape maps at the boundary — keep that
+adapter thin and cross-check the event-string → `DeliveryStatus` coverage
+against your enum, since this code path is webhook-behavior-sensitive.
 
 `screenInboundAttachment` (root export) enforces a cheap, dependency-free policy
 on untrusted inbound attachments — a size ceiling, an executable/macro extension
