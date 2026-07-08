@@ -1,5 +1,16 @@
 # @octabits-io/drizzle-toolkit
 
+## 0.9.0
+
+### Minor Changes
+
+- [`7c7f4bf`](https://github.com/octabits-io/platform/commit/7c7f4bff54c613426a6934704ba928436284a698) - config: add `onInvalidStoredValue` policy to the scoped config engine. A present stored row that fails schema validation on read now either falls back to the schema default (`'use-default'`, the existing behavior and default) or is left absent (`'skip'`), letting consumers surface corrupt/legacy values instead of masking them behind the default. Genuinely-absent rows still default under both policies.
+
+### Patch Changes
+
+- Updated dependencies [[`b3513fa`](https://github.com/octabits-io/platform/commit/b3513fa128ff3b69b286c74d0589772125efe30a)]:
+  - @octabits-io/foundation@0.9.0
+
 ## 0.8.0
 
 ### Minor Changes

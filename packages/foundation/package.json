@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/foundation",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Core utilities: Result types, IoC container, logger, helpers, Zod config fragments, RBAC engine, and OIDC/JWT validation",
   "license": "MIT",
   "type": "module",
