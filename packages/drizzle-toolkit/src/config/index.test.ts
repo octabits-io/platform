@@ -333,6 +333,71 @@ describe('readConfig invalid stored rows', () => {
 });
 
 // ---------------------------------------------------------------------------
+// readConfig — onInvalidStoredValue: 'skip' (surface corrupt/legacy values)
+// ---------------------------------------------------------------------------
+
+describe("readConfig onInvalidStoredValue: 'skip'", () => {
+  it('leaves the key absent (not the schema default) when a stored row fails validation', async () => {
+    const warn = vi.fn();
+    // page_size HAS a default (20); 'skip' must NOT fall back to it — the
+    // corrupt/legacy row surfaces as a missing key instead.
+    const { service } = makeService(
+      [{ key: 'page_size', value: 'legacy-string', encrypted: false }],
+      { onInvalidStoredValue: 'skip', logger: { warn, error: vi.fn() } },
+    );
+    const out = await service.readConfig('page_size');
+    expect('page_size' in out).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const [, attrs] = warn.mock.calls[0]!;
+    expect(attrs).toMatchObject({ key: 'page_size', scope: 't1' });
+    // The raw (possibly sensitive) value must never be logged.
+    expect(JSON.stringify(attrs)).not.toContain('legacy-string');
+  });
+
+  it('does not cache or write anything for a skipped invalid row (both tiers)', async () => {
+    const store = new Map<string, unknown>();
+    const lru: ConfigLruCache = {
+      get: (k) => store.get(k),
+      set: (k, v) => void store.set(k, v),
+      delete: (k) => store.delete(k),
+    };
+    const cache = createScopedConfigCache<ConfigMap>({ cache: lru, cacheableKeys: ['page_size'] });
+    const { service } = makeService(
+      [{ key: 'page_size', value: 'legacy-string', encrypted: false }],
+      {
+        onInvalidStoredValue: 'skip',
+        cache,
+        cacheableKeys: ['page_size'],
+        logger: { warn: vi.fn(), error: vi.fn() },
+      },
+    );
+    expect('page_size' in (await service.readConfig('page_size'))).toBe(false);
+    // Nothing promoted into the cross-scope cache — a skipped row is not a value.
+    expect(store.has('t1:page_size')).toBe(false);
+    // A repeat read still skips (no stale default cached in the request tier).
+    expect('page_size' in (await service.readConfig('page_size'))).toBe(false);
+  });
+
+  it("still applies the default for a genuinely absent row under 'skip'", async () => {
+    // 'skip' only affects PRESENT-but-invalid rows; a missing row still defaults.
+    const { service } = makeService([], {
+      onInvalidStoredValue: 'skip',
+      logger: { warn: vi.fn(), error: vi.fn() },
+    });
+    const out = await service.readConfig('page_size');
+    expect(out.page_size).toBe(20);
+  });
+
+  it("defaults to 'use-default' when the policy is unset", async () => {
+    const { service } = makeService([
+      { key: 'page_size', value: 'legacy-string', encrypted: false },
+    ]);
+    const out = await service.readConfig('page_size');
+    expect(out.page_size).toBe(20);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // readAll
 // ---------------------------------------------------------------------------
 

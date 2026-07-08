@@ -10,9 +10,11 @@
  *     an injected `cipher`, and stored in a `{ __encrypted: <base64> }`
  *     envelope; every entry is upserted in one statement.
  *   - **read** — rows are decrypted (envelope handling lives here), re-validated
- *     through the schema so **Zod defaults are applied for absent/invalid
- *     values**, and cached. Cacheable keys are additionally promoted into an
- *     optional cross-scope cache.
+ *     through the schema so **Zod defaults are applied for absent values**, and
+ *     cached. A **present** row that fails validation follows the configurable
+ *     {@link InvalidStoredValuePolicy} (default: apply the schema default; opt
+ *     into `'skip'` to leave the key absent). Cacheable keys are additionally
+ *     promoted into an optional cross-scope cache.
  *
  * The engine speaks **no tenant vocabulary**. Scoping is **optional**, mirroring
  * `../crud`'s base-vs-scoped split:
@@ -128,6 +130,25 @@ export interface ScopedConfigLogger {
 }
 
 const noopLogger: ScopedConfigLogger = { warn: () => {}, error: () => {} };
+
+/**
+ * Policy for a **present** stored row whose value fails schema validation on
+ * read (e.g. a legacy row written under an older, looser schema):
+ *
+ *   - `'use-default'` (default) — warn and fall back to the schema default via
+ *     the absent-row path, so a documented-defaulted key is never silently
+ *     dropped. Best when config should always resolve to *something* usable.
+ *   - `'skip'` — warn and leave the key **absent** from the result, exactly as
+ *     if no row existed and the schema had no default. Best when a corrupt or
+ *     legacy value must surface to the caller (as a missing key) rather than be
+ *     masked by the default — e.g. a downstream guard that treats an absent key
+ *     as an integrity error.
+ *
+ * Either way the failure is logged (key/scope/issue only — never the raw
+ * value). Decrypt failures are unaffected: they always throw
+ * {@link ScopedConfigDecryptError}.
+ */
+export type InvalidStoredValuePolicy = 'use-default' | 'skip';
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -256,6 +277,14 @@ export interface ScopedConfigServiceConfig<
   cache?: ScopedConfigCache<TConfigMap>;
   /** Optional structured logger; a noop is used when omitted. */
   logger?: ScopedConfigLogger;
+  /**
+   * How to handle a **present** stored row that fails schema validation on read.
+   * Defaults to `'use-default'` (warn + apply the schema default). Use `'skip'`
+   * to leave the key absent instead, surfacing corrupt/legacy values to the
+   * caller rather than masking them behind the default. See
+   * {@link InvalidStoredValuePolicy}.
+   */
+  onInvalidStoredValue?: InvalidStoredValuePolicy;
 }
 
 /** The public surface of a scoped config service. */
@@ -310,6 +339,7 @@ export function createScopedConfigService<
     cipher,
     cache,
     logger = noopLogger,
+    onInvalidStoredValue = 'use-default',
   } = config;
 
   const encryptedKeys = new Set<keyof TConfigMap>(config.encryptedKeys ?? []);
@@ -457,15 +487,20 @@ export function createScopedConfigService<
    * on success, populate the result + request-scoped + shared caches.
    *
    * A **present** stored value that fails validation (e.g. a row written under
-   * an older, looser schema before a type tightening) must not silently vanish
-   * from the result — a consumer reading a documented-defaulted key would get
-   * `undefined`. Instead we warn (key/scope/issue only — never the raw value,
-   * which may be sensitive) and fall back to the schema default by re-absorbing
-   * `undefined`, i.e. the *exact* absent-row path. That keeps both cache tiers
-   * (request-scoped + cross-scope) identical to a genuinely-absent read and
-   * never writes the fallback back to the DB. Decrypt failures are handled
-   * upstream in {@link decryptRow} and still throw — this only covers plain
-   * schema-validation failures.
+   * an older, looser schema before a type tightening) is handled per the
+   * configured {@link InvalidStoredValuePolicy}:
+   *
+   *   - `'use-default'` (default) — warn and fall back to the schema default by
+   *     re-absorbing `undefined`, i.e. the *exact* absent-row path. That keeps
+   *     both cache tiers (request-scoped + cross-scope) identical to a
+   *     genuinely-absent read and never writes the fallback back to the DB, so a
+   *     documented-defaulted key never silently vanishes.
+   *   - `'skip'` — warn and leave the key absent, surfacing the corrupt/legacy
+   *     value to the caller instead of masking it behind the default.
+   *
+   * Either way the raw (possibly sensitive) value is never logged. Decrypt
+   * failures are handled upstream in {@link decryptRow} and still throw — this
+   * only covers plain schema-validation failures.
    */
   function absorb(target: Partial<TConfigMap>, key: keyof TConfigMap, rawValue: unknown): void {
     const parsed = schema.safeParse({ key: String(key), value: rawValue });
@@ -483,14 +518,18 @@ export function createScopedConfigService<
     const rowPresent = rawValue !== undefined && rawValue !== null;
     if (!rowPresent) return;
 
-    // A stored row failed validation: warn, then apply the schema default via the
-    // absent-row path so the key is never silently dropped. `absorb(undefined)`
-    // recurses at most once (undefined is not "present"), so no infinite loop.
-    logger.warn('Stored config value failed schema validation; applying schema default', {
-      key: String(key),
-      scope: scopeValue,
-      issue: parsed.error.message,
-    });
+    // A stored row failed validation: warn, then apply the configured policy.
+    logger.warn(
+      onInvalidStoredValue === 'skip'
+        ? 'Stored config value failed schema validation; leaving key absent'
+        : 'Stored config value failed schema validation; applying schema default',
+      { key: String(key), scope: scopeValue, issue: parsed.error.message },
+    );
+    // 'skip' → leave the key absent (surface corrupt/legacy values to the caller).
+    if (onInvalidStoredValue === 'skip') return;
+    // 'use-default' → apply the schema default via the absent-row path.
+    // `absorb(undefined)` recurses at most once (undefined is not "present"), so
+    // no infinite loop.
     absorb(target, key, undefined);
   }
 
