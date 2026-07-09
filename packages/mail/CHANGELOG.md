@@ -1,5 +1,19 @@
 # @octabits-io/mail
 
+## 0.4.0
+
+### Minor Changes
+
+- [`e70e564`](https://github.com/octabits-io/platform/commit/e70e5644f9ec83eb4fa08cfc2085ab66dc68af3f) - Export `MAIL_DELIVERY_STATUSES`, a runtime tuple of the provider-agnostic delivery statuses (`['queued', 'sent', 'delivered', 'failed', 'bounced']`), from the root. `DeliveryStatus` is now derived from it (`(typeof MAIL_DELIVERY_STATUSES)[number]`), so the type and the runtime value are a single source of truth.
+
+  Previously `DeliveryStatus` was a type-only union, forcing a consumer that stores delivery status in a database enum to hand-maintain a parallel string list and re-verify it against every provider mapping (e.g. `mapBrevoEventToDeliveryStatus`). Consumers can now derive their storage enum directly from the package — e.g. `pgEnum('message_delivery_status', MAIL_DELIVERY_STATUSES)` — collapsing that translation-and-verification surface to a compile-time `satisfies` check.
+
+  Purely additive — the `DeliveryStatus` type is unchanged.
+
+- [`f3b60e6`](https://github.com/octabits-io/platform/commit/f3b60e6f19d1fba0f5ed08d4051a21cc76cbe6bb) - Add `dispatchRendered(params, rendered)` to `createBaseMailService`, splitting rendering from delivery. `render(params)` already produced a `RenderedEmail` without sending; `dispatchRendered` now delivers one verbatim — the content and recipients are sent as-is while transport/From/fallback routing is recomputed via a fresh `configReader(params)` read (the template is never rebuilt), and the header-injection guard runs again before any transport contact.
+
+  This lets a consumer render now and deliver later: retry a rendered message, defer a send, or build a hold-for-review flow the consumer owns end-to-end (render → park in its own outbox → re-dispatch after approval), without re-implementing the pipeline's routing/delivery half. Purely additive — existing `send()`/`render()` behavior is unchanged.
+
 ## 0.3.0
 
 ### Minor Changes
