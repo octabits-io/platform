@@ -10,7 +10,18 @@ export type { MasterKeyProvider, MasterKeyError, MasterKeyUnsupportedPlaintextEr
 export { createBlindIndex, createBlindIndexService, MIN_BLIND_INDEX_KEY_LENGTH } from './blind-index.ts';
 export type { BlindIndexService } from './blind-index.ts';
 
-// Error types
+// High-level PII helpers — stateless, null-safe, Result-returning wrappers over
+// hybrid encryption (string / JSON / bytes variants). The service factories
+// above are sugar over these; consumers that fetch keys per call (e.g. a
+// per-tenant wrapper) can use these directly with the recipient/identity.
+export {
+  encryptPiiString,
+  decryptPiiString,
+  encryptPiiJson,
+  decryptPiiJson,
+  encryptPiiBytes,
+  decryptPiiBytes,
+} from './pii-encryption.ts';
 export type { PiiEncryptionError, PiiDecryptionError } from './pii-encryption.ts';
 
 // Low-level (for advanced use)
