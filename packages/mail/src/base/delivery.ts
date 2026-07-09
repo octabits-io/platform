@@ -5,6 +5,16 @@ import type { OctError } from '@octabits-io/foundation/result';
 // ============================================================================
 
 /**
+ * The closed set of provider-agnostic delivery statuses, as a runtime tuple.
+ * Exported so a consumer can derive its own storage enum from this single
+ * source of truth (e.g. Drizzle `pgEnum('...', MAIL_DELIVERY_STATUSES)`),
+ * rather than hand-maintaining a parallel list that must be re-verified against
+ * every provider mapping. The order is stable — treat it as the canonical
+ * declaration order for enum definitions.
+ */
+export const MAIL_DELIVERY_STATUSES = ['queued', 'sent', 'delivered', 'failed', 'bounced'] as const;
+
+/**
  * Provider-agnostic delivery status for an outbound message. Providers map
  * their native transactional events onto this closed set:
  * - `queued` / `sent` — set by the outbound pipeline (pre-provider-event).
@@ -12,7 +22,7 @@ import type { OctError } from '@octabits-io/foundation/result';
  * - `bounced` — a hard rejection (hard bounce, spam, blocked, invalid address).
  * - `failed` — a transient/soft failure (soft bounce, deferred, provider error).
  */
-export type DeliveryStatus = 'queued' | 'sent' | 'delivered' | 'failed' | 'bounced';
+export type DeliveryStatus = (typeof MAIL_DELIVERY_STATUSES)[number];
 
 /**
  * A normalized transactional delivery event. The webhook + queue handler

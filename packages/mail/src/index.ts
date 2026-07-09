@@ -57,6 +57,7 @@ export type {
 } from './base/inbound';
 
 // --- Delivery contract (provider-agnostic delivery status + events) --------
+export { MAIL_DELIVERY_STATUSES } from './base/delivery';
 export type {
   DeliveryStatus,
   NormalizedDeliveryEvent,
