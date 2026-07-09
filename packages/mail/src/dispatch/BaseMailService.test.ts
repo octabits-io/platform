@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createBaseMailService, type OnSendCallback } from './BaseMailService';
+import type { RenderedEmail } from '../base/errors';
 import type {
   UserMailParams,
   SystemMailParams,
@@ -850,6 +851,154 @@ describe('createBaseMailService', () => {
       if (!result.ok) return;
       expect(result.value.recipients).toEqual(['customer@example.com']);
       expect(result.value.bcc).toEqual(['admin@acme.example']);
+    });
+  });
+
+  describe('dispatchRendered()', () => {
+    /** Render a message via the service, returning the frozen RenderedEmail. */
+    async function renderOf(
+      service: ReturnType<typeof createBaseMailService<Params, TestOverrides, TestServerConfig>>,
+      params: Params,
+    ): Promise<RenderedEmail> {
+      const rendered = await service.render(params);
+      if (!rendered.ok) throw new Error(`render failed: ${rendered.error.key}`);
+      return rendered.value;
+    }
+
+    it('delivers a previously-rendered email verbatim, recomputing routing against current config', async () => {
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        platformFromName: 'Example',
+        templates: registry({ 'user-mail': mockBuilder({ subject: 'Rendered earlier' }) }),
+        configReader: configReaderOf({ scopeName: 'Acme', notificationsAddress: 'admin@acme.example' }),
+        transport,
+        logger: mockLogger,
+      });
+
+      const params = userParams();
+      const rendered = await renderOf(service, params);
+      expect(transport.count()).toBe(0); // render never delivers
+
+      const result = await service.dispatchRendered(params, rendered);
+      expect(result.ok).toBe(true);
+      expect(transport.count()).toBe(1);
+      const message = transport.getLastMessage()!;
+      // Content taken verbatim from the rendered snapshot; routing recomputed.
+      expect(message.subject).toBe('Rendered earlier');
+      expect(message.to).toEqual(['customer@example.com']);
+      expect(message.from).toEqual({ address: 'noreply@example.com', name: 'Acme via Example' });
+      expect(message.replyTo).toEqual({ address: 'admin@acme.example', name: 'Acme' });
+    });
+
+    it('does not re-render the template on dispatch', async () => {
+      const builder = mockBuilder({ subject: 'Once' });
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry({ 'user-mail': builder }),
+        transport,
+        logger: mockLogger,
+      });
+
+      const params = userParams();
+      const rendered = await renderOf(service, params);
+      builder.buildSubject.mockClear();
+      builder.buildHtmlContent.mockClear();
+      builder.buildTextContent.mockClear();
+
+      await service.dispatchRendered(params, rendered);
+      expect(builder.buildSubject).not.toHaveBeenCalled();
+      expect(builder.buildHtmlContent).not.toHaveBeenCalled();
+      expect(builder.buildTextContent).not.toHaveBeenCalled();
+    });
+
+    it('reflects a config change made between render and dispatch (scoped server activated)', async () => {
+      const scopedTransport = createMemoryTransport();
+      // configReader returns platform-fallback config on first call, a scoped
+      // server on the second (the dispatch-time re-read).
+      const reads: (ResolvedMailConfig<TestOverrides, TestServerConfig> | undefined)[] = [
+        { scopeName: 'Acme', notificationsAddress: 'admin@acme.example' },
+        { mailServerConfig: { provider: 'smtp', fromAddress: 'server@scope.example', fromName: 'Scope Server' } },
+      ];
+      let call = 0;
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        platformFromName: 'Example',
+        templates: registry(),
+        configReader: async () => reads[call++],
+        transportFactory: () => scopedTransport,
+        transport,
+        logger: mockLogger,
+      });
+
+      const params = userParams();
+      const rendered = await renderOf(service, params); // read #0 (platform fallback)
+      await service.dispatchRendered(params, rendered);  // read #1 (scoped server now active)
+
+      // Delivered via the newly-active scoped transport, using its From.
+      expect(scopedTransport.count()).toBe(1);
+      expect(transport.count()).toBe(0);
+      expect(scopedTransport.getLastMessage()!.from).toEqual({ address: 'server@scope.example', name: 'Scope Server' });
+    });
+
+    it('fires onSend for the delivery', async () => {
+      const onSend = vi.fn();
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        transport,
+        logger: mockLogger,
+        onSend,
+      });
+
+      const params = userParams();
+      const rendered = await renderOf(service, params);
+      onSend.mockClear();
+
+      await service.dispatchRendered(params, rendered);
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(onSend).toHaveBeenCalledWith(
+        params,
+        expect.objectContaining({ to: ['customer@example.com'] }),
+        expect.objectContaining({ ok: true }),
+        expect.objectContaining({ viaPlatformFallback: false }),
+      );
+    });
+
+    it('re-runs the header-injection guard before any transport contact', async () => {
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        transport,
+        logger: mockLogger,
+      });
+
+      const rendered = await renderOf(service, userParams());
+      // Tamper with the rendered recipients before re-dispatch.
+      const tampered: RenderedEmail = { ...rendered, recipients: ['victim@example.com,attacker@evil.example'] };
+
+      const result = await service.dispatchRendered(userParams(), tampered);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.key).toBe('invalid_recipient');
+      expect(transport.count()).toBe(0);
+    });
+
+    it('carries the BCC from the rendered snapshot through to the transport', async () => {
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry(),
+        configReader: configReaderOf({ scopeName: 'Acme', deliveryMode: 'customer_and_notifications', notificationsAddress: 'admin@acme.example' }),
+        transport,
+        logger: mockLogger,
+      });
+
+      const params = userParams();
+      const rendered = await renderOf(service, params);
+      expect(rendered.bcc).toEqual(['admin@acme.example']);
+
+      await service.dispatchRendered(params, rendered);
+      const message = transport.getLastMessage()!;
+      expect(message.to).toEqual(['customer@example.com']);
+      expect(message.bcc).toEqual(['admin@acme.example']);
     });
   });
 });

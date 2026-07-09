@@ -147,6 +147,30 @@ wraps any transport to redirect every recipient to a single dev address.
 > / `createBrevoTransport` factories (imported from their subpaths) switched on
 > your own config's provider field.
 
+### Render now, deliver later (`render` + `dispatchRendered`)
+
+`render(params)` produces the `RenderedEmail` (subject/html/text + resolved
+recipients) without contacting any transport, and `dispatchRendered(params,
+rendered)` delivers a `RenderedEmail` verbatim — the content and recipients are
+sent as-is, while transport/From/fallback routing is **recomputed** via a fresh
+`configReader(params)` read (the template is never rebuilt). The
+header-injection guard runs again on dispatch, before any transport contact.
+
+Together they let a consumer split render from delivery: retry a previously
+rendered message, defer a send, or build a **hold-for-review** flow that the
+consumer owns end-to-end — render, park the `RenderedEmail` in your own outbox,
+then re-dispatch it after approval. The service stays a dispatcher; the review
+workflow, its storage, and its fail-closed policy live in the consumer.
+
+```ts
+// render + park (consumer's own outbox / review UI)
+const rendered = await service.render(params);
+if (rendered.ok) await outbox.park({ params, rendered: rendered.value });
+
+// …later, after a reviewer approves — routing re-resolved against current config
+await service.dispatchRendered(params, approvedRendered);
+```
+
 ## Tagged reply addresses
 
 `replyAddress` builds and parses tagged inbound addresses of the form

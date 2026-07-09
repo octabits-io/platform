@@ -5,6 +5,7 @@ import type { MailMessage, MailTransport } from '../base/transport';
 import type {
   SendMailResult,
   RenderMailResult,
+  RenderedEmail,
   MailError,
 } from '../base/errors';
 import type {
@@ -111,6 +112,17 @@ export interface BaseMailService<TParams extends BaseMailParams> {
   send(params: TParams): Promise<SendMailResult>;
   /** Render (subject/html/text/recipients) without sending — for previews. */
   render(params: TParams): Promise<RenderMailResult>;
+  /**
+   * Deliver an already-rendered email verbatim: the `rendered` content and
+   * recipients are sent as-is, while transport/From/fallback routing is
+   * recomputed against current config (a re-read via `configReader(params)`).
+   * The template is never re-rendered. Use it to send a message that was
+   * rendered earlier — e.g. a retry, a deferred send, or a hold-for-review flow
+   * the consumer owns (render → park → later re-dispatch). `params` supplies the
+   * scope key for the config re-read plus reply routing (`replyTo`/`returnPath`)
+   * and the `onSend` params.
+   */
+  dispatchRendered(params: TParams, rendered: RenderedEmail): Promise<SendMailResult>;
 }
 
 // ============================================================================
@@ -251,18 +263,19 @@ export function createBaseMailService<
     }
   }
 
-  async function send(params: TParams): Promise<SendMailResult> {
-    const preparedResult = await prepareEmail(params);
-    if (!preparedResult.ok) {
-      // Refusals must still reach the delivery log — fire the hook with the
-      // error result (there is no message to report yet).
-      if (preparedResult.error.key === 'mail_not_configured') {
-        logger.warn('Mail refused: not configured', { type: params.type, reason: preparedResult.error.message });
-      }
-      await fireOnSend(params, undefined, preparedResult, { viaPlatformFallback: false });
-      return preparedResult;
-    }
-    const { subject: finalSubject, html, text, recipientsResult, scopeConfig } = preparedResult.value;
+  /**
+   * Phase 2 of a send: everything from the recipient-sanitization guard through
+   * transport selection, message build, dev-override, delivery, and the
+   * `onSend` hook. Consumes already-rendered content and a resolved scope config
+   * — never re-renders. Shared by the live send path and `dispatchRendered`, so
+   * a held snapshot re-delivers through exactly the same routing logic.
+   */
+  async function dispatch(
+    params: TParams,
+    content: { subject: string; html: string; text: string; recipientsResult: RecipientsResult },
+    scopeConfig: ResolvedMailConfig<TOverrides, TServerConfig> | undefined,
+  ): Promise<SendMailResult> {
+    const { subject: finalSubject, html, text, recipientsResult } = content;
 
     // Recipient-smuggling / header-injection guard: refuse any address a
     // transport could misread as a list (comma/semicolon), an angle-bracket
@@ -384,19 +397,68 @@ export function createBaseMailService<
     return result;
   }
 
+  /** Build the frozen rendered view of a prepared email. */
+  function toRendered(prepared: PreparedEmail): RenderedEmail {
+    return {
+      subject: prepared.subject,
+      html: prepared.html,
+      text: prepared.text,
+      recipients: prepared.recipientsResult.recipients,
+      bcc: prepared.recipientsResult.bcc,
+      primaryRecipient: prepared.recipientsResult.primaryRecipient,
+    };
+  }
+
+  async function send(params: TParams): Promise<SendMailResult> {
+    const preparedResult = await prepareEmail(params);
+    if (!preparedResult.ok) {
+      // Refusals must still reach the delivery log — fire the hook with the
+      // error result (there is no message to report yet).
+      if (preparedResult.error.key === 'mail_not_configured') {
+        logger.warn('Mail refused: not configured', { type: params.type, reason: preparedResult.error.message });
+      }
+      await fireOnSend(params, undefined, preparedResult, { viaPlatformFallback: false });
+      return preparedResult;
+    }
+    const prepared = preparedResult.value;
+    return dispatch(
+      params,
+      {
+        subject: prepared.subject,
+        html: prepared.html,
+        text: prepared.text,
+        recipientsResult: prepared.recipientsResult,
+      },
+      prepared.scopeConfig,
+    );
+  }
+
+  async function dispatchRendered(params: TParams, rendered: RenderedEmail): Promise<SendMailResult> {
+    // Re-read the scope config so routing (transport/From/fallback/Reply-To)
+    // reflects current config; the rendered content and recipients are taken
+    // verbatim and never rebuilt.
+    const scopeConfig = configReader ? await configReader(params) : undefined;
+    return dispatch(
+      params,
+      {
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        recipientsResult: {
+          recipients: rendered.recipients,
+          bcc: rendered.bcc,
+          primaryRecipient: rendered.primaryRecipient,
+        },
+      },
+      scopeConfig,
+    );
+  }
+
   async function render(params: TParams): Promise<RenderMailResult> {
     const preparedResult = await prepareEmail(params);
     if (!preparedResult.ok) return preparedResult;
-    const { subject, html, text, recipientsResult } = preparedResult.value;
-    return ok({
-      subject,
-      html,
-      text,
-      recipients: recipientsResult.recipients,
-      bcc: recipientsResult.bcc,
-      primaryRecipient: recipientsResult.primaryRecipient,
-    });
+    return ok(toRendered(preparedResult.value));
   }
 
-  return { type: transport.type, send, render };
+  return { type: transport.type, send, render, dispatchRendered };
 }
