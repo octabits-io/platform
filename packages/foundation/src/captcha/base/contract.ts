@@ -1,4 +1,4 @@
-import type { Result, OctErrorWithKey } from '@octabits-io/foundation/result';
+import type { Result, OctErrorWithKey } from '../../result/index.ts';
 
 // ============================================================================
 // Error Types

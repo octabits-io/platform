@@ -1,6 +1,6 @@
-import type { Result } from '@octabits-io/foundation/result';
-import type { DateProvider } from '@octabits-io/foundation/utils';
-import type { Logger } from '@octabits-io/foundation/logger';
+import type { Result } from '../../result/index.ts';
+import type { DateProvider } from '../../utils/index.ts';
+import type { Logger } from '../../logger/index.ts';
 import type {
   CaptchaService,
   CaptchaChallenge,

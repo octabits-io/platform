@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { solveChallenge } from 'altcha-lib';
 import { deriveKey } from 'altcha-lib/algorithms/pbkdf2';
 import type { Challenge, Solution } from 'altcha-lib/types';
-import { createLruCacheService } from '@octabits-io/foundation/utils';
-import type { DateProvider } from '@octabits-io/foundation/utils';
+import { createLruCacheService } from '../utils/index.ts';
+import type { DateProvider } from '../utils/index.ts';
 import { createAltchaCaptchaService, type CaptchaNonceStore } from './altcha';
 
 const HMAC_SECRET = '0123456789abcdef0123456789abcdef'; // 32 chars

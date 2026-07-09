@@ -1,5 +1,5 @@
 // ============================================================================
-// @octabits-io/captcha — provider-agnostic captcha contract
+// @octabits-io/foundation/captcha — provider-agnostic captcha contract
 // ============================================================================
 //
 // The root entry is vendor-free: the service contract, the error taxonomy, the
@@ -7,7 +7,7 @@
 // concrete ALTCHA implementation lives behind a subpath export so consumers
 // only load `altcha-lib` when they actually use it:
 //
-//   @octabits-io/captcha/altcha  — altcha-lib (optional peer)
+//   @octabits-io/foundation/captcha/altcha  — altcha-lib (optional peer)
 
 // --- Service contract ------------------------------------------------------
 export type {

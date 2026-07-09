@@ -278,3 +278,30 @@ verifiable before any lookup). Without one, the service is read-only against
 earlier; signing an unprovisioned purpose returns `scoped_signing_key_not_found`.
 Errors are `Result` values (`scoped_signing_key_not_found`,
 `scoped_signing_signature_invalid`), never thrown.
+
+### `@octabits-io/foundation/vault`
+
+Boot-time HashiCorp Vault secret loader — hydrates `process.env` from KV-v2
+paths declared in a JSON manifest, before config loads. Plain `fetch`, no SDK.
+(Formerly the standalone `@octabits-io/vault` package.)
+
+```ts
+import { loadVaultSecrets, parseSecretManifest } from '@octabits-io/foundation/vault';
+
+const manifest = parseSecretManifest(await readFile('secrets.json', 'utf8'));
+await loadVaultSecrets(manifest); // populates process.env from Vault KV-v2
+```
+
+### `@octabits-io/foundation/captcha`
+
+Provider-agnostic captcha contract (challenge → redeem → verified-token →
+validate) with a no-op implementation for dev/test and the ALTCHA config schema.
+The root entry is vendor-free; the ALTCHA proof-of-work implementation lives
+behind `@octabits-io/foundation/captcha/altcha` so `altcha-lib` (an optional
+peer) is only loaded when used. (Formerly the standalone `@octabits-io/captcha`
+package.)
+
+```ts
+import { createNoopCaptchaService, CAPTCHA_CONFIG_SCHEMA } from '@octabits-io/foundation/captcha';
+import { createAltchaCaptchaService } from '@octabits-io/foundation/captcha/altcha';
+```

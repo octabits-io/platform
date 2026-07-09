@@ -1,8 +1,8 @@
 import { createChallenge as altchaCreateChallenge, verifySolution } from 'altcha-lib';
 import { deriveKey } from 'altcha-lib/algorithms/pbkdf2';
 import type { Challenge, Payload } from 'altcha-lib/types';
-import type { Result } from '@octabits-io/foundation/result';
-import type { DateProvider, LruCacheService } from '@octabits-io/foundation/utils';
+import type { Result } from '../result/index.ts';
+import type { DateProvider, LruCacheService } from '../utils/index.ts';
 import type {
   CaptchaService,
   CaptchaChallenge,

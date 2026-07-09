@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createLruCacheService } from '@octabits-io/foundation/utils';
-import type { DateProvider } from '@octabits-io/foundation/utils';
+import { createLruCacheService } from '../utils/index.ts';
+import type { DateProvider } from '../utils/index.ts';
 
 // Mock only createChallenge so we can force the underlying library to throw;
 // everything else keeps the real implementation.
