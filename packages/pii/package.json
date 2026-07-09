@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/pii",
-  "version": "0.8.0",
+  "version": "0.12.0",
   "description": "PII encryption toolkit: age-based field encryption, blind indexes, master-key envelope encryption, and scoped key management",
   "license": "MIT",
   "type": "module",

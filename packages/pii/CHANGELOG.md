@@ -1,5 +1,17 @@
 # @octabits-io/pii
 
+## 0.12.0
+
+### Minor Changes
+
+- [`f7beeca`](https://github.com/octabits-io/platform/commit/f7beeca01635370b260d8abb027b81283cdcee00) - Export the high-level PII helpers (`encryptPiiString` / `decryptPiiString`,
+  `encryptPiiJson` / `decryptPiiJson`, `encryptPiiBytes` / `decryptPiiBytes`) from
+  the package entrypoint. The `createPiiEncryptionService` /
+  `createPiiEncryptionOnlyService` factories are sugar over these; consumers that
+  resolve keys per call (e.g. a per-tenant wrapper) can now call the stateless
+  helpers directly with a `recipient` / `identity` instead of constructing a
+  service per operation.
+
 ## 0.8.0
 
 ### Minor Changes
