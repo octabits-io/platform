@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/foundation",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "Core utilities: Result types, IoC container, logger, helpers, Zod config fragments, RBAC engine, OIDC/JWT validation, Vault secret loader, a provider-agnostic captcha contract, PII encryption, Drizzle ORM toolkit, and iCal ingestion",
   "license": "MIT",
   "type": "module",

@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/storage",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Namespaced blob storage contract with S3-compatible and raw-pg Postgres providers",
   "license": "MIT",
   "type": "module",
