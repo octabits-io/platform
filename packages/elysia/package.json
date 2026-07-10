@@ -29,6 +29,7 @@
     "LICENSE"
   ],
   "dependencies": {
+    "@sinclair/typebox": ">= 0.34.0 < 1",
     "elysia-rate-limit": "^4.6.2"
   },
   "publishConfig": {
