@@ -1,4 +1,4 @@
-import { defineConfig } from "tsup";
+import { defineConfig } from "tsdown";
 
 export default defineConfig({
   entry: {
@@ -7,6 +7,8 @@ export default defineConfig({
     "postgres": "src/postgres.ts",
   },
   format: "esm",
+  // Emit .js/.d.ts (matching the exports map) instead of tsdown's default .mjs/.d.mts.
+  fixedExtension: false,
   dts: true,
   clean: true,
 });

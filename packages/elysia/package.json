@@ -5,11 +5,11 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "tsup",
+    "build": "tsdown",
     "clean": "rm -rf dist",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "tsup"
+    "prepublishOnly": "tsdown"
   },
   "exports": {
     ".": {

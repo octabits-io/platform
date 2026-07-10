@@ -5,11 +5,11 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "tsup",
+    "build": "tsdown",
     "clean": "rm -rf dist",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "tsup"
+    "prepublishOnly": "tsdown"
   },
   "exports": {
     ".": {
@@ -56,7 +56,7 @@
     "@types/nodemailer": "^8.0.1",
     "node-mailjet": "^6.0.11",
     "nodemailer": "^9.0.3",
-    "tsup": "^8.5.1",
+    "tsdown": "^0.22.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10",
     "wretch": "^3.0.9",
