@@ -12,7 +12,7 @@
     "clean": "turbo clean && rm -rf node_modules .turbo",
     "changeset": "changeset",
     "changeset:version": "GITHUB_TOKEN=$(passage show github/token) changeset version",
-    "changeset:publish": "turbo run build && echo \"//registry.npmjs.org/:_authToken=$(passage show npm/token/octabits)\" > .npmrc && changeset publish; rm -f .npmrc",
+    "changeset:publish": "turbo run build && echo \"//registry.npmjs.org/:_authToken=$(passage show npm/token/octabits)\" > .npmrc && { changeset publish; s=$?; rm -f .npmrc; exit $s; }",
     "release": "bash scripts/release.sh"
   },
   "simple-git-hooks": {
