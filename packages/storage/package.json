@@ -52,14 +52,14 @@
     "@types/pg": "^8.20.0",
     "pg": "^8.22.0",
     "tsdown": "^0.22.4",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
     "@aws-sdk/client-s3": "^3",
     "@octabits-io/foundation": ">=0.2.0 <1",
     "pg": "^8.22.0",
-    "typescript": "^5 || ^6"
+    "typescript": "^5 || ^6 || ^7"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-s3": {

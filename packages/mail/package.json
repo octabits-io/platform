@@ -57,7 +57,7 @@
     "node-mailjet": "^6.0.11",
     "nodemailer": "^9.0.3",
     "tsdown": "^0.22.4",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10",
     "wretch": "^3.0.9",
     "zod": "^4.4.3"
@@ -66,7 +66,7 @@
     "@octabits-io/foundation": ">=0.2.0 <1",
     "node-mailjet": "^6",
     "nodemailer": "^7 || ^8 || ^9",
-    "typescript": "^5 || ^6",
+    "typescript": "^5 || ^6 || ^7",
     "wretch": "^2 || ^3",
     "zod": "^4"
   },
