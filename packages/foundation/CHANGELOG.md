@@ -1,5 +1,11 @@
 # @octabits-io/foundation
 
+## 0.12.2
+
+### Patch Changes
+
+- [`8cd4cee`](https://github.com/octabits-io/platform/commit/8cd4ceea7ba23bdad94ef13d3b241a8ad1bf3186) - Fix jsonb double-parse on read in `drizzle/scope` and `drizzle/idempotency`: stored JSON-string values whose content is itself valid JSON (e.g. a postal code `"73235"`, `"true"`) came back type-mangled (number/boolean) because Drizzle's stock `jsonb()` re-parses driver-parsed strings, making schema-validating readers drop the key. `scopedConfigColumns.value` and `idempotencyKeyColumns.responseBody` now use the new exported `jsonbSafe` custom type (same `jsonb` SQL type — zero DDL — and identical write serialization; reads trust the driver's parsing). Requires a driver that parses jsonb result columns itself, as node-postgres does by default.
+
 ## 0.12.1
 
 ### Patch Changes
