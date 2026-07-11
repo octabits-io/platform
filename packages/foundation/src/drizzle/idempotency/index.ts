@@ -49,13 +49,13 @@
  */
 import { and, eq, lt, type SQL } from "drizzle-orm";
 import {
-  jsonb,
   smallint,
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
 import { createHash } from "node:crypto";
 import { extractPgError } from "../db/index.ts";
+import { jsonbSafe } from "../scope/index.ts";
 
 // ---------------------------------------------------------------------------
 // Column-set (extension mechanism)
@@ -93,7 +93,9 @@ export const idempotencyKeyColumns = {
   key: text().notNull(),
   requestHash: text("request_hash").notNull(),
   responseStatus: smallint("response_status").notNull(),
-  responseBody: jsonb("response_body").notNull(),
+  // jsonbSafe (not stock jsonb): a bare JSON-string body like `"ok"` must
+  // round-trip as a string, not get double-parsed on read.
+  responseBody: jsonbSafe("response_body").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
     .notNull(),

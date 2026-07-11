@@ -6,6 +6,7 @@ import {
   baseScopeColumns,
   bytea,
   encryptionKeyColumns,
+  jsonbSafe,
   scopedConfigColumns,
 } from "./index";
 
@@ -110,12 +111,48 @@ describe("scopedConfigColumns", () => {
   it("stores value as jsonb", () => {
     expect(getTableColumns(config).value.getSQLType()).toBe("jsonb");
   });
+
+  it("round-trips JSON-string values without double-parsing (jsonbSafe)", () => {
+    // node-postgres parses jsonb itself, so the driver hands the column a
+    // JS string "73235" for the stored JSON string "73235". Stock jsonb()
+    // would JSON.parse it AGAIN → number 73235. Regression for the
+    // legal_address_postal_code config drop.
+    const value = getTableColumns(config).value;
+    expect(value.mapFromDriverValue("73235")).toBe("73235");
+    expect(value.mapFromDriverValue("true")).toBe("true");
+    expect(value.mapFromDriverValue("null")).toBe("null");
+    // Non-string driver values (objects, numbers, booleans) pass through.
+    expect(value.mapFromDriverValue({ a: 1 })).toEqual({ a: 1 });
+    expect(value.mapFromDriverValue(42)).toBe(42);
+  });
+
+  it("serializes writes identically to stock jsonb (JSON.stringify)", () => {
+    const value = getTableColumns(config).value;
+    expect(value.mapToDriverValue("73235")).toBe('"73235"');
+    expect(value.mapToDriverValue({ a: 1 })).toBe('{"a":1}');
+    expect(value.mapToDriverValue(42)).toBe("42");
+  });
 });
 
 describe("bytea custom type", () => {
   it("resolves to the bytea SQL type", () => {
     const probe = pgTable("probe", { blob: bytea("blob") });
     expect(getTableColumns(probe).blob.getSQLType()).toBe("bytea");
+  });
+});
+
+describe("jsonbSafe custom type", () => {
+  const probe = pgTable("probe", { body: jsonbSafe("body") });
+
+  it("resolves to the jsonb SQL type (zero-DDL swap for stock jsonb)", () => {
+    expect(getTableColumns(probe).body.getSQLType()).toBe("jsonb");
+  });
+
+  it("trusts driver-parsed values instead of re-parsing strings", () => {
+    const body = getTableColumns(probe).body;
+    expect(body.mapFromDriverValue("ok")).toBe("ok");
+    expect(body.mapFromDriverValue("123")).toBe("123");
+    expect(body.mapFromDriverValue([1, 2])).toEqual([1, 2]);
   });
 });
 

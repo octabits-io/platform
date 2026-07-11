@@ -43,7 +43,6 @@ import {
   boolean,
   customType,
   integer,
-  jsonb,
   text,
   timestamp,
 } from "drizzle-orm/pg-core";
@@ -60,6 +59,35 @@ export const bytea = customType<{ data: Buffer; driverData: Buffer }>({
     return value;
   },
   fromDriver(value: Buffer): Buffer {
+    return value;
+  },
+});
+
+/**
+ * Custom `jsonb` column type that trusts the driver's parsing instead of
+ * re-parsing.
+ *
+ * Drizzle's stock `jsonb()` defensively runs `JSON.parse` on any *string* it
+ * receives from the driver (a fallback for drivers that return jsonb as raw
+ * text). `pg` (node-postgres) already parses jsonb, so a stored top-level JSON
+ * **string whose content is itself valid JSON** gets parsed a second time and
+ * silently changes type on read: `"73235"` → `73235` (number), `"true"` →
+ * `true` (boolean), `"null"` → `null`. Key/value config is exactly the kind
+ * of data that hits this (postal codes, numeric-looking free text), breaking
+ * the write→read round-trip.
+ *
+ * Writes serialize identically to stock (`JSON.stringify`); reads pass the
+ * driver value through untouched. Requires a driver that parses json/jsonb
+ * result columns itself (node-postgres does by default).
+ */
+export const jsonbSafe = customType<{ data: unknown; driverData: unknown }>({
+  dataType() {
+    return "jsonb";
+  },
+  toDriver(value: unknown): string {
+    return JSON.stringify(value);
+  },
+  fromDriver(value: unknown): unknown {
     return value;
   },
 });
@@ -165,7 +193,7 @@ export const encryptionKeyColumns = {
  */
 export const scopedConfigColumns = {
   key: text().notNull(),
-  value: jsonb().notNull(),
+  value: jsonbSafe().notNull(),
   encrypted: boolean().notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
     .defaultNow()
