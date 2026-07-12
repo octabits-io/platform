@@ -47,7 +47,15 @@ of the octabits stack, not a standalone kit.
   `createPathSegmentScopeParser('tenant')` for `/tenant/:id/`, or `() => 'default'`
   for single-scope deployments (it matches the segment's last occurrence and caps
   key length at 256).
+  The returned plugin composes under prefixed parents (`.use()` it anywhere in a
+  nested route tree); matched requests are internally re-addressed, so
+  `resolveScope` should read the public URL from its `url` argument, not from
+  `context.request.url`.
   `elysia-mcp` + `@modelcontextprotocol/sdk` are optional peers.
+  ⚠️ On **Node runtimes** (e.g. vitest), `elysia-mcp` ≤0.1.1 calls
+  `Bun.randomUUIDv7()` on every stateless request — shim it in test setup
+  *after* importing `elysia` (so Elysia's runtime detection is unaffected):
+  `globalThis.Bun = { randomUUIDv7: () => crypto.randomUUID() }`.
 - **Env-config helpers** — `getEnv*`, `isProduction`, `parseCsv`, `parseCorsOrigins`.
 - **Response schemas** — `SCHEMA_ERROR_RESPONSE`, `SCHEMA_VALIDATION_ERROR`,
   `SCHEMA_SUCCESS_RESPONSE`, the `CommonErrorResponses` superset, and the

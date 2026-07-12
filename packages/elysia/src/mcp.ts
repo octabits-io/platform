@@ -45,6 +45,25 @@
  *
  * `elysia-mcp` and `@modelcontextprotocol/sdk` are OPTIONAL peers — only pulled
  * in by consumers of this `./mcp` subpath, keeping the root export free of them.
+ *
+ * ## Composition under prefixed parents
+ *
+ * The returned plugin composes like any Elysia plugin — `.use()` it on the
+ * root app or arbitrarily deep inside prefixed parents. This works because the
+ * inner elysia-mcp app is location-independent: the outer routes re-address
+ * every matched request to a fixed internal pathname ({@link INNER_PATH})
+ * before delegating, so `resolveScope` must read the public URL from its `url`
+ * argument rather than `context.request.url`.
+ *
+ * ## Node runtimes need a `Bun.randomUUIDv7` shim (elysia-mcp ≤0.1.1)
+ *
+ * elysia-mcp's transport calls `Bun.randomUUIDv7()` on every stateless
+ * request, which throws on Node (e.g. under vitest). Shim it in test setup,
+ * AFTER importing `elysia`/`elysia-mcp` so their runtime detection still sees
+ * Node: `globalThis.Bun = { randomUUIDv7: () => crypto.randomUUID() }`. This
+ * module deliberately does not install the shim itself — defining a `Bun`
+ * global from library code can flip Elysia's runtime detection for the whole
+ * process.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { Elysia } from 'elysia';
@@ -127,6 +146,14 @@ export interface CreateMcpRoutesOptions<S extends DisposableScope> {
    */
   resolveScope: (args: {
     scopeKey: string;
+    /**
+     * The original (public) request URL. Prefer this over
+     * `context.request.url`: the request is re-addressed to an internal fixed
+     * path before it reaches the inner MCP app, so `context.request.url` does
+     * not carry the public pathname (method, headers, body, and query string
+     * are preserved).
+     */
+    url: string;
     context: McpContext;
   }) => Promise<ResolveScopeResult<S>>;
   /**
@@ -165,7 +192,25 @@ export interface CreateMcpRoutesOptions<S extends DisposableScope> {
 /** Request-private carrier for the resolved scope, keyed by async context. */
 interface ContainerHolder<S> {
   container: S | null;
+  /** Original request URL, captured before the internal re-addressing. */
+  url: string;
 }
+
+/**
+ * Fixed pathname the inner elysia-mcp app serves. Every request the outer
+ * routes match is re-addressed to this pathname before being delegated (query
+ * string preserved), which makes the inner app location-independent: the outer
+ * routes are the single source of truth for WHERE the endpoint is served, and
+ * the plugin composes under prefixed parents like any plain Elysia plugin.
+ *
+ * Mirroring the public `prefix`/`basePath` on the inner app instead breaks
+ * nesting: when the returned plugin is `.use()`'d under a prefixed parent, the
+ * request URL carries the parent's prefix too, which the standalone inner app
+ * has never heard of — every delegated request would 404 inside
+ * `inner.handle()` while `app.routes` still showed the outer routes as
+ * registered.
+ */
+const INNER_PATH = '/mcp';
 
 /**
  * Build the `/mcp` route: `elysia-mcp` in stateless mode with a per-request
@@ -203,32 +248,36 @@ export const createMcpRoutes = <S extends DisposableScope>(options: CreateMcpRou
     return holder.container;
   };
 
-  // Inner app: the real elysia-mcp plugin. All of its per-request work
-  // (authentication, per-request setupServer, tool dispatch) runs inside the
-  // ALS context entered by the outer route handler below.
-  const inner = new Elysia({ prefix }).use(mcp({
-    basePath,
+  // Inner app: the real elysia-mcp plugin, served at the fixed INNER_PATH
+  // (see its doc comment — this is what makes the plugin compose under
+  // prefixed parents). All of its per-request work (authentication,
+  // per-request setupServer, tool dispatch) runs inside the ALS context
+  // entered by the outer route handler below.
+  const inner = new Elysia().use(mcp({
+    basePath: INNER_PATH,
     stateless: true,
     enableJsonResponse: true,
     serverInfo,
     capabilities,
     authentication: async (context: McpContext) => {
-      const scopeKey = parseScopeKey(context.request.url);
+      const holder = storage.getStore();
+      if (!holder) {
+        // Unreachable via the outer routes; fail closed rather than leak.
+        return { response: jsonRpcError(500, -32603, 'Internal error') };
+      }
+
+      // Parse from the ORIGINAL URL — context.request was re-addressed to
+      // INNER_PATH, so its pathname no longer carries the scope key.
+      const scopeKey = parseScopeKey(holder.url);
       if (!scopeKey) {
         return { response: invalidScopeResponse() };
       }
 
-      const result = await resolveScope({ scopeKey, context });
+      const result = await resolveScope({ scopeKey, url: holder.url, context });
       if (result.response) {
         return { response: result.response };
       }
 
-      const holder = storage.getStore();
-      if (!holder) {
-        // Unreachable via the outer routes; fail closed rather than leak.
-        await result.scope.dispose?.();
-        return { response: jsonRpcError(500, -32603, 'Internal error') };
-      }
       holder.container = result.scope;
       return {};
     },
@@ -238,12 +287,24 @@ export const createMcpRoutes = <S extends DisposableScope>(options: CreateMcpRou
   }));
 
   const handleRequest = async ({ request }: { request: Request }): Promise<Response> => {
-    const holder: ContainerHolder<S> = { container: null };
+    const holder: ContainerHolder<S> = { container: null, url: request.url };
+    // Re-address the request to the inner app's fixed pathname (query string
+    // preserved; the MCP transport routes on method/headers/body, not path).
+    const innerUrl = new URL(request.url);
+    innerUrl.pathname = INNER_PATH;
+    const forwarded = new Request(innerUrl.toString(), {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+      // Node's fetch (undici) requires half-duplex when forwarding a body
+      // stream; Bun accepts and ignores it.
+      ...(request.body ? { duplex: 'half' } : {}),
+    } as RequestInit);
     try {
       // Everything downstream — elysia-mcp's authentication hook, the
       // per-request setupServer, and tool handler execution — descends from
       // this async context, so getContainer() resolves this request's holder.
-      return await storage.run(holder, () => inner.handle(request));
+      return await storage.run(holder, () => inner.handle(forwarded));
     } finally {
       const container = holder.container;
       holder.container = null;
@@ -260,10 +321,15 @@ export const createMcpRoutes = <S extends DisposableScope>(options: CreateMcpRou
     }
   };
 
-  // Mirror elysia-mcp's own route registration (`${basePath}/*` + `basePath`
-  // under `prefix`) so the outer wrapper matches exactly what the inner app
-  // serves. `parse: 'none'` keeps the body stream untouched for the inner app.
+  // The outer routes place the endpoint at `<prefix><basePath>` (+ `/*`) and
+  // compose under prefixed parents like any plain Elysia plugin; handleRequest
+  // re-addresses matched requests to the inner app's fixed INNER_PATH.
+  // `parse: 'none'` keeps the body stream untouched for the inner app's own
+  // JSON parsing. The wildcard path is normalized by hand: a root basePath
+  // would otherwise yield `'//*'`, which Elysia fails to match under nested
+  // parent prefixes.
+  const wildcardPath = `${basePath === '/' ? '' : basePath}/*`;
   return new Elysia({ prefix })
-    .all(`${basePath}/*`, handleRequest, { parse: 'none' })
+    .all(wildcardPath, handleRequest, { parse: 'none' })
     .all(basePath, handleRequest, { parse: 'none' });
 };
