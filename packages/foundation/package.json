@@ -154,7 +154,7 @@
     "ical.js": "^2.2.1",
     "jose": "^6.2.3",
     "pg": "^8.22.0",
-    "tsdown": "^0.22.4",
+    "tsdown": "^0.22.5",
     "vitest": "^4.1.10"
   },
   "peerDependencies": {
