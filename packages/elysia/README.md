@@ -82,4 +82,6 @@ const app = new Elysia()
 if (!result.ok) return statusErrorWithSet(set, result.error, { tenant_not_found: 403 });
 ```
 
-Peer dependencies: `elysia`, `zod`.
+Peer dependencies: `@octabits-io/foundation`, `elysia`, `zod` (plus the
+optional `elysia-mcp` + `@modelcontextprotocol/sdk` peers, pulled in only by
+the `./mcp` subpath).

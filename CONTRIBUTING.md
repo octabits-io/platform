@@ -22,6 +22,7 @@ Requires:
 pnpm build
 pnpm test
 pnpm typecheck
+pnpm lint          # only flow defines a lint task (layer-boundary check)
 
 # Single package
 pnpm --filter @octabits-io/foundation build
@@ -31,8 +32,9 @@ pnpm --filter @octabits-io/foundation test
 cd packages/foundation && npx vitest run src/result/types.test.ts
 
 # flow and queue split unit vs integration (integration requires Docker)
-cd packages/flow && npx vitest run --project unit
-cd packages/flow && npx vitest run --project integration
+cd packages/flow && pnpm test:unit          # core + ai layers, no services
+cd packages/flow && pnpm test:integration   # store-pg + dispatcher-pgboss, real Postgres
+cd packages/queue && pnpm test:integration  # pg-boss against real Postgres
 ```
 
 ### Commit conventions
@@ -62,8 +64,8 @@ Common types:
 Examples:
 
 ```bash
-git commit -m "feat(workflow): add retry policy to step execution"
-git commit -m "fix(pii): handle empty plaintext in encrypt"
+git commit -m "feat(flow): add retry policy to step execution"
+git commit -m "fix(foundation): handle empty plaintext in pii encrypt"
 git commit -m "chore: update drizzle-orm to v0.40"
 ```
 
@@ -71,7 +73,7 @@ git commit -m "chore: update drizzle-orm to v0.40"
 
 We use [Changesets](https://github.com/changesets/changesets) to manage versions and changelogs.
 
-The core packages (`foundation`, `drizzle-toolkit`, `pii`, `flow`) are **linked** — when one bumps to a new version, the others that also have changesets share the same version number. The rest (`elysia`, `queue`, `storage`, `mail`, `captcha`, `vault`) version independently. Packages without changesets are not published.
+All packages version **independently** (the former `linked` group was dissolved when `pii` and `drizzle-toolkit` were folded into `foundation`). Packages without changesets are not published.
 
 ### Step 1: Add a changeset
 
@@ -133,35 +135,43 @@ After publishing, push the version commit and tags:
 git push --follow-tags
 ```
 
+### One-command release
+
+`scripts/release.sh` orchestrates the whole flow with safety gates
+(preflight → quality gates → version → commit → push → publish → push tags):
+
+```bash
+pnpm release            # interactive: prints the plan, asks to confirm
+pnpm release --yes      # non-interactive
+pnpm release --dry-run  # run every gate + show the version plan, change nothing
+```
+
 ### Quick reference
 
 ```bash
 pnpm changeset              # add a changeset (interactive)
 pnpm changeset:version      # bump versions + update changelogs
 pnpm changeset:publish      # build + publish to npm
+pnpm release                # all of the above with safety gates
 ```
 
 ## Package overview
 
 | Package | Description | Exports |
 |---------|-------------|---------|
-| `@octabits-io/foundation` | Result types, IoC container, logger, utilities, config-schema fragments, RBAC, OIDC/JWT auth | `./result` `./ioc` `./logger` `./utils` `./config-schema` `./rbac` `./auth` |
-| `@octabits-io/drizzle-toolkit` | DB error handling, pagination, factory, migrations, scoped CRUD, RLS scoping, idempotency, tenant schema primitives | `./db` `./factory` `./migrate` `./tenant` `./crud` `./rls` `./idempotency` |
-| `@octabits-io/pii` | PII encryption (age/X25519), blind indexes, master key provider | `.` |
-| `@octabits-io/elysia` | Elysia middleware & helpers (security headers, client IP, errors, rate limit, app skeleton + graceful shutdown, health routes, env-config helpers) | `.` `./mcp` |
-| `@octabits-io/queue` | pg-boss queue base (BossManager, queue/worker/DLQ trio; system + tenant payload bases) | `.` |
-| `@octabits-io/storage` | Namespace-partitioned blob storage contract + S3-compatible/Postgres providers | `.` `./s3` `./postgres` |
-| `@octabits-io/vault` | HashiCorp Vault boot-time secret loader (KV-v2, k8s SA-JWT / token auth) | `.` |
-| `@octabits-io/captcha` | Provider-agnostic captcha contract + noop + config schema; Altcha provider | `.` `./altcha` |
-| `@octabits-io/mail` | Mail transport contract + providers | `.` `./smtp` `./mailjet` `./brevo` |
-| `@octabits-io/flow` | Durable DAG workflow engine + AI add-on | `.` `./ai` `./store-pg` `./dispatcher-pgboss` |
+| `@octabits-io/foundation` | Result types, IoC container, logger, utilities, config-schema fragments, RBAC, JWT/API-key auth, scoped signing, Vault loader, captcha contract + ALTCHA, PII encryption, Drizzle helpers, iCal ingestion | `./result` `./ioc` `./logger` `./utils` `./config-schema` `./rbac` `./auth` `./signing` `./vault` `./captcha` `./captcha/altcha` `./pii` `./drizzle/*` `./ical` |
+| `@octabits-io/flow` | Durable DAG workflow engine + AI add-on, Postgres store, pg-boss dispatcher | `.` `./ai` `./store-pg` `./dispatcher-pgboss` |
+| `@octabits-io/elysia` | Elysia middleware & helpers (security headers, client IP, errors, rate limit, app skeleton + graceful shutdown, health routes, env-config helpers) + MCP harness | `.` `./mcp` |
+| `@octabits-io/queue` | pg-boss queue base (BossManager, declarative queue/worker/DLQ trio; system + scoped payload bases) | `.` |
+| `@octabits-io/storage` | Namespaced blob storage contract + S3-compatible/Postgres providers | `.` `./s3` `./postgres` |
+| `@octabits-io/mail` | Mail transport contract + transactional dispatch layer + providers | `.` `./smtp` `./mailjet` `./brevo` |
 
-Dependency graph: `drizzle-toolkit` → `foundation` (dep), `pii` → `foundation`
-(dep), `queue` → `foundation` + `pg-boss` (**peers** — `Result`/`PgBoss` are in
-its public API), `mail` → `foundation` (**peer**, same reason; vendor SDKs are
-optional peers), `elysia` → `foundation` (**peer** — errors are `OctError`),
-`foundation` → `jose` (optional peer, `./auth` only). `flow` is deliberately
-standalone (zero deps, structural `Result`/`Logger`) — it is the one package
-with standalone-OSS posture. The former `schema` package was merged into
-`drizzle-toolkit` (`./tenant`); the former `drizzle-test` package (briefly
-`drizzle-toolkit/testing`) was removed — no consumers.
+Dependency graph: `elysia`, `queue`, `storage`, and `mail` declare `foundation`
+as a **peer** (its `Result`/`OctError`/`Logger` types appear in their public
+APIs). Heavy/vendor deps are peer or optional-peer everywhere (aws-sdk,
+drizzle-orm, pg, pg-boss, ai, nodemailer, jose, …); `foundation`'s only hard
+deps are the tiny zero-dep `@noble/*`/`@scure/base` crypto primitives. `flow`
+is deliberately standalone (structural `Result`/`Logger`, no dependency on
+`foundation`) — it is the one package with standalone-OSS posture. The former
+standalone `pii`, `drizzle-toolkit`, `ical`, `captcha`, and `vault` packages
+were folded into `foundation` as subpath exports and deprecated on npm.

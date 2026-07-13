@@ -253,7 +253,7 @@ each `purpose` gets its own 256-bit key. Keys live behind an injected `keyStore`
 import { createScopedSigningService } from '@octabits-io/foundation/signing';
 
 const signing = createScopedSigningService({
-  infoPrefix: 'acme',                 // → HKDF info `acme-<purpose>-signing-key-v1`
+  infoPrefix: 'acme',                 // → length-prefixed HKDF info `4:acme|5:reply|signing-key-v1`
   scopeKey: tenantId,                 // opaque salt for domain separation
   keyStore: { read, write },          // your `purpose → base64-key` persistence
   masterSecret: process.env.SIGNING_MASTER_SECRET, // optional; enables derive + JWT signing

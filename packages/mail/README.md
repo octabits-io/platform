@@ -14,7 +14,8 @@ pnpm add @octabits-io/mail
 # plus the SDK for each vendor transport you actually use:
 pnpm add nodemailer      # for @octabits-io/mail/smtp
 pnpm add node-mailjet    # for @octabits-io/mail/mailjet
-pnpm add wretch          # for @octabits-io/mail/brevo
+pnpm add wretch          # for @octabits-io/mail/brevo (transport)
+pnpm add zod             # for @octabits-io/mail/brevo inbound/event parsers
 ```
 
 `@octabits-io/foundation` (`Result`, `Logger`) is a required peer dependency
