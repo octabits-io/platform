@@ -1,5 +1,11 @@
 # @octabits-io/foundation
 
+## 0.13.0
+
+### Minor Changes
+
+- [`9f37a5a`](https://github.com/octabits-io/platform/commit/9f37a5a6ed0461e2a97a10cb064a2ae73ea080ca) - `./utils` gains the last generic utility batch (reynt extraction-catalog items 25 + 24): `deepMerge`/`DeepPartial` (i18n-overlay merge semantics), `stripDefaults`, the full BCP-47 locale toolkit (`Locale`/`LocaleMap` types, `BCP47_LOCALE_REGEX`, `baseLocaleOf`, `localeFallbackChain`, `resolveLocale`/`resolveLocaleStrict`/`resolveLocaleOrAny`/`anyLocaleValue`, `matchLocaleTag`, `parseAcceptLanguage`, `negotiateContentLocale`, `isLocaleMapComplete`/`missingLocales`/`missingLocalesInUse`, `isLocaleMap`/`resolveLocaleDeep`), WCAG contrast helpers (`getContrastColor`, `getContrastTextMode`, `TAILWIND_COLOR_HEX`/`TAILWIND_COLOR_NAMES`), and `hashCyrb53` — previously a private copy inside `./ical`, now public (the ical fetcher imports it from utils).
+
 ## 0.12.2
 
 ### Patch Changes
