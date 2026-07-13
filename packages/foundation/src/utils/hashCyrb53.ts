@@ -1,14 +1,9 @@
-// TODO(catalog #24): `hashCyrb53` is inlined here as a private, package-local
-// copy. Catalog item #24 moves a shared implementation into
-// `@octabits-io/foundation`; once it lands, import from there and delete this
-// file.
-
 /**
  * cyrb53 — a fast, well-distributed **non-cryptographic** 53-bit string hash.
  *
- * Used here only for change detection (comparing two calendar snapshots to
- * decide whether anything meaningful changed). It is not, and must not be used
- * as, a security or integrity primitive.
+ * Suited to cheap change detection (comparing two snapshots to decide whether
+ * anything meaningful changed) and stable bucketing. It is not, and must not
+ * be used as, a security or integrity primitive.
  *
  * @param str - Input string to hash.
  * @param seed - Optional seed; the same input + seed always yields the same hash.

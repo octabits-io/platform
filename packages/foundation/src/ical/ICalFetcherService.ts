@@ -1,6 +1,6 @@
 import { ok, err, toOctError, type Result, type OctError } from '../result/index.ts';
 import type { Logger } from '../logger/index.ts';
-import { hashCyrb53 } from './hash.ts';
+import { hashCyrb53 } from '../utils/hashCyrb53.ts';
 
 export interface ICalFetchResult {
   /** The raw iCal data with DTSTAMP lines removed. */
