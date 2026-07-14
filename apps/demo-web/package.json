@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/demo-web",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "description": "Contact-desk demo SPA — living documentation for @octabits-io/nuxt-ui-kit and the first in-repo consumer that typechecks the kit's .vue SFCs",

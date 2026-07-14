@@ -1,5 +1,13 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.2.1
+
+### Patch Changes
+
+- [`78a2a88`](https://github.com/octabits-io/platform/commit/78a2a880710084db50ddbaa187928ca4b27c0273) - Fix a type error in `SubSidebar.vue`'s mobile toggle. The inline `@click="open = true"` compiled to a handler returning `boolean`, which is not assignable to `UButton`'s `onClick` type (`(event) => void | Promise<void>` — a union, so TypeScript's "a value-returning function is assignable to a void-returning signature" rule does not apply). Any consumer running `vue-tsc` over the source-shipped SFC hit `TS2322`. The handler is now a named `openSidebar()` function.
+
+- [`3f6c42f`](https://github.com/octabits-io/platform/commit/3f6c42fcb36ffce685b3db89338a1c046f787bfb) - Fix `createApiErrorMessenger`'s validation lookups being undefinable: field paths and message texts are now slugged (lowercased, non-alphanumeric runs collapsed to `_`) before the `validation.fields.<slug>` / `validation.messages.<slug>` lookups, so dotted paths (`items.0.email` → `items_0_email`) and punctuated messages (`Expected string to match 'email'` → `expected_string_to_match_email`) resolve to flat, definable vue-i18n keys instead of always falling through to raw values.
+
 ## 0.2.0
 
 ### Minor Changes
