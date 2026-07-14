@@ -158,7 +158,7 @@ pnpm release                # all of the above with safety gates
 
 | Package | Description | Exports |
 |---------|-------------|---------|
-| `@octabits-io/framework` | Server framework toolkit: base modules (Result, IoC, logger, utils, config-schema, RBAC, auth, signing, Vault, captcha, PII, Drizzle helpers, iCal) plus app modules for Elysia, pg-boss queues, blob storage, and mail | `./result` `./ioc` `./logger` `./utils` `./config-schema` `./rbac` `./auth` `./signing` `./vault` `./captcha` `./captcha/altcha` `./pii` `./drizzle/*` `./ical` `./elysia` `./elysia/mcp` `./queue` `./storage` `./storage/s3` `./storage/postgres` `./mail` `./mail/smtp` `./mail/mailjet` `./mail/brevo` |
+| `@octabits-io/framework` | Server framework toolkit: base modules (Result, IoC, logger, utils, config-schema, RBAC, auth, signing, Vault, captcha, PII, Drizzle helpers, iCal) plus app modules for Elysia, pg-boss queues, blob storage, and mail | `./result` `./ioc` `./logger` `./utils` `./config-schema` `./rbac` `./auth` `./signing` `./vault` `./captcha` `./captcha/altcha` `./pii` `./drizzle/*` `./ical` `./elysia` `./elysia/mcp` `./elysia/testing` `./queue` `./storage` `./storage/s3` `./storage/postgres` `./mail` `./mail/smtp` `./mail/mailjet` `./mail/brevo` |
 | `@octabits-io/nuxt-ui-kit` | Frontend kit for Nuxt/Vue admin SPAs (source-shipped SFCs) | `.` `./zod` `./dates` `./ai` `./components/*` |
 
 Inside `framework`, a boundary lint (`scripts/check-boundaries.mjs`) enforces the

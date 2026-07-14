@@ -85,7 +85,10 @@ if (!result.ok) {
 ## Dispatch pipeline
 
 `createBaseMailService` is the higher-level service the contract mentions: it
-turns typed send-params into a delivered `MailMessage`. It renders a template,
+turns typed send-params into a delivered `MailMessage`. (The matching config
+fragment — a discriminated union over the four shipped transports whose fields
+spread straight into this service — ships as `MAIL_CONFIG_SCHEMA` in
+[`@octabits-io/framework/config-schema`](./foundation.md).) It renders a template,
 resolves per-scope config, picks recipients by delivery mode, selects a
 transport (a scope's own mail server vs a platform fallback), applies redirect
 subject-prefixing and an optional dev-override, sends, and fires an `onSend`
