@@ -24,14 +24,16 @@ pnpm test
 pnpm typecheck
 
 # Single package
-pnpm --filter @octabits-io/foundation build
-pnpm --filter @octabits-io/foundation test
+pnpm --filter @octabits-io/framework build
+pnpm --filter @octabits-io/framework test
 
 # Single test file (from package directory)
-cd packages/foundation && npx vitest run src/result/types.test.ts
+cd packages/framework && npx vitest run src/result/types.test.ts
 
-# queue splits unit vs integration (integration requires Docker)
-cd packages/queue && pnpm test:integration  # pg-boss against real Postgres
+# framework splits unit vs integration (integration requires Docker)
+cd packages/framework && pnpm test:unit
+cd packages/framework && pnpm test:integration  # queue module: pg-boss against real Postgres
+cd packages/framework && pnpm lint              # module-boundary check
 ```
 
 ### Commit conventions
@@ -61,8 +63,8 @@ Common types:
 Examples:
 
 ```bash
-git commit -m "feat(queue): add retry policy to worker registration"
-git commit -m "fix(foundation): handle empty plaintext in pii encrypt"
+git commit -m "feat(framework): add retry policy to queue worker registration"
+git commit -m "fix(framework): handle empty plaintext in pii encrypt"
 git commit -m "chore: update drizzle-orm to v0.40"
 ```
 
@@ -70,7 +72,7 @@ git commit -m "chore: update drizzle-orm to v0.40"
 
 We use [Changesets](https://github.com/changesets/changesets) to manage versions and changelogs.
 
-All packages version **independently** (the former `linked` group was dissolved when `pii` and `drizzle-toolkit` were folded into `foundation`). Packages without changesets are not published.
+The two packages version **independently of each other**. Packages without changesets are not published.
 
 ### Step 1: Add a changeset
 
@@ -156,18 +158,18 @@ pnpm release                # all of the above with safety gates
 
 | Package | Description | Exports |
 |---------|-------------|---------|
-| `@octabits-io/foundation` | Result types, IoC container, logger, utilities, config-schema fragments, RBAC, JWT/API-key auth, scoped signing, Vault loader, captcha contract + ALTCHA, PII encryption, Drizzle helpers, iCal ingestion | `./result` `./ioc` `./logger` `./utils` `./config-schema` `./rbac` `./auth` `./signing` `./vault` `./captcha` `./captcha/altcha` `./pii` `./drizzle/*` `./ical` |
-| `@octabits-io/elysia` | Elysia middleware & helpers (security headers, client IP, errors, rate limit, app skeleton + graceful shutdown, health routes, env-config helpers) + MCP harness | `.` `./mcp` |
-| `@octabits-io/queue` | pg-boss queue base (BossManager, declarative queue/worker/DLQ trio; system + scoped payload bases) | `.` |
-| `@octabits-io/storage` | Namespaced blob storage contract + S3-compatible/Postgres providers | `.` `./s3` `./postgres` |
-| `@octabits-io/mail` | Mail transport contract + transactional dispatch layer + providers | `.` `./smtp` `./mailjet` `./brevo` |
+| `@octabits-io/framework` | Server framework toolkit: base modules (Result, IoC, logger, utils, config-schema, RBAC, auth, signing, Vault, captcha, PII, Drizzle helpers, iCal) plus app modules for Elysia, pg-boss queues, blob storage, and mail | `./result` `./ioc` `./logger` `./utils` `./config-schema` `./rbac` `./auth` `./signing` `./vault` `./captcha` `./captcha/altcha` `./pii` `./drizzle/*` `./ical` `./elysia` `./elysia/mcp` `./queue` `./storage` `./storage/s3` `./storage/postgres` `./mail` `./mail/smtp` `./mail/mailjet` `./mail/brevo` |
+| `@octabits-io/nuxt-ui-kit` | Frontend kit for Nuxt/Vue admin SPAs (source-shipped SFCs) | `.` `./zod` `./dates` `./ai` `./components/*` |
 
-Dependency graph: `elysia`, `queue`, `storage`, and `mail` declare `foundation`
-as a **peer** (its `Result`/`OctError`/`Logger` types appear in their public
-APIs). Heavy/vendor deps are peer or optional-peer everywhere (aws-sdk,
-drizzle-orm, pg, pg-boss, nodemailer, jose, …); `foundation`'s only hard
-deps are the tiny zero-dep `@noble/*`/`@scure/base` crypto primitives. The former
-standalone `pii`, `drizzle-toolkit`, `ical`, `captcha`, and `vault` packages
-were folded into `foundation` as subpath exports and deprecated on npm. The
-durable workflow engine `@octabits-io/flow` moved to its own repository,
-[octabits-io/flow](https://github.com/octabits-io/flow) (2026-07-14).
+Inside `framework`, a boundary lint (`scripts/check-boundaries.mjs`) enforces the
+module tiers: the four app modules (`elysia`, `queue`, `storage`, `mail`) may import
+base modules but never each other, and each vendor SDK stays confined to its module.
+Heavy/vendor deps are optional peers everywhere (aws-sdk, drizzle-orm, pg, pg-boss,
+elysia, nodemailer, jose, …); the only hard deps are the tiny zero-dep
+`@noble/*`/`@scure/base` crypto primitives plus elysia's `@sinclair/typebox`/`elysia-rate-limit`.
+
+History: the former standalone `pii`, `drizzle-toolkit`, `ical`, `captcha`, and
+`vault` packages were folded into `foundation` (2026-06), and `foundation`,
+`elysia`, `queue`, `storage`, and `mail` were merged into `framework` (2026-07-14) —
+all deprecated on npm. The durable workflow engine `@octabits-io/flow` moved to its
+own repository, [octabits-io/flow](https://github.com/octabits-io/flow) (2026-07-14).

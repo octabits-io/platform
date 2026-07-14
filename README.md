@@ -6,16 +6,15 @@ Monorepo for shared platform libraries. Managed with [pnpm workspaces](https://p
 
 | Package | Description |
 |---|---|
-| [`foundation`](./packages/foundation) | Base utilities: Result types, IoC container, structured logger, config-schema fragments, RBAC, JWT/API-key auth, scoped signing, Vault secret loader, captcha contract (+ ALTCHA), PII encryption, Drizzle ORM helpers (`./drizzle/*`), iCal ingestion |
-| [`elysia`](./packages/elysia) | Elysia middleware & helpers: security headers, client IP, error mapping, response schemas, rate limiting, health routes, app skeleton, MCP harness (`./mcp`) |
-| [`queue`](./packages/queue) | pg-boss queue base: lifecycle/monitoring facade + declarative queue/worker/DLQ trio with Zod-validated payloads |
-| [`storage`](./packages/storage) | Namespaced blob storage contract; S3-compatible and Postgres providers behind subpaths |
-| [`mail`](./packages/mail) | Provider-agnostic mail transport contract + transactional dispatch layer; SMTP/Mailjet/Brevo transports behind per-provider subpaths |
+| [`framework`](./packages/framework) | Opinionated server framework toolkit behind granular subpaths: Result types, IoC container, structured logger, config-schema fragments, RBAC, JWT/API-key auth, scoped signing, Vault secret loader, captcha contract (+ ALTCHA), PII encryption, Drizzle ORM helpers (`/drizzle/*`), iCal ingestion, Elysia middleware & MCP harness (`/elysia`), pg-boss queue base (`/queue`), namespaced blob storage (`/storage`), and mail transport + dispatch (`/mail`) |
 | [`nuxt-ui-kit`](./packages/nuxt-ui-kit) | Frontend kit for Nuxt/Vue admin SPAs: OIDC session harness, auth/org store cores, route-guard builder, Eden Treaty client factory, confirm/date/AI-review components (source-shipped SFCs), date + AI-workflow engines behind subpaths |
+
+`framework` supersedes the former `@octabits-io/{foundation,elysia,queue,storage,mail}`
+packages (merged 2026-07-14; imports map 1:1 — see the
+[migration table](./packages/framework/README.md#migrating-from-the-split-packages)).
 
 The durable DAG workflow engine `@octabits-io/flow` lives in its own repository:
 [octabits-io/flow](https://github.com/octabits-io/flow) (extracted from this monorepo 2026-07-14).
-
 
 ## Getting Started
 
@@ -29,23 +28,21 @@ pnpm install
 pnpm build       # Build all packages
 pnpm test        # Run all tests
 pnpm typecheck   # Type-check all packages
+pnpm lint        # Package lint tasks (framework's module-boundary check)
 pnpm clean       # Remove all build artifacts and node_modules
 ```
 
-Integration tests (queue) run against real Postgres via Testcontainers — Docker must be running.
+Integration tests (framework's queue module) run against real Postgres via Testcontainers — Docker must be running.
 
 ## Versioning for consumers
 
-These packages are pre-1.0 and managed with Changesets. All packages version
-**independently**. Two things to know when depending on them:
+These packages are pre-1.0 and managed with Changesets. A caret range on a `0.x`
+package (`^0.9.0`) resolves to `>=0.9.0 <0.10.0`, so it will **not** auto-pull the
+next minor. Each release needs a deliberate bump on the consumer side.
 
-- A caret range on a `0.x` package (`^0.9.0`) resolves to `>=0.9.0 <0.10.0`, so
-  it will **not** auto-pull the next minor. Each release needs a deliberate
-  bump on the consumer side.
-- `elysia`, `queue`, `storage`, and `mail` declare `@octabits-io/foundation` as
-  a **wide peer** (`>=0.2.0 <1`) because its `Result`/`OctError`/`Logger` types
-  appear in their public APIs. Install `foundation` yourself; as long as your
-  own range admits it, a single instance is resolved.
+Everything heavy in `framework` is an optional peer dependency — install only the
+vendor SDKs for the modules you use (`elysia`, `pg-boss`, `drizzle-orm`, `pg`,
+`@aws-sdk/client-s3`, `nodemailer`, …). `zod` is the one required peer.
 
 ## License
 

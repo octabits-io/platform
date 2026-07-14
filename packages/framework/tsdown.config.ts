@@ -1,0 +1,45 @@
+import { defineConfig } from "tsdown";
+
+export default defineConfig({
+  entry: {
+    "result/index": "src/result/index.ts",
+    "ioc/index": "src/ioc/index.ts",
+    "logger/index": "src/logger/index.ts",
+    "utils/index": "src/utils/index.ts",
+    "config-schema/index": "src/config-schema/index.ts",
+    "rbac/index": "src/rbac/index.ts",
+    "auth/index": "src/auth/index.ts",
+    "signing/index": "src/signing/index.ts",
+    "vault/index": "src/vault/index.ts",
+    "captcha/index": "src/captcha/index.ts",
+    "captcha/altcha": "src/captcha/altcha.ts",
+    "pii/index": "src/pii/index.ts",
+    "drizzle/db/index": "src/drizzle/db/index.ts",
+    "drizzle/factory/index": "src/drizzle/factory/index.ts",
+    "drizzle/migrate/index": "src/drizzle/migrate/index.ts",
+    "drizzle/scope/index": "src/drizzle/scope/index.ts",
+    "drizzle/idempotency/index": "src/drizzle/idempotency/index.ts",
+    "drizzle/crud/index": "src/drizzle/crud/index.ts",
+    "drizzle/scoped-key-store/index": "src/drizzle/scoped-key-store/index.ts",
+    "drizzle/config/index": "src/drizzle/config/index.ts",
+    "drizzle/rls/index": "src/drizzle/rls/index.ts",
+    "ical/index": "src/ical/index.ts",
+    "elysia/index": "src/elysia/index.ts",
+    "elysia/mcp": "src/elysia/mcp.ts",
+    "queue/index": "src/queue/index.ts",
+    "storage/index": "src/storage/index.ts",
+    "storage/s3": "src/storage/s3.ts",
+    "storage/postgres": "src/storage/postgres.ts",
+    "mail/index": "src/mail/index.ts",
+    "mail/smtp": "src/mail/smtp.ts",
+    "mail/mailjet": "src/mail/mailjet.ts",
+    "mail/brevo": "src/mail/brevo.ts",
+  },
+  format: "esm",
+  // Rolldown code-splits ESM entries automatically, so shared base modules
+  // (result, logger, …) are deduplicated between entries.
+  // Emit .js/.d.ts (matching the exports map) instead of tsdown's default .mjs/.d.mts.
+  fixedExtension: false,
+  dts: true,
+  clean: true,
+});
