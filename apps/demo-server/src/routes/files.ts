@@ -17,7 +17,7 @@
  */
 import { Elysia, t } from 'elysia';
 import { z } from 'zod';
-import { errorResponses, statusErrorWithSet } from '@octabits-io/framework/elysia';
+import { errorResponses, statusErrorWithSet, successResponses } from '@octabits-io/framework/elysia';
 import { createWebResponse } from '@octabits-io/framework/storage/postgres';
 import type { IoC } from '@octabits-io/framework/ioc';
 import type { DemoServices } from '../container.ts';
@@ -54,7 +54,7 @@ export function createFileRoutes(container: IoC<DemoServices>) {
         // Multipart needs Elysia's own `t.File()` — a zod schema cannot express
         // the runtime File the body parser produces.
         body: t.Object({ file: t.File() }),
-        response: { 201: SCHEMA_FILE, ...errorResponses(400, 429, 500) },
+        response: { ...successResponses(201, SCHEMA_FILE), ...errorResponses(400, 429, 500) },
         detail: { summary: 'Upload a file (multipart/form-data)' },
       },
     )

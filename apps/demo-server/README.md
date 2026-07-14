@@ -62,6 +62,8 @@ Tables are created at startup with idempotent `CREATE TABLE IF NOT EXISTS` DDL
 | POST | `/api/tools/slugify` | `slugify` from `…/utils` |
 | GET | `/api/captcha/challenge` | Captcha contract (no-op provider) |
 | POST | `/api/captcha/verify` | Redeem a solution → verified token |
+| GET | `/api/protected/whoami` | **Bearer API-key auth** (`createBearerAuthPlugin` + `…/auth`) — the boot log prints a `demo_…` key once |
+| GET | `/swagger` | OpenAPI UI (`buildSwaggerOptions` + caller-built `@elysiajs/swagger`; `ENABLE_SWAGGER=false` to disable) |
 
 ### The one flow worth following
 
@@ -110,18 +112,19 @@ saw nothing but preflight failures. A browser is the only client that tests CORS
 | `./ioc` | [`container.ts`](./src/container.ts) — service map, `createSystemScope` for the queue worker, and per-request child scopes (`createDemoRequestScope`) with a Scoped `settingsService` override | ✅ |
 | `./logger` | [`main.ts`](./src/main.ts) — root logger, childed per component | ✅ |
 | `./utils` | [`routes/tools.ts`](./src/routes/tools.ts) (`slugify`), `createDateProvider` in the container | ✅ |
-| `./config-schema` | [`config.ts`](./src/config.ts) — `DATABASE_CONFIG_SCHEMA`, `LOGGING_CONFIG_SCHEMA`, `nonEmptyString/Url` | ✅ |
+| `./config-schema` | [`config.ts`](./src/config.ts) — `DATABASE_CONFIG_SCHEMA`, `LOGGING_CONFIG_SCHEMA`, `MAIL_CONFIG_SCHEMA`, `createConfigParser`, `nonEmptyString/Url` | ✅ |
 | `./rbac` | [`rbac.ts`](./src/rbac.ts) — statement matrix + `admin`/`viewer` roles | ✅ |
 | `./pii` | [`services/contacts.ts`](./src/services/contacts.ts) — age encryption + HMAC blind index | ✅ |
 | `./captcha` | [`routes/tools.ts`](./src/routes/tools.ts) — no-op provider behind the real contract | ✅ |
+| `./auth` | [`api-keys.ts`](./src/api-keys.ts) — `createApiKeyFormat` + `createBearerAuthService` behind `/api/protected` (the IdP-free half; JWT validation still needs an IdP) | ✅ |
 | `./drizzle/factory` | [`main.ts`](./src/main.ts) — `createDrizzle(schema, { pool })` | ✅ |
 | `./drizzle/db` | `withDbErrorHandling`, `normalizePaginationLimit` in the contacts service | ✅ |
 | `./drizzle/scope` | [`db/schema.ts`](./src/db/schema.ts) — `scopedConfigColumns`, `bytea` | ✅ |
 | `./drizzle/crud` | [`services/notes.ts`](./src/services/notes.ts) — `createBaseCrudService` drives the whole entity | ✅ |
 | `./drizzle/config` | [`services/settings.ts`](./src/services/settings.ts) — unscoped `createScopedConfigService` | ✅ |
 | `./drizzle/idempotency` | `POST /api/contacts/:id/welcome` — `begin()` / `commit()` | ✅ |
-| `./elysia` | [`app.ts`](./src/app.ts) — `createElysiaApp`, `createHealthRoutes`, `registerGracefulShutdown`, `statusErrorWithSet`, `errorResponses`, env helpers; [`request-scope.ts`](./src/request-scope.ts) — `createRequestScopePlugin`: contacts + settings resolve via `ctx.scope` (request-seeded `role`, per-request `settingsService` cache), the `guard` rejects unknown roles with `invalid_demo_role` → 400 | ✅ |
-| `./queue` | [`queues/welcome-email.ts`](./src/queues/welcome-email.ts) — `defineQueue` + `BossManager` | ✅ |
+| `./elysia` | [`app.ts`](./src/app.ts) — `createElysiaApp`, `createHealthRoutes`, `registerGracefulShutdown`, `statusErrorWithSet`, `errorResponses`, env helpers; [`request-scope.ts`](./src/request-scope.ts) — `createRequestScopePlugin`: contacts + settings resolve via `ctx.scope` (request-seeded `role`, per-request `settingsService` cache), the `guard` rejects unknown roles with `invalid_demo_role` → 400; `successResponses` on every non-200-success route (the Eden narrowing fix); `runElysiaServer` owns [`main.ts`](./src/main.ts)'s tail; `createBearerAuthPlugin` guards `/api/protected`; `buildSwaggerOptions` + `assertNotInProduction` in [`config.ts`](./src/config.ts); [`app.test.ts`](./src/app.test.ts) runs on `…/elysia/testing`'s `testRequest` | ✅ |
+| `./queue` | [`queues/welcome-email.ts`](./src/queues/welcome-email.ts) — `defineQueue` + `BossManager`; dead letters persist to `job_audit_log` via `…/drizzle/job-audit-store` | ✅ |
 | `./storage` + `./storage/postgres` | [`routes/files.ts`](./src/routes/files.ts) — provider + `createWebResponse` + `objectStorageDdl` | ✅ |
 | `./mail` | [`services/mail.ts`](./src/services/mail.ts) — `createBaseMailService` + logger transport | ✅ |
 
@@ -129,7 +132,6 @@ Honestly not covered:
 
 | Subpath | Why not |
 | --- | --- |
-| `./auth` | Needs an IdP. The demo has no login; RBAC reads a header instead of a JWT claim, which is the only part `./auth` would feed. |
 | `./signing` | No use case here — it signs scoped tokens/tags (e.g. the `<tag>` in a `reply+…` address), which requires the inbound-mail flow below. |
 | `./vault` | Boot-time secret loading from HashiCorp Vault. Would need a Vault instance to demo anything real. |
 | `./ical` | No calendar domain in a contact desk. Bolting one on would be filler, not documentation. |
@@ -141,6 +143,10 @@ Honestly not covered:
 | `./mail` inbound/reply-address | `parseBrevoInbound`, `buildReplyAddress`, `screenInboundAttachment` need a real inbound webhook. |
 | `./captcha/altcha` | The no-op provider covers the contract; ALTCHA adds `altcha-lib` and a proof-of-work widget. |
 | `./elysia/mcp` | Skipped — see below. |
+| `./ioc`'s `withScope`/`forEachScope` | The queue module already owns the worker's scope lifecycle here; a fan-out sweep over one scope would be filler. |
+| `./drizzle/rls`'s `createGucScopeFactory` | The ioc↔rls bridge needs RLS policies + a partitioned schema; this app is single-scope by design (same reason as `./drizzle/rls` above). |
+| `./elysia`'s `createErrorMapper` | This app has no domain key→status overrides — every key hits the built-in conventions. |
+| `./signing`'s `constantTimeEquals` | No inbound webhook to verify. |
 | `./drizzle/crud`'s `createScopedCrudService` | The scoped sibling of the factory used here. Needs a scope column; this app is single-scope. |
 
 `./elysia/mcp` was left out deliberately: it needs two more optional peers

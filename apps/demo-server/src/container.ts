@@ -116,8 +116,8 @@ export async function buildContainer(deps: BuildContainerDeps): Promise<IoC<Demo
         // Resolved from the root container per send. Capturing `c` would pin a
         // scope that may already be disposed by the time a job sends.
         settings: () => container.resolve('settingsService'),
-        platformFromAddress: deps.config.mail.fromAddress,
-        platformFromName: deps.config.mail.fromName,
+        platformFromAddress: deps.config.mail.platformFromAddress,
+        platformFromName: deps.config.mail.platformFromName ?? 'Octabits Demo',
       }),
     single,
   );

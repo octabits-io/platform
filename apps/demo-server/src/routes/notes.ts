@@ -9,7 +9,7 @@
  */
 import { Elysia } from 'elysia';
 import { z } from 'zod';
-import { errorResponses, statusErrorWithSet } from '@octabits-io/framework/elysia';
+import { errorResponses, statusErrorWithSet, successResponses } from '@octabits-io/framework/elysia';
 import type { IoC } from '@octabits-io/framework/ioc';
 import type { DemoServices } from '../container.ts';
 
@@ -80,7 +80,7 @@ export function createNoteRoutes(container: IoC<DemoServices>) {
       },
       {
         body: SCHEMA_CREATE_NOTE,
-        response: { 201: SCHEMA_NOTE, ...errorResponses(400, 404, 429, 500) },
+        response: { ...successResponses(201, SCHEMA_NOTE), ...errorResponses(400, 404, 429, 500) },
         detail: { summary: 'Create a note' },
       },
     )
@@ -110,7 +110,7 @@ export function createNoteRoutes(container: IoC<DemoServices>) {
       },
       {
         params: z.object({ id: z.uuid() }),
-        response: { 204: z.undefined(), ...errorResponses(400, 404, 429, 500) },
+        response: { ...successResponses(204, z.undefined()), ...errorResponses(400, 404, 429, 500) },
         detail: { summary: 'Delete a note' },
       },
     );

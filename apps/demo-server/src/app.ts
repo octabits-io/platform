@@ -20,7 +20,13 @@
  */
 import { Elysia } from 'elysia';
 import { cors } from '@elysiajs/cors';
-import { createElysiaApp, createHealthRoutes } from '@octabits-io/framework/elysia';
+import { swagger } from '@elysiajs/swagger';
+import {
+  buildSwaggerOptions,
+  createElysiaApp,
+  createHealthRoutes,
+  type ElysiaPlugin,
+} from '@octabits-io/framework/elysia';
 import type { IoC } from '@octabits-io/framework/ioc';
 import type { AppConfig } from './config.ts';
 import type { DemoServices } from './container.ts';
@@ -31,16 +37,24 @@ import { createSettingsRoutes } from './routes/settings.ts';
 import { createQueueRoutes } from './routes/queue.ts';
 import { createToolRoutes } from './routes/tools.ts';
 import { createDemoScopePlugin, type DemoScopePlugin } from './request-scope.ts';
+import { createDemoApiKeys, type DemoApiKeys } from './api-keys.ts';
+import { createProtectedRoutes } from './routes/protected.ts';
 
 export interface CreateDemoAppDeps {
   container: IoC<DemoServices>;
+  /** Injectable for tests (issue a key, assert against it). Default: fresh set with a logged bootstrap key. */
+  apiKeys?: DemoApiKeys;
   config: AppConfig;
   /** Readiness probe — resolves when the app can serve traffic. */
   checkReady: () =>  Promise<void>;
 }
 
 /** Every `/api/*` route. Exported separately so the type stays inspectable. */
-export function createApiRoutes(container: IoC<DemoServices>, scopePlugin: DemoScopePlugin) {
+export function createApiRoutes(
+  container: IoC<DemoServices>,
+  scopePlugin: DemoScopePlugin,
+  apiKeys: DemoApiKeys,
+) {
   // Two resolution styles, on purpose (both are documentation):
   // contacts + settings go through the per-request scope (`ctx.scope`) because
   // the request seeds state they need (role, the per-request settings cache);
@@ -51,20 +65,47 @@ export function createApiRoutes(container: IoC<DemoServices>, scopePlugin: DemoS
     .use(createFileRoutes(container))
     .use(createSettingsRoutes(scopePlugin))
     .use(createQueueRoutes(container))
-    .use(createToolRoutes(container));
+    .use(createToolRoutes(container))
+    .use(createProtectedRoutes(apiKeys));
 }
 
-export function createDemoApp({ container, config, checkReady }: CreateDemoAppDeps) {
+export function createDemoApp({ container, config, checkReady, ...deps }: CreateDemoAppDeps) {
   const logger = container.resolve('logger');
   const scopePlugin = createDemoScopePlugin(container, logger.child({ component: 'request-scope' }));
+  const apiKeys = deps.apiKeys ?? createDemoApiKeys(logger.child({ component: 'api-keys' }));
 
   const routes = new Elysia()
     .use(createHealthRoutes({ checkReady, logger: logger.child({ component: 'health' }) }))
-    .use(createApiRoutes(container, scopePlugin));
+    .use(createApiRoutes(container, scopePlugin, apiKeys));
+
+  // `buildSwaggerOptions` is the plain options object; the plugin itself stays
+  // a caller-built instance (the framework never depends on `@elysiajs/*`).
+  const plugins: ElysiaPlugin[] = [];
+  if (config.enableSwagger) {
+    plugins.push(
+      swagger(
+        buildSwaggerOptions({
+          title: 'Contact Desk API',
+          version: '0.0.0',
+          description: 'Demo API exercising @octabits-io/framework end to end.',
+          tags: [
+            { name: 'Contacts', description: 'PII-encrypted contacts with blind-index search' },
+            { name: 'Notes', description: 'Plain CRUD via createBaseCrudService' },
+            { name: 'Files', description: 'Postgres blob storage' },
+            { name: 'Settings', description: 'Scoped config engine' },
+            { name: 'Queue', description: 'pg-boss monitoring' },
+            { name: 'Tools', description: 'Captcha, slugify' },
+            { name: 'Protected', description: 'API-key bearer auth' },
+          ],
+        }),
+      ),
+    );
+  }
 
   return createElysiaApp(routes, {
     logger,
     plugins: [
+      ...plugins,
       cors({
         origin: config.corsOrigins,
         // `x-demo-role` is this demo's stand-in for a JWT role claim; without

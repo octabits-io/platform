@@ -19,7 +19,9 @@
 import { z } from 'zod';
 import { ok, err } from '@octabits-io/framework/result';
 import { defineQueue, SCHEMA_SYSTEM_JOB_PAYLOAD } from '@octabits-io/framework/queue';
+import { createDrizzleJobAuditStore } from '@octabits-io/framework/drizzle/job-audit-store';
 import type { DemoServices } from '../container.ts';
+import { jobAuditLog } from '../db/schema.ts';
 
 export const WELCOME_EMAIL_QUEUE = 'welcome-email';
 
@@ -70,10 +72,18 @@ export const welcomeEmailQueue = defineQueue<WelcomeEmailJob, DemoServices>({
         await scope.dispose();
       }
     },
-  // The DLQ audit sink is where a real app would persist a record. No table
-  // schema is baked into the queue base, so logging it is a valid wiring.
-  onDlqAudit: async (_scope, record) => {
-    console.warn('[dlq-audit]', JSON.stringify(record));
+  // The DLQ audit sink persists dead-lettered jobs to `job_audit_log` via
+  // `…/drizzle/job-audit-store` — the queue base keeps only the structural
+  // seam, the Drizzle implementation ships as its own subpath (same split as
+  // pii ↔ drizzle/scoped-key-store). The store is built per audit from the
+  // scope's db: dead letters are rare, and the scope owns the db's lifetime.
+  onDlqAudit: async (scope, record) => {
+    const store = createDrizzleJobAuditStore({ db: scope.resolve('db'), table: jobAuditLog });
+    const written = await store.record(record);
+    if (!written.ok) {
+      // Auditing must never take the DLQ handler down with it.
+      console.error('[dlq-audit] failed to persist audit record', written.error.message);
+    }
   },
   dlqLogFields: (data) => ({ contactId: data.contactId }),
 });

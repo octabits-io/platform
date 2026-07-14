@@ -19,6 +19,7 @@
 import { pgTable, primaryKey, text, timestamp, uuid, index } from 'drizzle-orm/pg-core';
 import { bytea, scopedConfigColumns } from '@octabits-io/framework/drizzle/scope';
 import { idempotencyKeyColumns } from '@octabits-io/framework/drizzle/idempotency';
+import { jobAuditColumns } from '@octabits-io/framework/drizzle/job-audit-store';
 
 /**
  * A contact. `email` never lands in a readable column: the ciphertext lives in
@@ -69,5 +70,12 @@ export const idempotencyKey = pgTable(
   ],
 );
 
-export const schema = { contacts, notes, settings, idempotencyKey };
+/**
+ * Dead-lettered-job audit trail — `jobAuditColumns` from
+ * `…/drizzle/job-audit-store`, unscoped (no scope column, single-scope demo).
+ * Written by the welcome-email queue's `onDlqAudit` sink.
+ */
+export const jobAuditLog = pgTable('job_audit_log', { ...jobAuditColumns });
+
+export const schema = { contacts, notes, settings, idempotencyKey, jobAuditLog };
 export type Schema = typeof schema;

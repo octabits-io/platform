@@ -56,6 +56,19 @@ const APP_DDL = `
     CONSTRAINT idempotency_key_pk PRIMARY KEY (key)
   );
   CREATE INDEX IF NOT EXISTS idempotency_key_expires_at_idx ON idempotency_key (expires_at);
+
+  CREATE TABLE IF NOT EXISTS job_audit_log (
+    id bigserial PRIMARY KEY,
+    job_id text NOT NULL,
+    queue_name text NOT NULL,
+    job_type text NOT NULL,
+    status text NOT NULL,
+    payload jsonb,
+    error_message text,
+    attempt_count integer NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    completed_at timestamptz
+  );
 `;
 
 /** Create every table this app needs. Idempotent — safe on every boot. */

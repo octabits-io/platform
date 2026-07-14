@@ -177,6 +177,9 @@ handler types accept any return.
 
 ### 2. Eden `data` does not narrow on 201/202-only routes (server-side, not fixed)
 
+> **Fixed 2026-07-14:** the framework now ships `successResponses(status, schema)`, the demo-server routes adopted it, and the `'in' data` guards this finding forced are gone from this app.
+
+
 On the demo server, routes whose only declared success code is `201`/`202` —
 `POST /api/files`, `POST /api/contacts/:id/welcome` — leak the error body into
 Eden's success type, so `if (error) return` does **not** narrow `data`:

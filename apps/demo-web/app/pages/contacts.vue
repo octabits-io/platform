@@ -157,14 +157,6 @@ async function submitEdit() {
 async function sendWelcome(contact: Contact) {
   const { data, error } = await api.contacts({ id: contact.id }).welcome.post()
   if (error) { toastError(error); return }
-  // `if (error)` does not fully narrow `data` here, and that is an upstream
-  // API-shape wrinkle rather than a quirk of this page: the route's only
-  // success code is 202, so Elysia infers an *additional* `200` entry from the
-  // handler's return-type union — which includes the `{ key, message }` body
-  // that `statusErrorWithSet` returns. Eden then reads `data` as
-  // `Res[200 | 202]`, error body included. Routes that declare an explicit
-  // `200:` (the list/search/settings ones) narrow cleanly. See the README.
-  if (!('jobId' in data)) return
   toast.add({
     title: t('contacts.welcome.success', { id: data.jobId }),
     description: data.replayed ? t('contacts.welcome.replayed') : undefined,

@@ -11,10 +11,14 @@ import { z } from 'zod';
 import {
   DATABASE_CONFIG_SCHEMA,
   LOGGING_CONFIG_SCHEMA,
+  MAIL_CONFIG_SCHEMA,
+  booleanFromEnv,
+  createConfigParser,
   nonEmptyString,
   nonEmptyUrl,
 } from '@octabits-io/framework/config-schema';
 import {
+  assertNotInProduction,
   getEnv,
   getEnvNumber,
   isProduction,
@@ -44,10 +48,16 @@ const SCHEMA_CONFIG = z.object({
     /** HMAC key behind the searchable-email blind index. */
     blindIndexKey: z.string().min(MIN_BLIND_INDEX_KEY_LENGTH),
   }),
-  mail: z.object({
-    fromAddress: z.email(),
-    fromName: nonEmptyString(),
-  }),
+  /**
+   * The framework's mail fragment: a discriminated union on `mode` over the
+   * four shipped transports, plus the platform-identity fields
+   * (`platformFromAddress`, `platformFromName`, …) named to spread straight
+   * into `createBaseMailService`. This demo only wires the logger transport,
+   * so `loadConfig` rejects other modes with a pointer instead of failing
+   * later in the transport factory.
+   */
+  mail: MAIL_CONFIG_SCHEMA,
+  enableSwagger: z.boolean(),
   rateLimit: z.object({
     max: z.coerce.number().int().positive(),
     windowMs: z.coerce.number().int().positive(),
@@ -65,18 +75,27 @@ const SCHEMA_CONFIG = z.object({
 
 export type AppConfig = z.infer<typeof SCHEMA_CONFIG>;
 
+/**
+ * `createConfigParser` wraps `safeParse` into a `Result` with a stable
+ * `config_invalid` key and every issue path aggregated into one message —
+ * boot code throws that message once instead of a raw ZodError.
+ */
+const parseConfig = createConfigParser(SCHEMA_CONFIG);
+
 /** Parse + validate the environment. Throws on a misconfigured environment. */
 export function loadConfig(): AppConfig {
   const ageIdentity = getEnv('DEMO_AGE_IDENTITY', DEV_AGE_IDENTITY);
   const blindIndexKey = getEnv('DEMO_BLIND_INDEX_KEY', DEV_BLIND_INDEX_KEY);
 
-  if (isProduction() && (ageIdentity === DEV_AGE_IDENTITY || blindIndexKey === DEV_BLIND_INDEX_KEY)) {
-    throw new Error(
-      'Refusing to boot in production with the committed demo PII keys. Set DEMO_AGE_IDENTITY and DEMO_BLIND_INDEX_KEY.',
-    );
-  }
+  // `assertNotInProduction` throws when the flag is truthy AND NODE_ENV is
+  // production — the presence-flag here is "the committed dev key material is
+  // in use", i.e. neither env var was set.
+  assertNotInProduction(
+    'committed demo PII keys (set DEMO_AGE_IDENTITY and DEMO_BLIND_INDEX_KEY)',
+    ageIdentity === DEV_AGE_IDENTITY || blindIndexKey === DEV_BLIND_INDEX_KEY,
+  );
 
-  return SCHEMA_CONFIG.parse({
+  const parsed = parseConfig({
     port: getEnvNumber('PORT', 3001),
     publicBaseUrl: getEnv('PUBLIC_BASE_URL', 'http://localhost:3001'),
     database: {
@@ -88,11 +107,13 @@ export function loadConfig(): AppConfig {
     },
     pii: { ageIdentity, blindIndexKey },
     mail: {
-      fromAddress: getEnv('MAIL_FROM_ADDRESS', 'noreply@demo.example'),
+      mode: getEnv('MAIL_MODE', 'logger'),
+      platformFromAddress: getEnv('MAIL_FROM_ADDRESS', 'noreply@demo.example'),
       // The platform *brand*. The mail service composes the platform-fallback
       // From as "<scopeName> via <brand>" — see services/mail.ts.
-      fromName: getEnv('MAIL_FROM_NAME', 'Octabits Demo'),
+      platformFromName: getEnv('MAIL_FROM_NAME', 'Octabits Demo'),
     },
+    enableSwagger: booleanFromEnv().parse(getEnv('ENABLE_SWAGGER', isProduction() ? 'false' : 'true')),
     rateLimit: {
       max: getEnvNumber('RATE_LIMIT_MAX', 200),
       windowMs: getEnvNumber('RATE_LIMIT_WINDOW_MS', 60_000),
@@ -101,4 +122,13 @@ export function loadConfig(): AppConfig {
     // Defaults to the demo SPA's dev origin (nuxt.config.ts pins port 3100).
     corsOrigins: parseCsv(process.env.CORS_ORIGINS ?? 'http://localhost:3100'),
   });
+  if (!parsed.ok) throw new Error(parsed.error.message);
+
+  if (parsed.value.mail.mode !== 'logger') {
+    throw new Error(
+      `MAIL_MODE '${parsed.value.mail.mode}' is valid config, but this demo only wires the logger transport — see services/mail.ts for where smtp/mailjet/brevo would slot in.`,
+    );
+  }
+
+  return parsed.value;
 }

@@ -48,10 +48,6 @@ async function upload() {
     // No manual FormData, and the field name is still type-checked.
     const { data, error } = await api.files.post({ file })
     if (error) { toastError(error); return }
-    // Same upstream narrowing wrinkle as the welcome route in contacts.vue:
-    // 201 is the only declared success code, so Elysia's inferred `200` folds
-    // the error body into `data`'s union. See the README's findings section.
-    if (!('name' in data)) return
     toast.add({ title: t('files.uploaded', { name: data.name }), color: 'success' })
     selected.value = null
     await load()

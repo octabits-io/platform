@@ -10,7 +10,7 @@
  */
 import { Elysia } from 'elysia';
 import { z } from 'zod';
-import { errorResponses, statusErrorWithSet } from '@octabits-io/framework/elysia';
+import { errorResponses, statusErrorWithSet, successResponses } from '@octabits-io/framework/elysia';
 import type { DemoScopePlugin } from '../request-scope.ts';
 import { hasPermission } from '../rbac.ts';
 import { welcomeEmailQueue } from '../queues/welcome-email.ts';
@@ -104,7 +104,10 @@ export function createContactRoutes(scopePlugin: DemoScopePlugin) {
       },
       {
         body: SCHEMA_CREATE_CONTACT,
-        response: { 201: SCHEMA_CONTACT, ...errorResponses(400, 429, 500) },
+        // `successResponses` adds a 200 alias next to the 201 — without it,
+        // Elysia infers an extra 200 entry from the handler's return union
+        // (error body included) and Eden folds that union into `data`.
+        response: { ...successResponses(201, SCHEMA_CONTACT), ...errorResponses(400, 429, 500) },
         detail: { summary: 'Create a contact (email encrypted + blind-indexed)' },
       },
     )
@@ -141,7 +144,7 @@ export function createContactRoutes(scopePlugin: DemoScopePlugin) {
       },
       {
         params: z.object({ id: z.uuid() }),
-        response: { 204: z.undefined(), ...errorResponses(400, 403, 404, 429, 500) },
+        response: { ...successResponses(204, z.undefined()), ...errorResponses(400, 403, 404, 429, 500) },
         detail: { summary: 'Delete a contact (requires the admin demo role)' },
       },
     )
@@ -190,7 +193,7 @@ export function createContactRoutes(scopePlugin: DemoScopePlugin) {
       {
         params: z.object({ id: z.uuid() }),
         response: {
-          202: z.object({ jobId: z.string(), queue: z.string(), replayed: z.boolean() }),
+          ...successResponses(202, z.object({ jobId: z.string(), queue: z.string(), replayed: z.boolean() })),
           ...errorResponses(400, 404, 429, 500),
         },
         detail: { summary: 'Queue a welcome email (idempotent per contact)' },
