@@ -11,8 +11,7 @@
 import { Elysia } from 'elysia';
 import { z } from 'zod';
 import { errorResponses, statusErrorWithSet } from '@octabits-io/framework/elysia';
-import type { DemoServices } from '../container.ts';
-import type { IoC } from '@octabits-io/framework/ioc';
+import type { DemoScopePlugin } from '../request-scope.ts';
 import { hasPermission } from '../rbac.ts';
 import { welcomeEmailQueue } from '../queues/welcome-email.ts';
 
@@ -41,14 +40,21 @@ const SCHEMA_UPDATE_CONTACT = z.object({
   email: z.email().optional(),
 });
 
-export function createContactRoutes(container: IoC<DemoServices>) {
-  const contacts = () => container.resolve('contactsService');
-
+/**
+ * Routes resolve their services through `ctx.scope` — the per-request child
+ * container mounted by the scope plugin (see `../request-scope.ts`). Root
+ * singletons (`contactsService`, `idempotency`, `boss`) resolve through the
+ * scope's parent chain; request-seeded values (`role`) resolve from the scope
+ * itself. Mounting the plugin here (deduplicated by name) is what types
+ * `ctx.scope` on every handler.
+ */
+export function createContactRoutes(scopePlugin: DemoScopePlugin) {
   return new Elysia({ prefix: '/contacts', tags: ['Contacts'] })
+    .use(scopePlugin)
     .get(
       '/',
-      async ({ query, set }) => {
-        const result = await contacts().list({ page: query.page, pageSize: query.pageSize });
+      async ({ query, set, scope }) => {
+        const result = await scope.resolve('contactsService').list({ page: query.page, pageSize: query.pageSize });
         if (!result.ok) return statusErrorWithSet(set, result.error);
         return result.value;
       },
@@ -64,8 +70,8 @@ export function createContactRoutes(container: IoC<DemoServices>) {
     // Declared before `/:id` so `search` is not swallowed by the id pattern.
     .get(
       '/search',
-      async ({ query, set }) => {
-        const result = await contacts().searchByEmail(query.email);
+      async ({ query, set, scope }) => {
+        const result = await scope.resolve('contactsService').searchByEmail(query.email);
         if (!result.ok) return statusErrorWithSet(set, result.error);
         return { items: result.value };
       },
@@ -77,8 +83,8 @@ export function createContactRoutes(container: IoC<DemoServices>) {
     )
     .get(
       '/:id',
-      async ({ params, set }) => {
-        const result = await contacts().getById(params.id);
+      async ({ params, set, scope }) => {
+        const result = await scope.resolve('contactsService').getById(params.id);
         if (!result.ok) return statusErrorWithSet(set, result.error);
         return result.value;
       },
@@ -90,8 +96,8 @@ export function createContactRoutes(container: IoC<DemoServices>) {
     )
     .post(
       '/',
-      async ({ body, set }) => {
-        const result = await contacts().create(body);
+      async ({ body, set, scope }) => {
+        const result = await scope.resolve('contactsService').create(body);
         if (!result.ok) return statusErrorWithSet(set, result.error);
         set.status = 201;
         return result.value;
@@ -104,8 +110,8 @@ export function createContactRoutes(container: IoC<DemoServices>) {
     )
     .put(
       '/:id',
-      async ({ params, body, set }) => {
-        const result = await contacts().update(params.id, body);
+      async ({ params, body, set, scope }) => {
+        const result = await scope.resolve('contactsService').update(params.id, body);
         if (!result.ok) return statusErrorWithSet(set, result.error);
         return result.value;
       },
@@ -118,16 +124,17 @@ export function createContactRoutes(container: IoC<DemoServices>) {
     )
     .delete(
       '/:id',
-      async ({ params, set, headers }) => {
+      async ({ params, set, scope }) => {
         // The one RBAC-guarded route: `viewer` may read contacts but not delete
-        // one. `forbidden` → 403 by the elysia error module's key conventions.
-        if (!hasPermission(headers['x-demo-role'], { contact: ['delete'] })) {
+        // one. The role is request-scoped state seeded from the `x-demo-role`
+        // header. `forbidden` → 403 by the elysia error module's key conventions.
+        if (!hasPermission(scope.resolve('role'), { contact: ['delete'] })) {
           return statusErrorWithSet(set, {
             key: 'forbidden',
             message: 'Role is not permitted to delete contacts',
           });
         }
-        const result = await contacts().remove(params.id);
+        const result = await scope.resolve('contactsService').remove(params.id);
         if (!result.ok) return statusErrorWithSet(set, result.error);
         set.status = 204;
         return undefined;
@@ -140,13 +147,13 @@ export function createContactRoutes(container: IoC<DemoServices>) {
     )
     .post(
       '/:id/welcome',
-      async ({ params, set }) => {
+      async ({ params, set, scope }) => {
         // Idempotency (`…/drizzle/idempotency`) keeps a double-submit from
         // queueing two welcome mails: `begin()` classifies the request as
         // cached / fresh / conflict, and only a `fresh` outcome enqueues.
         // `requestHash` is what makes "same key, different request" a conflict
         // rather than a silent replay.
-        const idempotency = container.resolve('idempotency');
+        const idempotency = scope.resolve('idempotency');
         const outcome = await idempotency.begin({
           key: `welcome:${params.id}`,
           requestHash: params.id,
@@ -166,10 +173,10 @@ export function createContactRoutes(container: IoC<DemoServices>) {
           });
         }
 
-        const contact = await contacts().getById(params.id);
+        const contact = await scope.resolve('contactsService').getById(params.id);
         if (!contact.ok) return statusErrorWithSet(set, contact.error);
 
-        const { enqueue } = welcomeEmailQueue.createEnqueuer({ boss: container.resolve('boss').getBoss() });
+        const { enqueue } = welcomeEmailQueue.createEnqueuer({ boss: scope.resolve('boss').getBoss() });
         const queued = await enqueue({ contactId: params.id });
         if (!queued.ok) return statusErrorWithSet(set, queued.error);
 

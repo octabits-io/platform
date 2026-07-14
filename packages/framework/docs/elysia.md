@@ -36,6 +36,20 @@ of the octabits stack, not a standalone kit.
   preserving the routes' type for Eden Treaty; plus **`registerGracefulShutdown`**.
 - **`createHealthRoutes({ checkReady })`** — `/health` + `/live` + `/ready` with the
   readiness-failure → 503 mapping.
+- **`createRequestScopePlugin({ createScope, guard?, logger? })`** — a per-request
+  IoC scope as `ctx.scope`, with disposal guaranteed on every exit path:
+  success → `onAfterResponse` disposes `{ commit: true }`; handler error →
+  `onError` disposes `{ commit: false }`; `guard` rejection → disposed inline
+  `{ commit: false }` before any handler runs. `createScope(ctx)` allocates +
+  seeds (e.g. `container.createScope()` plus scoped registrations from the
+  request); `guard(scope, ctx)` holds checks that need the scope — the plugin
+  owns dispose-on-throw so a failing check can't leak it. The scope is only
+  required to satisfy the structural `RequestScope` contract (`dispose(opts?)`,
+  idempotent — the `…/ioc` container's is), so augmented containers type
+  through unchanged. Both hooks are `{ as: 'scoped' }`; mount the plugin (it
+  deduplicates by `name`) in each route module that reads `ctx.scope` so the
+  typing flows. Dispose failures after a sent response are logged via `logger`,
+  never thrown.
 - **`@octabits-io/framework/elysia/mcp`** — `createMcpRoutes({ resolveScope, registerTools, … })`:
   stateless `elysia-mcp` harness with a per-request scope correlated via
   `AsyncLocalStorage` (interleaving-safe under concurrent requests) and disposed

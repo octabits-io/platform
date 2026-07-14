@@ -107,7 +107,7 @@ saw nothing but preflight failures. A browser is the only client that tests CORS
 | Subpath | Used in | Covered |
 | --- | --- | --- |
 | `./result` | Everywhere — every service returns `Result<T, E>` | ✅ |
-| `./ioc` | [`container.ts`](./src/container.ts) — service map + `createSystemScope` for the queue worker | ✅ |
+| `./ioc` | [`container.ts`](./src/container.ts) — service map, `createSystemScope` for the queue worker, and per-request child scopes (`createDemoRequestScope`) with a Scoped `settingsService` override | ✅ |
 | `./logger` | [`main.ts`](./src/main.ts) — root logger, childed per component | ✅ |
 | `./utils` | [`routes/tools.ts`](./src/routes/tools.ts) (`slugify`), `createDateProvider` in the container | ✅ |
 | `./config-schema` | [`config.ts`](./src/config.ts) — `DATABASE_CONFIG_SCHEMA`, `LOGGING_CONFIG_SCHEMA`, `nonEmptyString/Url` | ✅ |
@@ -120,7 +120,7 @@ saw nothing but preflight failures. A browser is the only client that tests CORS
 | `./drizzle/crud` | [`services/notes.ts`](./src/services/notes.ts) — `createBaseCrudService` drives the whole entity | ✅ |
 | `./drizzle/config` | [`services/settings.ts`](./src/services/settings.ts) — unscoped `createScopedConfigService` | ✅ |
 | `./drizzle/idempotency` | `POST /api/contacts/:id/welcome` — `begin()` / `commit()` | ✅ |
-| `./elysia` | [`app.ts`](./src/app.ts) — `createElysiaApp`, `createHealthRoutes`, `registerGracefulShutdown`, `statusErrorWithSet`, `errorResponses`, env helpers | ✅ |
+| `./elysia` | [`app.ts`](./src/app.ts) — `createElysiaApp`, `createHealthRoutes`, `registerGracefulShutdown`, `statusErrorWithSet`, `errorResponses`, env helpers; [`request-scope.ts`](./src/request-scope.ts) — `createRequestScopePlugin`: contacts + settings resolve via `ctx.scope` (request-seeded `role`, per-request `settingsService` cache), the `guard` rejects unknown roles with `invalid_demo_role` → 400 | ✅ |
 | `./queue` | [`queues/welcome-email.ts`](./src/queues/welcome-email.ts) — `defineQueue` + `BossManager` | ✅ |
 | `./storage` + `./storage/postgres` | [`routes/files.ts`](./src/routes/files.ts) — provider + `createWebResponse` + `objectStorageDdl` | ✅ |
 | `./mail` | [`services/mail.ts`](./src/services/mail.ts) — `createBaseMailService` + logger transport | ✅ |

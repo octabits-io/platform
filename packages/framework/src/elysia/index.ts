@@ -15,6 +15,7 @@ export * from './errors';
 export * from './config';
 export * from './create-app';
 export * from './health';
+export * from './request-scope';
 
 // NOTE: the MCP harness lives at the `./mcp` subpath (not re-exported here) so
 // the root export stays free of the optional `elysia-mcp` /

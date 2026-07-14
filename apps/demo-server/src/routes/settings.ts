@@ -9,8 +9,7 @@
 import { Elysia } from 'elysia';
 import { z } from 'zod';
 import { errorResponses, statusErrorWithSet } from '@octabits-io/framework/elysia';
-import type { IoC } from '@octabits-io/framework/ioc';
-import type { DemoServices } from '../container.ts';
+import type { DemoScopePlugin } from '../request-scope.ts';
 import { hasPermission } from '../rbac.ts';
 
 const SCHEMA_SETTINGS = z.object({
@@ -18,17 +17,17 @@ const SCHEMA_SETTINGS = z.object({
   welcomeSubject: z.string(),
 });
 
-export function createSettingsRoutes(container: IoC<DemoServices>) {
-  // Resolved per call, not once per route module: the service is registered
-  // Transient because its read cache is scoped to one unit of work (see
-  // container.ts), so each request must get its own instance.
-  const settings = () => container.resolve('settingsService');
-
+export function createSettingsRoutes(scopePlugin: DemoScopePlugin) {
+  // `settingsService` resolves from `ctx.scope`, where the request scope
+  // re-registers it as Scoped (see container.ts): the service's read cache is
+  // per-unit-of-work, and the request scope makes the request that unit — one
+  // instance per request, disposed with the scope, never stale across requests.
   return new Elysia({ prefix: '/settings', tags: ['Settings'] })
+    .use(scopePlugin)
     .get(
       '/',
-      async () => {
-        const config = await settings().readAll();
+      async ({ scope }) => {
+        const config = await scope.resolve('settingsService').readAll();
         return config as z.infer<typeof SCHEMA_SETTINGS>;
       },
       {
@@ -38,16 +37,19 @@ export function createSettingsRoutes(container: IoC<DemoServices>) {
     )
     .put(
       '/',
-      async ({ body, set, headers }) => {
-        if (!hasPermission(headers['x-demo-role'], { settings: ['write'] })) {
+      async ({ body, set, scope }) => {
+        if (!hasPermission(scope.resolve('role'), { settings: ['write'] })) {
           return statusErrorWithSet(set, {
             key: 'forbidden',
             message: 'Role is not permitted to write settings',
           });
         }
-        const written = await settings().writeConfig(body);
+        // One scoped instance for both calls: the write invalidates the same
+        // cache the readAll below then re-populates.
+        const settings = scope.resolve('settingsService');
+        const written = await settings.writeConfig(body);
         if (!written.ok) return statusErrorWithSet(set, written.error);
-        const config = await settings().readAll();
+        const config = await settings.readAll();
         return config as z.infer<typeof SCHEMA_SETTINGS>;
       },
       {

@@ -30,6 +30,7 @@ import { createFileRoutes } from './routes/files.ts';
 import { createSettingsRoutes } from './routes/settings.ts';
 import { createQueueRoutes } from './routes/queue.ts';
 import { createToolRoutes } from './routes/tools.ts';
+import { createDemoScopePlugin, type DemoScopePlugin } from './request-scope.ts';
 
 export interface CreateDemoAppDeps {
   container: IoC<DemoServices>;
@@ -39,22 +40,27 @@ export interface CreateDemoAppDeps {
 }
 
 /** Every `/api/*` route. Exported separately so the type stays inspectable. */
-export function createApiRoutes(container: IoC<DemoServices>) {
+export function createApiRoutes(container: IoC<DemoServices>, scopePlugin: DemoScopePlugin) {
+  // Two resolution styles, on purpose (both are documentation):
+  // contacts + settings go through the per-request scope (`ctx.scope`) because
+  // the request seeds state they need (role, the per-request settings cache);
+  // notes/files/queue/tools resolve stateless singletons straight off the root.
   return new Elysia({ prefix: '/api' })
-    .use(createContactRoutes(container))
+    .use(createContactRoutes(scopePlugin))
     .use(createNoteRoutes(container))
     .use(createFileRoutes(container))
-    .use(createSettingsRoutes(container))
+    .use(createSettingsRoutes(scopePlugin))
     .use(createQueueRoutes(container))
     .use(createToolRoutes(container));
 }
 
 export function createDemoApp({ container, config, checkReady }: CreateDemoAppDeps) {
   const logger = container.resolve('logger');
+  const scopePlugin = createDemoScopePlugin(container, logger.child({ component: 'request-scope' }));
 
   const routes = new Elysia()
     .use(createHealthRoutes({ checkReady, logger: logger.child({ component: 'health' }) }))
-    .use(createApiRoutes(container));
+    .use(createApiRoutes(container, scopePlugin));
 
   return createElysiaApp(routes, {
     logger,

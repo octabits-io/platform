@@ -146,3 +146,33 @@ export function createSystemScopeFactory(
 ): () => Promise<DisposableServiceResolver<DemoServices>> {
   return async () => container.createScope();
 }
+
+/** Services that exist only inside a request scope. */
+export interface DemoRequestServices {
+  /** The `x-demo-role` header — a real app maps this from a validated JWT claim. */
+  role: string | undefined;
+}
+
+/**
+ * Seed one request's scope (consumed by `request-scope.ts`'s plugin wiring).
+ *
+ * The `settingsService` re-registration narrows the root's Transient lifetime
+ * to Scoped *for this request*: the service's read cache is per-unit-of-work,
+ * and here the request is the unit — one instance, one warm cache, gone when
+ * the plugin disposes the scope. The root registration stays Transient for
+ * non-request callers (the queue worker's mail path).
+ */
+export function createDemoRequestScope(
+  container: IoC<DemoServices>,
+  request: Request,
+): IoC<DemoRequestServices & DemoServices> {
+  const scope = container.createScope<DemoRequestServices>();
+  const role = request.headers.get('x-demo-role') ?? undefined;
+  scope.register('role', () => role, ServiceLifetime.Scoped);
+  scope.register(
+    'settingsService',
+    (c) => createSettingsService({ db: c.resolve('db'), logger: c.resolve('logger') }),
+    ServiceLifetime.Scoped,
+  );
+  return scope;
+}
