@@ -1,0 +1,226 @@
+{
+  "app": {
+    "name": "Contact Desk",
+    "tagline": "{'@'}octabits-io/nuxt-ui-kit demo"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "create": "Create",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "search": "Search",
+    "reset": "Reset",
+    "loading": "Loading…",
+    "none": "—",
+    "saved": "Saved",
+    "empty": "Nothing here yet"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "contacts": "Contacts",
+    "notes": "Notes",
+    "files": "Files",
+    "settings": "Settings",
+    "logout": "Sign out"
+  },
+  "session": {
+    "expired": "Your session has ended. Please sign in again.",
+    "renewFailed": "Could not refresh your session — retrying."
+  },
+  "login": {
+    "title": "Sign in",
+    "description": "This demo has no identity provider. Signing in seeds a fake OIDC session in localStorage via the kit's dev bypass.",
+    "action": "Sign in with the dev bypass",
+    "productionNotice": "The bypass refuses to seed in a production build, so this button does nothing in `nuxt build` output."
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "health": {
+      "title": "API health",
+      "description": "GET /health/ready",
+      "ok": "Ready",
+      "down": "Unreachable",
+      "db": "Database: {status}"
+    },
+    "queue": {
+      "title": "Welcome-email queue",
+      "description": "GET /api/queue/stats",
+      "queue": "Queue",
+      "deferred": "Deferred",
+      "queued": "Queued",
+      "active": "Active",
+      "total": "Total"
+    },
+    "settings": {
+      "title": "Settings",
+      "description": "GET /api/settings",
+      "manage": "Manage settings"
+    },
+    "session": {
+      "title": "Session",
+      "description": "Seeded by the kit's dev auth bypass",
+      "role": "Demo role"
+    }
+  },
+  "contacts": {
+    "title": "Contacts",
+    "description": "Emails are encrypted at rest and looked up through a blind index.",
+    "new": "New contact",
+    "columns": {
+      "name": "Name",
+      "email": "Email",
+      "createdAt": "Created",
+      "actions": "Actions"
+    },
+    "search": {
+      "label": "Find by email",
+      "placeholder": "ada{'@'}example.com",
+      "hint": "Exact match via the blind index — partial emails will not match.",
+      "clear": "Clear search",
+      "resultCount": "No result | 1 match | {n} matches"
+    },
+    "create": {
+      "title": "New contact",
+      "success": "Contact created"
+    },
+    "edit": {
+      "title": "Edit contact",
+      "success": "Contact updated"
+    },
+    "welcome": {
+      "action": "Send welcome email",
+      "success": "Welcome email queued (job {id})",
+      "replayed": "Already queued for this contact — the idempotent replay was returned."
+    },
+    "delete": {
+      "title": "Delete this contact?",
+      "message": "{name} will be removed permanently. The demo server requires the admin role for this.",
+      "success": "Contact deleted"
+    },
+    "fields": {
+      "name": "Name",
+      "email": "Email"
+    },
+    "empty": "No contacts yet — create one to get started."
+  },
+  "notes": {
+    "title": "Notes",
+    "new": "New note",
+    "list": "All notes",
+    "selectPrompt": "Select a note from the list, or create a new one.",
+    "fields": {
+      "title": "Title",
+      "body": "Body"
+    },
+    "filter": {
+      "title": "Filter by creation date",
+      "mode": "Match",
+      "modeAll": "Any date",
+      "modeOn": "On a day",
+      "modeBetween": "In a range",
+      "on": "Created on",
+      "showing": "Showing {shown} of {total}"
+    },
+    "create": { "success": "Note created" },
+    "edit": { "success": "Note saved" },
+    "delete": {
+      "title": "Delete this note?",
+      "message": "{title} will be removed permanently.",
+      "success": "Note deleted"
+    },
+    "empty": "No notes match."
+  },
+  "files": {
+    "title": "Files",
+    "description": "Blobs stored in Postgres by the framework's object-storage provider.",
+    "upload": "Upload a file",
+    "uploading": "Uploading…",
+    "uploaded": "{name} uploaded",
+    "download": "Download",
+    "columns": {
+      "name": "Name",
+      "contentType": "Type",
+      "size": "Size",
+      "actions": "Actions"
+    },
+    "empty": "No files uploaded yet."
+  },
+  "settings": {
+    "title": "Settings",
+    "description": "Backed by the framework's scoped config engine — values are validated, encrypted, and cached; unset keys read back their schema default.",
+    "fields": {
+      "supportEmail": "Support email",
+      "welcomeSubject": "Welcome email subject"
+    },
+    "hints": {
+      "welcomeSubject": "Overrides the subject of the next welcome email queued from the contacts page."
+    },
+    "success": "Settings saved",
+    "role": {
+      "title": "Demo role",
+      "description": "Sent as the x-demo-role header on every API call. Writing settings and deleting contacts require admin; pick viewer to see the server's 403 path surfaced through the kit's error messenger.",
+      "admin": "admin",
+      "viewer": "viewer"
+    },
+    "sections": {
+      "general": "General",
+      "access": "Access"
+    }
+  },
+  "period": {
+    "travel": {
+      "tooltip": "Check-in → check-out",
+      "nights": "{n} night | {n} nights"
+    },
+    "booking": {
+      "tooltip": "First → last day covered",
+      "days": "{n} day | {n} days"
+    }
+  },
+  "dateRange": {
+    "checkIn": "From",
+    "checkOut": "To",
+    "atTime": "{date} at {time}",
+    "nextDay": "(next day)",
+    "checking": "Checking availability…",
+    "availabilityOk": "Available",
+    "availabilityConflict": "Not available",
+    "availabilityPartial": "Partially available",
+    "errors": {
+      "bothRequired": "Pick both a start and an end date.",
+      "endAfterStart": "The end date must not be before the start date.",
+      "minDays": "Pick at least {n} days.",
+      "maxDays": "Pick at most {n} days.",
+      "blockedDate": "{date} is not selectable.",
+      "blockedRange": "The range covers blocked dates: {dates}"
+    }
+  },
+  "errors": {
+    "internal_server_error": "Something went wrong. Please try again.",
+    "validation_error": "Please check the highlighted fields.",
+    "forbidden": "Your demo role is not allowed to do that. Switch to admin on the settings page.",
+    "contact_not_found": "That contact no longer exists.",
+    "note_not_found": "That note no longer exists.",
+    "object_not_found": "That file no longer exists.",
+    "invalid_idempotent_replay": "This request was already made with different data.",
+    "rate_limit_exceeded": "Too many requests — slow down for a moment.",
+    "network_error": "The demo API is unreachable. Is apps/demo-server running on port 3001?"
+  },
+  "validation": {
+    "fields": {
+      "name": "Name",
+      "email": "Email",
+      "title": "Title",
+      "body": "Body",
+      "supportEmail": "Support email",
+      "welcomeSubject": "Welcome email subject"
+    },
+    "messages": {
+      "expected_string_to_match_'email'": "must be a valid email address",
+      "expected_string_length_greater_or_equal_to_1": "must not be empty"
+    }
+  }
+}

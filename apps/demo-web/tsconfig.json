@@ -1,0 +1,14 @@
+{
+  // Nuxt generates the real configs into .nuxt/ (run `nuxt prepare`).
+  // `nuxt typecheck` runs vue-tsc against these projects — which is the point
+  // of this app: it is the first in-repo consumer that typechecks the kit's
+  // source-shipped .vue SFCs. The repo root is on TypeScript 7, where vue-tsc
+  // cannot run, so this package pins its own TypeScript 5.x.
+  "files": [],
+  "references": [
+    { "path": "./.nuxt/tsconfig.app.json" },
+    { "path": "./.nuxt/tsconfig.server.json" },
+    { "path": "./.nuxt/tsconfig.shared.json" },
+    { "path": "./.nuxt/tsconfig.node.json" }
+  ]
+}

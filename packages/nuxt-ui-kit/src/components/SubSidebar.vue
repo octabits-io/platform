@@ -28,6 +28,15 @@ const route = useRoute()
 
 const buttonLabel = computed(() => props.toggleLabel ?? props.title)
 
+// A named handler rather than an inline `@click="open = true"`: Vue compiles an
+// inline assignment to `$event => (open = true)`, whose return type is
+// `boolean`. UButton types `onClick` as `(event) => void | Promise<void>` — a
+// *union*, so TS's "a function returning a value is assignable to a void-returning
+// signature" rule does not apply and the assignment errors (TS2322).
+function openSidebar() {
+  open.value = true
+}
+
 watch(
   () => [route.path, route.query[props.selectionQueryKey]],
   () => { open.value = false },
@@ -73,7 +82,7 @@ watch(
             color="neutral"
             variant="outline"
             size="sm"
-            @click="open = true"
+            @click="openSidebar"
           />
         </div>
         <div class="min-w-0 flex-1 overflow-y-auto">

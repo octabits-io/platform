@@ -16,6 +16,22 @@ packages (merged 2026-07-14; imports map 1:1 — see the
 The durable DAG workflow engine `@octabits-io/flow` lives in its own repository:
 [octabits-io/flow](https://github.com/octabits-io/flow) (extracted from this monorepo 2026-07-14).
 
+## Demo apps
+
+Two private workspace apps under `apps/*` serve as living documentation and the
+pre-release validation harness for the packages:
+
+| App | What it is |
+|---|---|
+| [`demo-server`](./apps/demo-server) | "Contact desk" Elysia API on Bun (port 3001) exercising the framework: PII-encrypted contacts with blind-index search, Postgres blob storage, pg-boss welcome-email job through the mail dispatch layer, scoped config, RBAC, captcha, health/rate-limit/CORS middleware |
+| [`demo-web`](./apps/demo-web) | Nuxt admin SPA (port 3100) exercising the ui-kit: Eden client on the server's `App` type, OIDC bypass session, auth guard, confirm/pagination/dirty-tracking composables, kit SFCs — and the repo's only `vue-tsc` coverage of those SFCs (kit SFC changes must keep `pnpm --filter @octabits-io/demo-web typecheck` green) |
+
+```sh
+docker compose -f apps/demo-server/docker-compose.yml up -d --wait
+pnpm --filter @octabits-io/demo-server start   # API on :3001
+pnpm --filter @octabits-io/demo-web dev        # SPA on :3100
+```
+
 ## Getting Started
 
 ```sh

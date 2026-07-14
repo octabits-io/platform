@@ -2,11 +2,18 @@ node_modules/
 dist/
 *.tsbuildinfo
 .turbo/
+
+# Nuxt (apps/demo-web)
+.nuxt/
+.output/
+.data/
 .DS_Store
 bun.lock
 CLAUDE.md
 .claude/
 .env*
+# …but committed templates are the point of a template.
+!.env.example
 
 # local npm auth via direnv + passage
 .envrc

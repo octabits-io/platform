@@ -1,0 +1,11 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+/* The kit's SFCs ship as source and are compiled by this app's Vite, so their
+   Tailwind classes have to be scanned from node_modules too — the default
+   source detection skips it. */
+@source "../../../node_modules/@octabits-io/nuxt-ui-kit/src/components";
+
+@theme static {
+  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
