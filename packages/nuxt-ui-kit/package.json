@@ -1,0 +1,60 @@
+{
+  "name": "@octabits-io/nuxt-ui-kit",
+  "version": "0.1.0",
+  "description": "Frontend kit for Nuxt/Vue admin SPAs: OIDC session harness (oidc-client-ts), Eden Treaty client factory, auth/org store cores, and a route-guard builder — factory-style seams the app wires into its own plugins, stores, and middleware",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsdown"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/octabits-io/platform.git",
+    "directory": "packages/nuxt-ui-kit"
+  },
+  "homepage": "https://github.com/octabits-io/platform/tree/main/packages/nuxt-ui-kit",
+  "bugs": {
+    "url": "https://github.com/octabits-io/platform/issues"
+  },
+  "devDependencies": {
+    "@elysiajs/eden": "^1.4.9",
+    "elysia": "^1.4.29",
+    "oidc-client-ts": "^3.5.0",
+    "vitest": "^4.1.10",
+    "vue": "^3.5.39"
+  },
+  "peerDependencies": {
+    "@elysiajs/eden": "^1.4.0",
+    "elysia": ">=1.4 <3",
+    "oidc-client-ts": "^3.3.0",
+    "typescript": "^5 || ^6 || ^7",
+    "vue": "^3.5.0"
+  },
+  "peerDependenciesMeta": {
+    "elysia": {
+      "optional": true
+    },
+    "typescript": {
+      "optional": true
+    }
+  }
+}
