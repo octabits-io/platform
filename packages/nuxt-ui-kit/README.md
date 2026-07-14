@@ -5,13 +5,6 @@ keeps thin plugin/store/middleware files and wires the kit into them; the kit
 never touches Nuxt APIs (`defineNuxtPlugin`, `navigateTo`, `useRuntimeConfig`)
 itself, so it has no Nuxt dependency, only `vue`.
 
-> **Why "nuxt-ui-kit" when the root export is Nuxt-independent?** The name
-> covers the package's full planned scope: a component tier built on Nuxt UI 4
-> (confirm dialog, date-range input, sub-sidebar, AI-workflow harness) lands
-> here next, behind subpaths with `@nuxt/ui` as an optional peer. The auth/API
-> plumbing above is deliberately the kit's most portable layer — usable from
-> any Vue SPA — but the package as a whole targets the Nuxt UI stack.
-
 ## What's inside
 
 - **OIDC session harness** (`oidc-client-ts` peer)
@@ -39,10 +32,65 @@ itself, so it has no Nuxt dependency, only `vue`.
   wire), plus `createAccessTokenProvider` and `resolveApiBaseUrl`
 - **Org store core** — `createOrgStoreCore<TOrg>` (granted orgs, slug-keyed
   selection, persistence, lost-access revocation) for the app's own store
+- **API error → i18n** — `createApiErrorMessenger({ t, te })`: maps
+  `{ key, message }` bodies and validation errors to user-facing strings via
+  the `errors.*` / `validation.fields.*` / `validation.messages.*` key
+  convention; unwraps Eden `{ value }` envelopes
+- **Confirm dialog** — promise-based `useConfirm()` + singleton state, with a
+  `./components/ConfirmDialog.vue` renderer (`common.cancel`/`common.confirm`
+  i18n defaults, `zIndexClass` prop for stacking above slideovers)
+- **Generic primitives** — `useDirtyTracking` (deep-compare form dirty state),
+  `usePagination` (offset pagination with `queryParams`),
+  `./components/SubSidebar.vue` (responsive list/detail layout — desktop
+  column, mobile slideover, `selectionQueryKey` auto-close)
+- **`./zod`** (`zod` peer) — `setupZodLocaleSync`: keep Zod's built-in error
+  messages in the active UI language
+- **`./dates`** (`date-fns` peer) — `Period`/`calculateDays`/`shiftIso`,
+  `useDateRangeInput`, and `createDateFormatter({ getLocale })` (the engine of
+  an app-side `useDateFormat`), plus source-shipped `./components/DateInput.vue`,
+  `DateRangeInput.vue` (travel/booking end-date semantics, blocked dates via
+  props, injected `availabilityCheck`), and `PeriodDisplay.vue`
+- **`./ai`** — frontend AI-workflow engine: `useAiWorkflow` /
+  `useAiWorkflowGuard` (poll-driven state over injected transport),
+  `createAiProgressCore` (cross-page tracking + completion/applied signals —
+  the setup body of the app's progress store), `useAiCardState`,
+  `useActiveAiWorkflowProbe`, `createWorkflowRegistry`, and
+  `./components/AiResultReviewCard.vue`; dialog/float shells stay in the app
+  (thin views over this state, registry- and router-coupled)
 
-## Wiring sketch (Nuxt)
+## Components ship as source
+
+`./components/*.vue` files are published as **`.vue` source** — the consumer's
+Vite compiles them. They use only explicit imports (`@nuxt/ui/components/*.vue`,
+`vue-i18n`, `vue-router`), so no auto-import configuration is required, and
+they import kit composables from the **package root (self-reference)** so
+module-scoped singleton state (the confirm dialog) is shared with feature
+code. Register them under your app's own names with one-line re-exports:
 
 ```ts
+// app/components/AppSubSidebar.ts
+export { default } from '@octabits-io/nuxt-ui-kit/components/SubSidebar.vue'
+```
+
+## Wiring examples (Nuxt)
+
+### Auth + API client
+
+```ts
+// app/plugins/10.oidc.client.ts
+export const getUserManager = createUserManagerFactory({
+  getConfig: () => ({ issuerUrl, clientId }),           // runtime config lookup
+  scope: ZITADEL_ORG_PROJECT_SCOPE,
+  refreshTokenAllowedScope: ZITADEL_REFRESH_TOKEN_ALLOWED_SCOPE,
+})
+export default defineNuxtPlugin((nuxtApp) => {
+  attachSessionLifecycleHandlers(getUserManager(), {
+    redirectToLogin: createLoginRedirector({ getUserManager }),
+    onSessionLost: () => useAuthStore().$patch({ user: null }),
+    notify: (notice) => toast.add(/* map notice.kind to your copy */),
+  })
+})
+
 // app/composables/useApi.ts
 const getClient = createTreatyClientFactory<App>({
   getBaseUrl: () => resolveApiBaseUrl({ configuredUrl, isProductionBuild: import.meta.env.PROD, devFallbackPort: 3002 }),
@@ -59,4 +107,45 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const target = await guard(to)
   if (target) return navigateTo(target)
 })
+```
+
+### Errors, confirm, formatting
+
+```ts
+// app/composables/useApiError.ts — bind your i18n instance
+export function useApiError() {
+  const { t, te } = useI18n()
+  return createApiErrorMessenger({ t: key => t(key), te: key => te(key) })
+}
+
+// anywhere — the ConfirmDialog.vue renderer must be mounted once in a layout
+const { confirm } = useConfirm()
+if (await confirm({ title: t('owners.delete.title'), dangerous: true })) { /* … */ }
+
+// app/composables/useDateFormat.ts
+export function useDateFormat() {
+  const { locale } = useI18n()
+  return createDateFormatter({ getLocale: () => locale.value })
+}
+```
+
+### AI workflows
+
+```ts
+// app/stores/aiProgress.ts — transport injected, signals consumed by pages
+export const useAiProgressStore = defineStore('ai-progress', () =>
+  createAiProgressCore<AiDialogRequest>({
+    fetchWorkflowStatus: async (id) => {
+      const { data, error } = await api.ai.workflows({ id }).get()
+      return error || !data ? null : data
+    },
+  }))
+
+// a page — rehydrate on mount, refuse duplicate triggers
+const ai = useAiWorkflowGuard<MyOutput>({
+  checkFn: fetchLatestWorkflow,
+  pollFn: fetchLatestWorkflow,
+  onCompleted: (wf) => showReview(wf.output),
+})
+await ai.trigger(() => api.ai.workflows.post({ type: 'listing-fields' }))
 ```
