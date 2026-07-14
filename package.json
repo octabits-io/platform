@@ -10,6 +10,7 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean && rm -rf node_modules .turbo",
+    "demo": "pnpm --parallel --filter @octabits-io/demo-server --filter @octabits-io/demo-web dev",
     "changeset": "changeset",
     "changeset:version": "GITHUB_TOKEN=$(passage show github/token) changeset version",
     "changeset:publish": "turbo run build && echo \"//registry.npmjs.org/:_authToken=$(passage show npm/token/octabits)\" > .npmrc && { changeset publish; s=$?; rm -f .npmrc; exit $s; }",
