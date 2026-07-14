@@ -122,6 +122,36 @@ Also exported: `createDateProvider` / `DateProvider` (clock-injection seam),
 `createLruCacheService` (bounded LRU cache), `withRetry` (backoff retries,
 `RetryConfig` / `RetryOptions`), and `URL_FRIENDLY_REGEX`.
 
+BCP-47 locale toolkit (`Locale` / `LocaleMap<T>` — sparse tag→value maps):
+
+```ts
+import { resolveLocale, negotiateContentLocale, deepMerge } from '@octabits-io/foundation/utils';
+
+// Fallback chain: requested → base language → default → default's base.
+// A de-formal request with only a `de` value resolves to the `de` value.
+resolveLocale({ en: 'Hello', de: 'Hallo' }, 'de-formal', 'en'); // 'Hallo'
+
+// Route hint → Accept-Language → default, matched against supported tags
+negotiateContentLocale({
+  hint: 'de',
+  acceptLanguage: 'de-DE,en;q=0.5',
+  supported: ['en', 'de-formal'],
+  defaultLocale: 'en',
+}); // 'de-formal'
+
+// i18n-overlay merge: override leaves win, arrays replace wholesale
+deepMerge({ common: { ok: 'OK', cancel: 'Cancel' } }, { common: { cancel: 'Abbrechen' } });
+```
+
+Full locale surface: `BCP47_LOCALE_REGEX`, `baseLocaleOf`, `localeFallbackChain`,
+`resolveLocale` / `resolveLocaleStrict` / `resolveLocaleOrAny` / `anyLocaleValue`,
+`matchLocaleTag`, `parseAcceptLanguage`, `negotiateContentLocale`,
+`isLocaleMapComplete` / `missingLocales` / `missingLocalesInUse`, `isLocaleMap`,
+`resolveLocaleDeep`. Plus `stripDefaults` (omit default/empty values before
+persisting), WCAG contrast helpers (`getContrastColor`, `getContrastTextMode`,
+`TAILWIND_COLOR_HEX` / `TAILWIND_COLOR_NAMES`), and `hashCyrb53` (fast
+**non-cryptographic** 53-bit hash for change detection).
+
 ---
 
 ### `@octabits-io/foundation/config-schema`

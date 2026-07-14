@@ -12,6 +12,7 @@ Monorepo for shared platform libraries. Managed with [pnpm workspaces](https://p
 | [`queue`](./packages/queue) | pg-boss queue base: lifecycle/monitoring facade + declarative queue/worker/DLQ trio with Zod-validated payloads |
 | [`storage`](./packages/storage) | Namespaced blob storage contract; S3-compatible and Postgres providers behind subpaths |
 | [`mail`](./packages/mail) | Provider-agnostic mail transport contract + transactional dispatch layer; SMTP/Mailjet/Brevo transports behind per-provider subpaths |
+| [`nuxt-ui-kit`](./packages/nuxt-ui-kit) | Frontend kit for Nuxt/Vue admin SPAs: OIDC session harness, auth/org store cores, route-guard builder, Eden Treaty client factory, confirm/date/AI-review components (source-shipped SFCs), date + AI-workflow engines behind subpaths |
 
 
 ## Getting Started
