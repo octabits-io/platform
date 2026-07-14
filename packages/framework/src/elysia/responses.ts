@@ -35,7 +35,7 @@ export const SCHEMA_SUCCESS_RESPONSE = z.object({
 });
 
 /** Every error status code any API emits — the superset. */
-export const ALL_ERROR_STATUSES = [400, 401, 403, 404, 422, 429, 500, 503] as const;
+export const ALL_ERROR_STATUSES = [400, 401, 403, 404, 409, 422, 429, 500, 503] as const;
 
 export type ErrorStatusCode = (typeof ALL_ERROR_STATUSES)[number];
 
@@ -60,6 +60,35 @@ export function errorResponses<const C extends readonly ErrorStatusCode[]>(
  * a subset.
  */
 export const CommonErrorResponses = errorResponses(...ALL_ERROR_STATUSES);
+
+/**
+ * Declare a non-200 success schema **plus a 200 alias** for the same shape.
+ *
+ * This is an Eden Treaty workaround, not an HTTP nicety. Eden derives a route's
+ * `data` type as `Extract<Response, SuccessCodes>` and its `error` type from the
+ * rest. Elysia additionally infers a 200 entry from the handler's return union
+ * whenever the handler can return a bare value — so on a route whose only
+ * *declared* success code is non-200 (e.g. `201`), the inferred 200 entry ends
+ * up carrying the **whole** return union, error bodies included. Eden then folds
+ * those error shapes into `data`, and every caller has to re-narrow a union that
+ * should already have been split.
+ *
+ * Declaring 200 explicitly with the success schema pins that entry, so the
+ * union splits where it should: `data` is the success shape, `error` is the
+ * error union.
+ *
+ * ```ts
+ * response: { ...successResponses(201, CreatedSchema), ...errorResponses(400, 409) }
+ * ```
+ *
+ * Passing `200` is a no-op alias of itself (`{ 200: schema }`).
+ */
+export function successResponses<const S extends number, T>(
+  status: S,
+  schema: T,
+): { [K in S | 200]: T } {
+  return { 200: schema, [status]: schema } as { [K in S | 200]: T };
+}
 
 export type SchemaErrorResponse = z.infer<typeof SCHEMA_ERROR_RESPONSE>;
 export type SchemaValidationError = z.infer<typeof SCHEMA_VALIDATION_ERROR>;

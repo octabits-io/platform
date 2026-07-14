@@ -18,8 +18,10 @@ domain-agnostic foundation on top of [`pg-boss`](https://github.com/timgit/pg-bo
   a Zod payload schema, a handler factory, and optional retry/expire config it
   generates enqueuer / worker / DLQ-handler factories. The dead-letter audit is
   factored out behind an injected sink (`onDlqAudit`) so **no table schema is
-  baked in**, and partitioning stays generic via a `scopeKey` seam
-  (`resolveScopeKey`) rather than any tenant vocabulary.
+  baked in** — `@octabits-io/framework/drizzle/job-audit-store` ships a
+  ready-made Postgres/Drizzle implementation of that sink — and partitioning
+  stays generic via a `scopeKey` seam (`resolveScopeKey`) rather than any tenant
+  vocabulary.
 - Monitoring types + error factories (`JobDetails`, `QueueStats`, `JobState`,
   `createJobNotFoundError`, …).
 
@@ -119,8 +121,18 @@ const emailQueue = defineQueue<EmailJob>({
   // unpartitioned queues — nothing tenant-specific is baked in.
   resolveScopeKey: (data) => data.scopeKey,
   // Audit sink — YOU decide how (and whether) to persist. No table schema here.
+  // On Postgres/Drizzle, skip the hand-rolled insert and use the shipped store:
+  //   onDlqAudit: createDrizzleJobAuditStore({ db, table, scope }).onDlqAudit
   onDlqAudit: async (scope, record) => {
-    await scope.resolve('db').insert(jobAuditLog).values(record);
+    await scope.resolve('db').insert(jobAuditLog).values({
+      jobId: record.jobId,
+      queueName: record.queueName,
+      status: record.status,
+      payload: record.validPayload ? record.payload : record.rawPayload,
+      errorMessage: record.errorMessage,
+      attemptCount: record.attemptCount,
+      completedAt: record.completedAt,
+    });
   },
 });
 
@@ -147,6 +159,14 @@ limit; when `false` (schema-invalid — dead-lettered on the first attempt,
 without retry) it carries the raw value as `rawPayload: unknown` and
 `attemptCount: 1`. A sink that throws is caught and logged, and the scope is
 always disposed.
+
+On Postgres/Drizzle you do not have to write that sink:
+[`@octabits-io/framework/drizzle/job-audit-store`](./foundation.md#octabits-ioframeworkdrizzlejob-audit-store)
+ships `createDrizzleJobAuditStore({ db, table, scope? })`, whose `onDlqAudit`
+plugs straight in, plus a `jobAuditColumns` column-set to build the table from.
+It stays on the far side of the seam — this module keeps no `drizzle-orm` peer,
+and the store imports nothing from `queue` (the record types are structural
+duplicates).
 
 ### Base payload types
 

@@ -51,6 +51,28 @@ describe('createApiErrorMessenger', () => {
     expect(msg).toBe('Email address: is not valid, unknown_field: Untranslated message');
   });
 
+  it('slugs punctuated messages and dotted paths into definable i18n keys', () => {
+    const messages: Record<string, string> = {
+      'validation.fields.items_0_email': 'First email',
+      'validation.messages.expected_string_to_match_email': 'must be a valid email address',
+    };
+    const { getErrorMessage } = createApiErrorMessenger({
+      t: (key) => messages[key] ?? key,
+      te: (key) => key in messages,
+      log: () => {},
+    });
+    const msg = getErrorMessage({
+      key: 'validation_error',
+      message: 'raw',
+      fields: [
+        // Raw path has dots (vue-i18n nesting), raw message has quotes —
+        // neither is definable as a literal key without the slug.
+        { path: 'items.0.email', message: "Expected string to match 'email'" },
+      ],
+    });
+    expect(msg).toBe('First email: must be a valid email address');
+  });
+
   it('falls back to errors.validation_error for an empty fields array', () => {
     expect(
       messenger().getErrorMessage({ key: 'validation_error', message: 'raw', fields: [] }),

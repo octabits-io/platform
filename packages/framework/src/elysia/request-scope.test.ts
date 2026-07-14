@@ -172,3 +172,60 @@ describe('createRequestScopePlugin', () => {
     expect(paths).toEqual(['/ctx/42']);
   });
 });
+
+describe('contextKey + extras', () => {
+  it('exposes the scope under a custom context key', async () => {
+    const root = new IoC<Services>();
+    root.register('greeting', () => 'hi');
+    const plugin = createRequestScopePlugin({
+      contextKey: 'container',
+      createScope: () => root.createScope(),
+    });
+    const app = new Elysia()
+      .use(plugin)
+      .get('/greet', ({ container }) => container.resolve('greeting'));
+
+    const res = await app.handle(new Request('http://localhost/greet'));
+    expect(await res.text()).toBe('hi');
+  });
+
+  it('merges extras returned from createScope into the context', async () => {
+    const root = new IoC<Services>();
+    root.register('greeting', () => 'hello');
+    const disposals: Array<{ commit: boolean }> = [];
+    const plugin = createRequestScopePlugin({
+      createScope: ({ params }) => {
+        const scope = root.createScope();
+        scope.onDispose((opts) => { disposals.push({ commit: opts.commit }); });
+        return { scope, extras: { resourceId: params.id ?? 'none' } };
+      },
+    });
+    const app = new Elysia()
+      .use(plugin)
+      .get('/things/:id', ({ scope, resourceId }) => ({
+        id: resourceId,
+        greeting: scope.resolve('greeting'),
+      }));
+
+    const res = await app.handle(new Request('http://localhost/things/42'));
+    expect(await res.json()).toEqual({ id: '42', greeting: 'hello' });
+    await vi.waitFor(() => { expect(disposals).toEqual([{ commit: true }]); });
+  });
+
+  it('disposes under a custom key on the error path too', async () => {
+    const disposals: Array<{ commit: boolean }> = [];
+    const plugin = createRequestScopePlugin({
+      contextKey: 'container',
+      createScope: () => ({
+        dispose: async (opts = { commit: true }) => { disposals.push({ commit: opts.commit }); },
+      }),
+    });
+    const app = new Elysia().use(plugin).get('/boom', () => {
+      throw new Error('nope');
+    });
+
+    const res = await app.handle(new Request('http://localhost/boom'));
+    expect(res.status).toBe(500);
+    expect(disposals).toEqual([{ commit: false }]);
+  });
+});

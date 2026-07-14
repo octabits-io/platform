@@ -5,18 +5,23 @@ import { createSecurityHeadersPlugin } from './security-headers';
 import { createClientIpPlugin, createClientIpResolver, normalizeIp } from './client-ip';
 import {
   SCHEMA_ERROR_RESPONSE,
+  SCHEMA_SUCCESS_RESPONSE,
   CommonErrorResponses,
   errorResponses,
+  successResponses,
   ALL_ERROR_STATUSES,
 } from './responses';
 import {
   getStatusCodeForError,
   statusErrorWithSet,
   mapResultError,
+  createErrorMapper,
   isDbConnectionError,
   ApiError,
   NotFoundError,
   ForbiddenError,
+  ConflictError,
+  TooManyRequestsError,
   createErrorHandler,
 } from './errors';
 import {
@@ -26,6 +31,7 @@ import {
   getEnvNumberOptional,
   getEnvBoolean,
   isProduction,
+  assertNotInProduction,
   parseCsv,
   parseCorsOrigins,
 } from './config';
@@ -43,6 +49,28 @@ describe('getStatusCodeForError', () => {
     expect(getStatusCodeForError({ key: 'incomplete_profile', message: '' })).toBe(422);
     expect(getStatusCodeForError({ key: 'stripe_not_configured', message: '' })).toBe(422);
     expect(getStatusCodeForError({ key: 'something_weird', message: '' })).toBe(500);
+  });
+
+  it('maps conflict keys to 409', () => {
+    expect(getStatusCodeForError({ key: 'already_running', message: '' })).toBe(409);
+    expect(getStatusCodeForError({ key: 'already_published', message: '' })).toBe(409);
+    expect(getStatusCodeForError({ key: 'listing_change_conflict', message: '' })).toBe(409);
+    expect(getStatusCodeForError({ key: 'conflict', message: '' })).toBe(500); // bare key is not a convention
+  });
+
+  it('maps rate-limit keys to 429', () => {
+    expect(getStatusCodeForError({ key: 'rate_limit_exceeded', message: '' })).toBe(429);
+    expect(getStatusCodeForError({ key: 'ai_quota_rate_limited', message: '' })).toBe(429);
+    expect(getStatusCodeForError({ key: 'rate_limit', message: '' })).toBe(500); // not a convention
+  });
+
+  it('keeps existing conventions unshadowed by the newer 409/429 rules', () => {
+    // Each of these matches a new rule too — the earlier, more specific rule wins.
+    expect(getStatusCodeForError({ key: 'invalid_state_conflict', message: '' })).toBe(400);
+    expect(getStatusCodeForError({ key: 'validation_conflict', message: '' })).toBe(400);
+    expect(getStatusCodeForError({ key: 'missing_field_conflict', message: '' })).toBe(422);
+    expect(getStatusCodeForError({ key: 'incomplete_draft_conflict', message: '' })).toBe(422);
+    expect(getStatusCodeForError({ key: 'already_deleted_not_found', message: '' })).toBe(404);
   });
 
   it('honors statusOverrides over the conventions', () => {
@@ -120,6 +148,47 @@ describe('mapResultError', () => {
     expect(mapResultError({ key: 'boom', message: 'm' })).toBeInstanceOf(ApiError);
     expect(mapResultError({ key: 'tenant_not_found', message: 'm' }, { tenant_not_found: 403 })).toBeInstanceOf(ForbiddenError);
   });
+
+  it('covers the 409/429 conventions with their own subclasses', () => {
+    const conflict = mapResultError({ key: 'already_running', message: 'm' });
+    expect(conflict).toBeInstanceOf(ConflictError);
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.key).toBe('already_running');
+
+    const limited = mapResultError({ key: 'rate_limit_exceeded', message: 'm' });
+    expect(limited).toBeInstanceOf(TooManyRequestsError);
+    expect(limited.statusCode).toBe(429);
+  });
+});
+
+describe('createErrorMapper', () => {
+  const overrides = { attachment_blocked: 403, fill_already_running: 409 };
+  const mapper = createErrorMapper(overrides);
+
+  it('pre-binds the overrides into all three mappers', () => {
+    expect(mapper.getStatusCodeForError({ key: 'attachment_blocked', message: 'm' })).toBe(403);
+    expect(mapper.mapResultError({ key: 'attachment_blocked', message: 'm' })).toBeInstanceOf(ForbiddenError);
+
+    const set: { status?: number | string } = {};
+    expect(mapper.statusErrorWithSet(set, { key: 'attachment_blocked', message: 'nope' }))
+      .toEqual({ key: 'attachment_blocked', message: 'nope' });
+    expect(set.status).toBe(403);
+  });
+
+  it('still applies the generic conventions for unlisted keys', () => {
+    expect(mapper.getStatusCodeForError({ key: 'listing_not_found', message: 'm' })).toBe(404);
+    expect(mapper.getStatusCodeForError({ key: 'something_weird', message: 'm' })).toBe(500);
+  });
+
+  it('matches calling the unbound functions with the same overrides', () => {
+    const error = { key: 'fill_already_running', message: 'm' };
+    expect(mapper.getStatusCodeForError(error)).toBe(getStatusCodeForError(error, overrides));
+  });
+
+  it('binds no overrides when called without arguments', () => {
+    const bare = createErrorMapper();
+    expect(bare.getStatusCodeForError({ key: 'attachment_blocked', message: 'm' })).toBe(500);
+  });
 });
 
 describe('isDbConnectionError', () => {
@@ -143,6 +212,24 @@ describe('response schemas', () => {
     const r = errorResponses(400, 404);
     expect(Object.keys(r).map(Number).sort((a, b) => a - b)).toEqual([400, 404]);
     expect(r[400]).toBe(SCHEMA_ERROR_RESPONSE);
+  });
+
+  it('successResponses aliases a non-200 success code onto 200', () => {
+    const r = successResponses(201, SCHEMA_SUCCESS_RESPONSE);
+    expect(Object.keys(r).map(Number).sort((a, b) => a - b)).toEqual([200, 201]);
+    expect(r[201]).toBe(SCHEMA_SUCCESS_RESPONSE);
+    expect(r[200]).toBe(SCHEMA_SUCCESS_RESPONSE);
+  });
+
+  it('successResponses(200, …) is a no-op alias of itself', () => {
+    const r = successResponses(200, SCHEMA_SUCCESS_RESPONSE);
+    expect(Object.keys(r)).toEqual(['200']);
+    expect(r[200]).toBe(SCHEMA_SUCCESS_RESPONSE);
+  });
+
+  it('successResponses composes with errorResponses into a route response map', () => {
+    const map = { ...successResponses(201, SCHEMA_SUCCESS_RESPONSE), ...errorResponses(400, 409) };
+    expect(Object.keys(map).map(Number).sort((a, b) => a - b)).toEqual([200, 201, 400, 409]);
   });
 });
 
@@ -398,6 +485,47 @@ describe('config helpers', () => {
     delete process.env.PRODUCTION;
     process.env.NODE_ENV = 'production';
     expect(isProduction()).toBe(true);
+  });
+
+  it('assertNotInProduction is a no-op outside production', () => {
+    process.env[KEY] = 'dev-only-secret';
+    expect(() => assertNotInProduction(KEY)).not.toThrow();
+    expect(() => assertNotInProduction(KEY, 'explicit-value')).not.toThrow();
+    expect(() => assertNotInProduction(KEY, true)).not.toThrow();
+  });
+
+  it('assertNotInProduction throws in production when the env var is set', () => {
+    process.env.NODE_ENV = 'production';
+    process.env[KEY] = 'dev-only-secret';
+    expect(() => assertNotInProduction(KEY)).toThrow(new RegExp(`${KEY} must not be set in production`));
+  });
+
+  it('assertNotInProduction honors PRODUCTION=true without NODE_ENV', () => {
+    process.env.PRODUCTION = 'true';
+    process.env[KEY] = 'x';
+    expect(() => assertNotInProduction(KEY)).toThrow(/must not be set in production/);
+  });
+
+  it('assertNotInProduction passes in production when the value is unset', () => {
+    process.env.NODE_ENV = 'production';
+    expect(() => assertNotInProduction(KEY)).not.toThrow();
+    process.env[KEY] = '';
+    expect(() => assertNotInProduction(KEY)).not.toThrow(); // empty string is not "set"
+  });
+
+  it('assertNotInProduction checks an explicitly passed value over the env var', () => {
+    process.env.NODE_ENV = 'production';
+    // Env unset, but the caller already read a value from elsewhere → still throws.
+    expect(() => assertNotInProduction(KEY, 'from-config')).toThrow(/must not be set in production/);
+    // Env set, but the caller passes an explicitly-unset value → passes.
+    process.env[KEY] = 'ignored';
+    expect(() => assertNotInProduction(KEY, undefined)).toThrow(/must not be set in production/); // undefined → falls back to env
+    expect(() => assertNotInProduction(KEY, false)).not.toThrow();
+  });
+
+  it('assertNotInProduction treats any non-empty string as set, including "false"', () => {
+    process.env.NODE_ENV = 'production';
+    expect(() => assertNotInProduction(KEY, 'false')).toThrow(/must not be set in production/);
   });
 
   it('parseCsv trims and drops empties; undefined → []', () => {

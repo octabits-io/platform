@@ -51,6 +51,41 @@ export function isProduction(): boolean {
 }
 
 /**
+ * Fail startup when a development-only escape hatch is enabled in production —
+ * the guard for auth bypasses, seed endpoints, debug routes, and anything else
+ * that must never ship live.
+ *
+ * Call it from config loading so the process dies at boot rather than silently
+ * exposing the hatch. Nothing happens outside production, so the same call is
+ * safe in every environment.
+ *
+ * ```ts
+ * const authBypassSecret = getEnvOptional('AUTH_BYPASS_SECRET');
+ * assertNotInProduction('AUTH_BYPASS_SECRET', authBypassSecret);
+ *
+ * // Omit `value` to read process.env[name] directly:
+ * assertNotInProduction('SEED_ENABLED');
+ * ```
+ *
+ * @param name Env var name — used to read the value (when `value` is omitted)
+ *   and to name the offender in the error.
+ * @param value The already-read value. Omit to read `process.env[name]`.
+ *   **Any non-empty string counts as set** (including `'false'`) — these are
+ *   presence-flags, so the safe reading of a set-but-falsy value is "set".
+ *   Pass a real `boolean` when the flag was already parsed.
+ * @throws When the value is set/true and {@link isProduction} is true.
+ */
+export function assertNotInProduction(name: string, value?: string | boolean): void {
+  const resolved = value === undefined ? process.env[name] : value;
+  const isSet = typeof resolved === 'boolean' ? resolved : Boolean(resolved);
+  if (isSet && isProduction()) {
+    throw new Error(
+      `${name} must not be set in production. Unset the env var or ensure NODE_ENV !== "production" and PRODUCTION !== "true".`,
+    );
+  }
+}
+
+/**
  * Comma-split → trim → drop empties. Undefined/empty → `[]`.
  * For `TRUSTED_PROXIES`, `RATE_LIMIT_SKIP_CIDRS`, and similar list env vars.
  */

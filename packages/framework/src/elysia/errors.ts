@@ -28,9 +28,21 @@ export type ErrorStatusOverrides = Record<string, number>;
  * - `forbidden` / `permission_denied` → 403
  * - `invalid_*` / `validation_*` → 400
  * - `missing_*` / `incomplete_*` / `*_not_configured` → 422
+ * - `already_*` / `*_conflict` → 409
+ * - `rate_limit_exceeded` / `*_rate_limited` → 429
  * - everything else → 500
  *
- * `overrides` (e.g. `{ tenant_not_found: 403 }`) win over the conventions.
+ * The rules are checked in the order listed above, so an earlier, more specific
+ * convention wins: `invalid_state_conflict` is a 400 (`invalid_*`), not a 409.
+ * New conventions are appended for exactly that reason — they can never change
+ * a status an existing rule already assigned.
+ *
+ * There is deliberately **no 423 convention**: no key shape reliably means
+ * "locked" (`*_disabled` covers both a locked resource and an unconfigured
+ * feature), so 423 stays an explicit `ApiError(423, …)` or a `statusOverrides`
+ * entry.
+ *
+ * `overrides` (e.g. `{ tenant_not_found: 403 }`) win over every convention.
  */
 export function getStatusCodeForError(error: KeyedError, overrides?: ErrorStatusOverrides): number {
   const key = error.key;
@@ -42,6 +54,8 @@ export function getStatusCodeForError(error: KeyedError, overrides?: ErrorStatus
   if (key === 'forbidden' || key === 'permission_denied') return 403;
   if (key.startsWith('invalid_') || key.startsWith('validation_')) return 400;
   if (key.startsWith('missing_') || key.startsWith('incomplete_') || key.endsWith('_not_configured')) return 422;
+  if (key.startsWith('already_') || key.endsWith('_conflict')) return 409;
+  if (key === 'rate_limit_exceeded' || key.endsWith('_rate_limited')) return 429;
 
   return 500;
 }
@@ -122,6 +136,12 @@ export class ForbiddenError extends ApiError {
   }
 }
 
+export class ConflictError extends ApiError {
+  constructor(message: string, key = 'conflict') {
+    super(409, key, message);
+  }
+}
+
 export class UnprocessableEntityError extends ApiError {
   constructor(message: string, key = 'unprocessable_entity') {
     super(422, key, message);
@@ -148,11 +168,40 @@ export function mapResultError(error: KeyedError, overrides?: ErrorStatusOverrid
     case 401: return new UnauthorizedError(error.message, error.key);
     case 403: return new ForbiddenError(error.message, error.key);
     case 400: return new BadRequestError(error.message, error.key);
+    case 409: return new ConflictError(error.message, error.key);
     case 422: return new UnprocessableEntityError(error.message, error.key);
     case 429: return new TooManyRequestsError(error.message, error.key);
     default: return new InternalServerError(error.message, error.key);
   }
 }
+
+/**
+ * Bind a set of `statusOverrides` once and get the three override-sensitive
+ * mappers back pre-applied — the wrapper every API otherwise rewrites by hand
+ * around its own domain key→status table.
+ *
+ * ```ts
+ * // errors.ts in a consumer:
+ * export * from '@octabits-io/framework/elysia';
+ * export const { getStatusCodeForError, statusErrorWithSet, mapResultError } =
+ *   createErrorMapper({ attachment_blocked: 403, fill_already_running: 409 });
+ * ```
+ *
+ * Re-exporting the bound trio *after* the `export *` shadows the unbound
+ * originals, so route code keeps calling `statusErrorWithSet(set, err)` with no
+ * overrides argument and cannot forget the domain rules.
+ */
+export function createErrorMapper(overrides?: ErrorStatusOverrides) {
+  return {
+    getStatusCodeForError: (error: KeyedError): number => getStatusCodeForError(error, overrides),
+    statusErrorWithSet: <E extends KeyedError>(set: ElysiaSet, err: E): ErrorResponseBody =>
+      statusErrorWithSet(set, err, overrides),
+    mapResultError: (error: KeyedError): ApiError => mapResultError(error, overrides),
+  };
+}
+
+/** The pre-bound mapper trio returned by {@link createErrorMapper}. */
+export type ErrorMapper = ReturnType<typeof createErrorMapper>;
 
 const DB_CONNECTION_ERROR_CODES = new Set([
   'ECONNREFUSED',
@@ -218,6 +267,12 @@ export const createErrorHandler = (logger: Logger, options: ErrorHandlerOptions 
 
   return new Elysia({ name: 'error-handler' })
     .onError({ as: 'global' }, ({ error, code, set }) => {
+      // A thrown Response is an explicit, fully-formed answer — the only way to
+      // short-circuit from a `resolve` hook, which cannot do so by returning
+      // (see createBearerAuthPlugin's onUnauthorized). Pass it through verbatim
+      // instead of reporting it as an unhandled error (which would 500 it).
+      if (error instanceof Response) return error;
+
       // Elysia validation errors.
       if (code === 'VALIDATION') {
         set.status = 400;

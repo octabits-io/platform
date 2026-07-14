@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import {
   nonEmptyString,
   nonEmptyUrl,
@@ -6,6 +7,8 @@ import {
   DATABASE_CONFIG_SCHEMA,
   createRlsSchema,
   LOGGING_CONFIG_SCHEMA,
+  MAIL_CONFIG_SCHEMA,
+  createConfigParser,
 } from './index';
 
 describe('nonEmptyString / nonEmptyUrl', () => {
@@ -104,5 +107,154 @@ describe('LOGGING_CONFIG_SCHEMA', () => {
   it('validates the otlp endpoint as a url', () => {
     expect(LOGGING_CONFIG_SCHEMA.safeParse({ otlp: { endpoint: 'nope' } }).success).toBe(false);
     expect(LOGGING_CONFIG_SCHEMA.safeParse({ otlp: { endpoint: 'https://c.io' } }).success).toBe(true);
+  });
+});
+
+describe('MAIL_CONFIG_SCHEMA', () => {
+  const identity = { platformFromAddress: 'noreply@example.com' };
+
+  it('accepts a logger config with only the platform identity', () => {
+    const parsed = MAIL_CONFIG_SCHEMA.safeParse({ mode: 'logger', ...identity });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.mode).toBe('logger');
+  });
+
+  it('accepts an smtp config and defaults secure to false', () => {
+    const parsed = MAIL_CONFIG_SCHEMA.safeParse({
+      mode: 'smtp',
+      host: 'smtp.example.com',
+      port: '587',
+      user: 'mailer',
+      password: 's3cret',
+      ...identity,
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success && parsed.data.mode === 'smtp') {
+      expect(parsed.data.port).toBe(587); // coerced from the env string
+      expect(parsed.data.secure).toBe(false);
+    }
+  });
+
+  it('accepts a mailjet config', () => {
+    const parsed = MAIL_CONFIG_SCHEMA.safeParse({
+      mode: 'mailjet',
+      apiKey: 'mj-key',
+      apiSecret: 'mj-secret',
+      ...identity,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('accepts a brevo config', () => {
+    const parsed = MAIL_CONFIG_SCHEMA.safeParse({ mode: 'brevo', apiKey: 'bv-key', ...identity });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects an unknown mode', () => {
+    expect(MAIL_CONFIG_SCHEMA.safeParse({ mode: 'carrier-pigeon', ...identity }).success).toBe(false);
+  });
+
+  it('rejects a mode whose credentials are missing', () => {
+    const parsed = MAIL_CONFIG_SCHEMA.safeParse({ mode: 'brevo', ...identity });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('requires the platform From address in every mode', () => {
+    expect(MAIL_CONFIG_SCHEMA.safeParse({ mode: 'logger' }).success).toBe(false);
+    expect(MAIL_CONFIG_SCHEMA.safeParse({ mode: 'logger', platformFromAddress: '' }).success).toBe(false);
+  });
+
+  it('validates the optional email fields', () => {
+    expect(
+      MAIL_CONFIG_SCHEMA.safeParse({ mode: 'logger', ...identity, devOverrideRecipient: 'nope' }).success,
+    ).toBe(false);
+    expect(
+      MAIL_CONFIG_SCHEMA.safeParse({ mode: 'logger', ...identity, platformNotificationsAddress: 'nope' }).success,
+    ).toBe(false);
+    expect(
+      MAIL_CONFIG_SCHEMA.safeParse({
+        mode: 'logger',
+        ...identity,
+        devOverrideRecipient: 'dev@example.com',
+        platformNotificationsAddress: 'ops@example.com',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('reads booleans via booleanFromEnv, not z.coerce.boolean (regression: "false" must be false)', () => {
+    const parsed = MAIL_CONFIG_SCHEMA.safeParse({
+      mode: 'smtp',
+      host: 'smtp.example.com',
+      port: 465,
+      secure: 'false',
+      user: 'mailer',
+      password: 's3cret',
+      forceNotificationsOnlyDelivery: 'false',
+      ...identity,
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success && parsed.data.mode === 'smtp') {
+      expect(parsed.data.secure).toBe(false);
+      expect(parsed.data.forceNotificationsOnlyDelivery).toBe(false);
+    }
+  });
+});
+
+describe('createConfigParser', () => {
+  const schema = z.object({
+    database: DATABASE_CONFIG_SCHEMA,
+    mail: MAIL_CONFIG_SCHEMA.optional(),
+  });
+
+  it('returns ok with the parsed (defaulted, coerced) value', () => {
+    const parse = createConfigParser(schema);
+    const result = parse({ database: { url: 'postgres://x/db', poolMaxConnections: '20' } });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.database.url).toBe('postgres://x/db');
+      expect(result.value.database.poolMaxConnections).toBe(20);
+      expect(result.value.database.logger).toBe(false);
+    }
+  });
+
+  it('returns err config_invalid with the dotted issue path', () => {
+    const parse = createConfigParser(schema);
+    const result = parse({ database: { url: 'not-a-url' } });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.key).toBe('config_invalid');
+      expect(result.error.message).toContain('database.url');
+    }
+  });
+
+  it('aggregates every issue, not just the first', () => {
+    const parse = createConfigParser(schema);
+    const result = parse({
+      database: { url: 'not-a-url', poolMaxConnections: 'many' },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('database.url');
+      expect(result.error.message).toContain('database.poolMaxConnections');
+    }
+  });
+
+  it('labels a top-level issue <root>', () => {
+    const parse = createConfigParser(schema);
+    const result = parse('not-an-object');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('<root>');
+  });
+
+  it('does not echo config values into the message (they hold secrets)', () => {
+    const parse = createConfigParser(z.object({ apiKey: z.string().min(10) }));
+    const result = parse({ apiKey: 'sh0rt' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).not.toContain('sh0rt');
   });
 });

@@ -67,7 +67,31 @@ const services = container.toServices();
 services.db; // resolves on property access
 ```
 
-**Key types:** `ServiceResolver<T>`, `DisposableServiceResolver<T>`, `SystemScopeFactory<T>`
+**Key types:** `ServiceResolver<T>`, `DisposableServiceResolver<T>`, `SystemScopeFactory<T>`,
+`ErasedScope` (type-erased `resolve`-by-string + `dispose` — the circular-dependency
+dodge modules otherwise re-declare inline).
+
+**Scope lifecycle helpers** — for non-HTTP contexts (queue handlers, cron sweeps,
+CLI); the Elysia request path has `createRequestScopePlugin` instead:
+
+```ts
+import { withScope, forEachScope } from '@octabits-io/framework/ioc';
+
+// acquire → work → dispose, with the request-scope plugin's commit semantics:
+// success → dispose({ commit: true }) (a failure here RETHROWS — the work may
+// not be persisted); fn threw → dispose({ commit: false }), fn's error wins.
+const total = await withScope(
+  () => createSystemScope(),
+  async (scope) => scope.resolve('sweepService').run(),
+);
+
+// Fan out over many scopes with failure isolation: one broken key records an
+// error and the sweep continues. Returns { processed, failed } for the tally.
+const { processed, failed } = await forEachScope(
+  { keys: scopeKeys, createScope: (key) => createSystemScope(key), onError: log },
+  async (scope, key) => scope.resolve('sweepService').runFor(key),
+);
+```
 
 ---
 
@@ -162,18 +186,63 @@ Reusable Zod config fragments — compose them into your app's config schema.
 import {
   nonEmptyString,
   nonEmptyUrl,
+  booleanFromEnv,
   DATABASE_CONFIG_SCHEMA,
   createRlsSchema,
   LOGGING_CONFIG_SCHEMA,
+  MAIL_CONFIG_SCHEMA,
+  createConfigParser,
 } from '@octabits-io/framework/config-schema';
 
 const CONFIG_SCHEMA = z.object({
   database: DATABASE_CONFIG_SCHEMA,
   rls: createRlsSchema(true), // default-enabled RLS toggle
   logging: LOGGING_CONFIG_SCHEMA,
+  mail: MAIL_CONFIG_SCHEMA,
   apiUrl: nonEmptyUrl(),
 });
 ```
+
+Use `booleanFromEnv()` for env-sourced flags rather than `z.coerce.boolean()`,
+which treats every non-empty string — including `"false"` and `"0"` — as `true`.
+
+#### Mail
+
+`MAIL_CONFIG_SCHEMA` is a discriminated union on `mode`:
+
+| `mode` | Fields |
+| --- | --- |
+| `logger` | — (pairs with the logger/in-memory transports the `./mail` root ships) |
+| `smtp` | `host`, `port`, `secure` (default `false`), `user`, `password` |
+| `mailjet` | `apiKey`, `apiSecret` |
+| `brevo` | `apiKey` |
+
+Every mode also carries the platform identity and delivery-safety fields —
+`platformFromAddress` (required), `platformFromName?`,
+`platformNotificationsAddress?`, `forceNotificationsOnlyDelivery?`, and
+`devOverrideRecipient?` — named to match `createBaseMailService`'s config, so a
+parsed section spreads straight into it. They are shared across *all* modes
+(including `logger`), so flipping `mode` in an env file never invalidates the
+rest of the section.
+
+#### Parsing
+
+`createConfigParser(schema)` wraps a composed schema into a `Result`-returning
+parser — the Result-pattern counterpart to `schema.parse` (throws) and
+`schema.safeParse` (whose `ZodError` is not an `OctError`):
+
+```ts
+export const parseAppConfig = createConfigParser(CONFIG_SCHEMA);
+
+const parsed = parseAppConfig(raw);
+if (!parsed.ok) throw new Error(parsed.error.message); // boot-time: fail loud
+```
+
+Failures are `err({ key: 'config_invalid', message })`, where `message`
+aggregates **every** issue as `path: message` (dotted paths, `<root>` for a
+top-level issue) — one parse reports all problems, not just the first. Values
+are never echoed into the message: config holds secrets, and the message is
+expected to reach logs.
 
 ---
 
@@ -308,6 +377,24 @@ verifiable before any lookup). Without one, the service is read-only against
 earlier; signing an unprovisioned purpose returns `scoped_signing_key_not_found`.
 Errors are `Result` values (`scoped_signing_key_not_found`,
 `scoped_signing_signature_invalid`), never thrown.
+
+#### `constantTimeEquals`
+
+Constant-time string comparison for secrets an attacker can submit repeatedly
+and time — URL path secrets, webhook tokens, HMAC digests:
+
+```ts
+import { constantTimeEquals } from '@octabits-io/framework/signing';
+
+if (!constantTimeEquals(params.secret, expectedSecret)) return unauthorized();
+```
+
+`node:crypto`'s `timingSafeEqual` throws on a length mismatch, so callers reach
+for `a.length === b.length && timingSafeEqual(...)` — a guard that
+short-circuits, leaking the secret's length one probe at a time. This helper
+SHA-256s both inputs first, so the comparison always runs over two 32-byte
+digests and no branch depends on input length. Inputs are treated as UTF-8; no
+Unicode normalization is applied (it is for secrets, not user-visible text).
 
 ### `@octabits-io/framework/vault`
 
@@ -487,8 +574,8 @@ const dec = decryptSymmetric(enc.value, key);
 (Formerly the standalone `@octabits-io/drizzle-toolkit` package.)
 Shared Drizzle ORM utilities for PostgreSQL: database error handling, pagination,
 a drizzle factory, a migration runner, generic CRUD service factories, a
-scoped config store, RLS scoping, an idempotency-key store, and generic scope
-schema primitives.
+scoped config store, RLS scoping, an idempotency-key store, a job-audit store,
+and generic scope schema primitives.
 
 `pg` is an **optional peer dependency** — only the `./factory` and `./migrate`
 subpaths need it at runtime (`./rls` uses its types only). Install `pg` in your
@@ -638,6 +725,61 @@ query logic lives here, where Drizzle is already a hard dep).
   import (the same decoupling `./config`'s `ConfigCipher` uses). Wire it with
   `createScopedKeyService({ store, scope, masterKeyProvider, cache })`.
 
+#### `@octabits-io/framework/drizzle/job-audit-store`
+
+The Drizzle adapter behind `@octabits-io/framework/queue`'s structural
+`onDlqAudit` sink. `defineQueue` hands each dead-lettered job to an injected
+sink and bakes in **no table schema**, so queue carries no `drizzle-orm` peer;
+this module is the Postgres/Drizzle implementation of that seam. Record types
+are structural **duplicates** of queue's — no cross-module import.
+
+- `jobAuditColumns` — spreadable column-set (`jobId`, `queueName`, `jobType`,
+  `status`, `payload`, `errorMessage`, `attemptCount`, `createdAt`,
+  `completedAt`). As with `./scope`'s sets, the **scope column is yours to
+  declare** — omit it entirely in a single-scope deployment. `payload` uses
+  `jsonbSafe` (a schema-invalid payload is an arbitrary `unknown`, so it can be
+  a top-level JSON string — exactly what stock `jsonb()` silently retypes on
+  read).
+- `createDrizzleJobAuditStore({ db, table, scope? })` — `store.onDlqAudit` drops
+  straight into `defineQueue({ onDlqAudit })`; `store.record(record)` is the
+  `Result`-returning primitive underneath.
+
+```ts
+const auditStore = createDrizzleJobAuditStore({
+  db,
+  table: schema.jobAuditLog,
+  scope: { column: 'tenantId' }, // value read per-record from record.scopeKey
+});
+
+export const emailQueue = defineQueue({
+  name: 'email',
+  schema: SCHEMA_EMAIL_PAYLOAD,
+  createHandler,
+  resolveScopeKey: (data) => data.tenantId, // populates record.scopeKey
+  onDlqAudit: auditStore.onDlqAudit,
+});
+```
+
+Scoping differs from `./scoped-key-store`'s fixed `{ column, value }` on
+purpose: a key store serves one scope, but a queue definition is
+process-global — dead-lettered jobs from *every* scope flow through the one
+sink. So `value` is **optional** and defaults to each record's `scopeKey`:
+
+| `scope` | Behaviour |
+| --- | --- |
+| omitted | No scope column stamped; every record written. |
+| `{ column }` | Stamped from `record.scopeKey`. A record without one (system/cron queues, which omit `resolveScopeKey`) is **skipped** → `skipped_unscoped`. |
+| `{ column, value }` | Fixed value stamped on every record; `record.scopeKey` ignored. |
+
+The skip exists because such a column is typically FK-bound and `NOT NULL` — a
+row a system job could not satisfy anyway. Nothing is lost silently:
+`defineQueue` logs every dead-letter with full context *before* invoking the
+sink, so those jobs are log-only. `record()` returns the outcome
+(`recorded` | `skipped_unscoped`) so callers can tell a write from a skip;
+`onDlqAudit` **throws** on a storage failure (the seam returns `void`, and a
+swallowed error is a silently lost audit trail — `defineQueue` catches it, logs
+`Failed to run DLQ audit sink`, and keeps the batch alive).
+
 #### `@octabits-io/framework/drizzle/config`
 
 Generic **config store** over any key/value table (spread
@@ -672,6 +814,22 @@ operation runs inside a short transaction that applies transaction-local
 `withSystemMode`, the pinned-connection `acquireScopedClient` /
 `releaseScopedClient`, and `endPoolGracefully`. Policies and concrete GUC
 values stay in the consumer.
+
+**`createGucScopeFactory({ container, dbKey?, enabled?, gucs, seed? })`** — the
+bridge to `…/ioc` every RLS consumer otherwise hand-writes per scope kind
+(request/system/grant scope): returns `(args) => scope` where the child scope's
+`db` (or `dbKey`) is re-registered as a Scoped `createScopedDb` proxy over
+`gucs(args)`, and `seed(scope, args)` adds per-scope registrations. With
+`enabled: false` the raw db resolves through the parent chain but `seed` still
+runs — same wiring against a database without RLS policies. The container is
+addressed structurally (`ScopeContainer`/`ScopeChild`), so wrapped containers
+work.
+
+**List-valued GUCs** — single values are parameterized safely, but a list
+joined into one GUC (split DB-side via `string_to_array(…, ',')`) has an
+in-band separator: use `assertSafeGucListValue(values)` /
+`joinGucList(values)`, which reject any element containing `,` or `'` instead
+of silently widening the policy's match set.
 
 #### `@octabits-io/framework/drizzle/idempotency`
 

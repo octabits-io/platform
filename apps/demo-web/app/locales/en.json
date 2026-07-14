@@ -219,7 +219,7 @@
       "welcomeSubject": "Welcome email subject"
     },
     "messages": {
-      "expected_string_to_match_'email'": "must be a valid email address",
+      "expected_string_to_match_email": "must be a valid email address",
       "expected_string_length_greater_or_equal_to_1": "must not be empty"
     }
   }

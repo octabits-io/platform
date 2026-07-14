@@ -49,15 +49,34 @@ export interface RequestScopeContext {
   params: Record<string, string | undefined>;
 }
 
-export interface RequestScopePluginOptions<TScope extends RequestScope> {
+/** `createScope` may return the scope alone, or the scope plus extra context values. */
+export type CreateScopeResult<TScope extends RequestScope, TExtras extends Record<string, unknown>> =
+  | TScope
+  | { scope: TScope; extras: TExtras };
+
+export interface RequestScopePluginOptions<
+  TScope extends RequestScope,
+  TExtras extends Record<string, unknown> = Record<never, never>,
+  TKey extends string = 'scope',
+> {
   /**
    * Allocate + seed the scope for one request (e.g.
    * `container.createScope()` plus scoped registrations derived from the
    * request). Throwing *before* allocation is always safe; if you must throw
    * *after* allocating, dispose what you allocated first — or put the check
    * in `guard`, which exists for exactly that.
+   *
+   * Return `{ scope, extras }` to merge additional values into the handler
+   * context alongside the scope (e.g. an id you already parsed while
+   * seeding) — extras are plain context values with no lifecycle of their own.
    */
-  createScope: (ctx: RequestScopeContext) => TScope | Promise<TScope>;
+  createScope: (ctx: RequestScopeContext) => CreateScopeResult<TScope, TExtras> | Promise<CreateScopeResult<TScope, TExtras>>;
+  /**
+   * Context property the scope is exposed under. Default `'scope'`.
+   * Consumers migrating hand-rolled plugins can keep their established name
+   * (e.g. `'container'`) instead of touching every handler.
+   */
+  contextKey?: TKey;
   /**
    * Optional validation that needs the scope (grant checks, row lookups,
    * feature gates). On throw, the plugin disposes the scope with
@@ -107,14 +126,25 @@ async function disposeQuietly(
  * new Elysia().use(scopePlugin).get('/me', ({ scope }) => scope.resolve('role'));
  * ```
  */
-export function createRequestScopePlugin<TScope extends RequestScope>(
-  options: RequestScopePluginOptions<TScope>,
-) {
+export function createRequestScopePlugin<
+  TScope extends RequestScope,
+  TExtras extends Record<string, unknown> = Record<never, never>,
+  const TKey extends string = 'scope',
+>(options: RequestScopePluginOptions<TScope, TExtras, TKey>) {
   const { createScope, guard, logger, name = 'request-scope' } = options;
+  const contextKey = (options.contextKey ?? 'scope') as TKey;
+
+  const scopeOf = (ctx: unknown): TScope | undefined =>
+    (ctx as Record<string, unknown>)[contextKey] as TScope | undefined;
 
   return new Elysia({ name })
     .resolve({ as: 'scoped' }, async (ctx) => {
-      const scope = await createScope(ctx as unknown as RequestScopeContext);
+      const result = await createScope(ctx as unknown as RequestScopeContext);
+      // A wrapper carries the scope under `scope` and has no dispose of its
+      // own; anything with a dispose IS the scope.
+      const wrapped = typeof (result as { dispose?: unknown }).dispose !== 'function';
+      const scope = wrapped ? (result as { scope: TScope }).scope : (result as TScope);
+      const extras = wrapped ? (result as { extras: TExtras }).extras : undefined;
       if (guard) {
         try {
           await guard(scope, ctx as unknown as RequestScopeContext);
@@ -123,14 +153,14 @@ export function createRequestScopePlugin<TScope extends RequestScope>(
           throw error;
         }
       }
-      return { scope };
+      return { ...(extras as TExtras), [contextKey]: scope } as TExtras & Record<TKey, TScope>;
     })
-    .onAfterResponse({ as: 'scoped' }, async ({ scope }) => {
-      await disposeQuietly(scope, { commit: true }, logger);
+    .onAfterResponse({ as: 'scoped' }, async (ctx) => {
+      await disposeQuietly(scopeOf(ctx), { commit: true }, logger);
     })
-    .onError({ as: 'scoped' }, async ({ scope }) => {
+    .onError({ as: 'scoped' }, async (ctx) => {
       // Runs before the error response is sent; `onAfterResponse` still fires
       // afterwards — that second dispose is a no-op on an idempotent scope.
-      await disposeQuietly(scope as TScope | undefined, { commit: false }, logger);
+      await disposeQuietly(scopeOf(ctx), { commit: false }, logger);
     });
 }

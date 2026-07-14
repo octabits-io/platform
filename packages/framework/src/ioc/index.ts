@@ -8,3 +8,5 @@ export type {
   DisposeOptions,
   SystemScopeFactory,
 } from './container.ts';
+export { withScope, forEachScope } from './scopes.ts';
+export type { ErasedScope, DisposableScope, ForEachScopeResult } from './scopes.ts';

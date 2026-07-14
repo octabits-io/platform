@@ -135,6 +135,16 @@
       "import": "./dist/elysia/mcp.js",
       "default": "./dist/elysia/mcp.js"
     },
+    "./elysia/testing": {
+      "types": "./dist/elysia/testing.d.ts",
+      "import": "./dist/elysia/testing.js",
+      "default": "./dist/elysia/testing.js"
+    },
+    "./drizzle/job-audit-store": {
+      "types": "./dist/drizzle/job-audit-store/index.d.ts",
+      "import": "./dist/drizzle/job-audit-store/index.js",
+      "default": "./dist/drizzle/job-audit-store/index.js"
+    },
     "./queue": {
       "types": "./dist/queue/index.d.ts",
       "import": "./dist/queue/index.js",

@@ -26,6 +26,8 @@ export default defineConfig({
     "ical/index": "src/ical/index.ts",
     "elysia/index": "src/elysia/index.ts",
     "elysia/mcp": "src/elysia/mcp.ts",
+    "elysia/testing": "src/elysia/testing.ts",
+    "drizzle/job-audit-store/index": "src/drizzle/job-audit-store/index.ts",
     "queue/index": "src/queue/index.ts",
     "storage/index": "src/storage/index.ts",
     "storage/s3": "src/storage/s3.ts",

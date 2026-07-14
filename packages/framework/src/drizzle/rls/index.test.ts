@@ -1,7 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Pool, PoolClient } from 'pg';
+import { IoC, ServiceLifetime } from '../../ioc/index.ts';
 import {
   createScopedDb,
+  createGucScopeFactory,
+  assertSafeGucListValue,
+  joinGucList,
   runWithGucs,
   withSystemMode,
   acquireScopedClient,
@@ -248,5 +252,66 @@ describe('releaseScopedClient', () => {
     await expect(releaseScopedClient({ client, commit: false })).resolves.toBeUndefined();
     expect(release).toHaveBeenCalledTimes(1);
     expect(release.mock.calls[0]![0]).toBeInstanceOf(Error);
+  });
+});
+
+describe('assertSafeGucListValue / joinGucList', () => {
+  it('accepts machine-generated ids and joins them', () => {
+    expect(joinGucList(['org-1', 'org-2'])).toBe('org-1,org-2');
+    expect(() => assertSafeGucListValue(['a-b_c', '123'])).not.toThrow();
+  });
+
+  it('rejects values containing a comma or single quote', () => {
+    expect(() => assertSafeGucListValue(['ok', 'bad,ly'])).toThrow(/comma or single quote/);
+    expect(() => joinGucList(["o'brien"])).toThrow(/comma or single quote/);
+  });
+});
+
+describe('createGucScopeFactory', () => {
+  interface Services {
+    db: ReturnType<typeof makeDb>['db'];
+    label: string;
+  }
+
+  function harness(enabled: boolean) {
+    const { db: rawDb, gucCalls } = makeDb();
+    const root = new IoC<Services>();
+    root.register('db', () => rawDb);
+    root.register('label', () => 'root');
+    const factory = createGucScopeFactory<Services, { scopeId: string }>({
+      container: root,
+      enabled,
+      gucs: ({ scopeId }) => ({ 'app.scope_id': scopeId }),
+      seed: (scope, { scopeId }) => {
+        scope.register('label', () => `seeded:${scopeId}`, ServiceLifetime.Scoped);
+      },
+    });
+    return { factory, rawDb, gucCalls };
+  }
+
+  it('registers a GUC-scoped db override and runs seed', async () => {
+    const { factory, rawDb, gucCalls } = harness(true);
+    const scope = factory({ scopeId: 's1' });
+    expect(scope.resolve('label')).toBe('seeded:s1');
+    const scopedDb = scope.resolve('db');
+    expect(scopedDb).not.toBe(rawDb); // proxied
+    // Top-level op runs inside a transaction that applies the GUCs first.
+    const chain = (scopedDb as unknown as { select(): { from(t: unknown): { where(w: unknown): Promise<unknown> } } }).select();
+    await chain.from('t').where('w');
+    expect(gucCalls.length).toBeGreaterThan(0);
+    expect(gucCalls[0]?.[0]).toContain('app.scope_id');
+  });
+
+  it('skips the db override (raw db via parent chain) when disabled, but still seeds', () => {
+    const { factory, rawDb } = harness(false);
+    const scope = factory({ scopeId: 's2' });
+    expect(scope.resolve('db')).toBe(rawDb);
+    expect(scope.resolve('label')).toBe('seeded:s2');
+  });
+
+  it('creates isolated scopes per call', () => {
+    const { factory } = harness(true);
+    expect(factory({ scopeId: 'a' }).resolve('label')).toBe('seeded:a');
+    expect(factory({ scopeId: 'b' }).resolve('label')).toBe('seeded:b');
   });
 });

@@ -18,6 +18,7 @@
 import { sql } from 'drizzle-orm';
 import type { Pool, PoolClient } from 'pg';
 import type { Logger as DrizzleLogger } from 'drizzle-orm';
+import { ServiceLifetime } from '../../ioc/index.ts';
 
 /**
  * GUC key/value pairs applied via `set_config(name, value, true)` at the
@@ -403,4 +404,106 @@ export async function endPoolGracefully(opts: {
   } catch (err) {
     logger.error('pg.Pool.end() threw', err instanceof Error ? err : new Error(String(err)));
   }
+}
+
+// ---------------------------------------------------------------------------
+// GUC value guards + the IoC bridge
+// ---------------------------------------------------------------------------
+
+/**
+ * Guard for **list-valued** GUCs. Single GUC values are parameterized safely
+ * by `runWithGucs`/`createScopedDb`, but a list joined into one GUC (read
+ * DB-side via `string_to_array(current_setting(...), ',')`) has an in-band
+ * separator: an element containing `,` widens the match set, and `'` invites
+ * quoting bugs in hand-written policies. Ids passed here are expected to be
+ * machine-generated (uuids, snowflakes) — any such character is illegitimate,
+ * so we reject rather than silently truncate or widen.
+ *
+ * Throws on the first offending value; returns nothing when all are safe.
+ */
+export function assertSafeGucListValue(values: readonly string[]): void {
+  for (const value of values) {
+    if (value.includes(',') || value.includes("'")) {
+      throw new Error(`Invalid GUC list value: contains comma or single quote: ${value}`);
+    }
+  }
+}
+
+/** {@link assertSafeGucListValue} + comma-join, as one call. */
+export function joinGucList(values: readonly string[]): string {
+  assertSafeGucListValue(values);
+  return values.join(',');
+}
+
+/**
+ * Structural view of the IoC container this module bridges to — kept
+ * structural (rather than importing the `IoC` class) so wrapped containers
+ * work and `drizzle-orm` consumers without `../../ioc` in their object graph
+ * pay nothing.
+ */
+export interface ScopeContainer<TServices> {
+  resolve<K extends keyof TServices>(key: K): TServices[K];
+  createScope<T2 = object>(): ScopeChild<T2 & TServices>;
+}
+
+export interface ScopeChild<TServices> {
+  register<K extends keyof TServices>(
+    key: K,
+    factory: (scope: ScopeChild<TServices>) => TServices[K],
+    lifetime?: unknown,
+  ): void;
+  resolve<K extends keyof TServices>(key: K): TServices[K];
+  dispose(opts?: { commit: boolean }): Promise<void>;
+}
+
+/**
+ * The missing bridge between `../../ioc` and this module: build a factory
+ * that creates a child scope whose `db` is a GUC-scoped {@link createScopedDb}
+ * proxy — the block every RLS consumer otherwise hand-writes per scope kind
+ * (request scope, system scope, grant scope, …).
+ *
+ * ```ts
+ * const createRequestScope = createGucScopeFactory({
+ *   container, dbKey: 'db', enabled: config.rls.enabled,
+ *   gucs: ({ scopeId }) => ({ 'app.scope_id': scopeId }),
+ *   seed: (scope, { actorId }) => scope.register('actorId', () => actorId),
+ * });
+ * const scope = createRequestScope({ scopeId, actorId });
+ * ```
+ *
+ * When `enabled` is false the `db` override is skipped (the raw db resolves
+ * through the parent chain) but `seed` still runs — so consumers can develop
+ * against a database without RLS policies using the same wiring.
+ */
+export function createGucScopeFactory<
+  TServices extends Record<TDbKey, RlsDatabase>,
+  TArgs,
+  TExtra = object,
+  TDbKey extends keyof TServices & string = 'db' & keyof TServices & string,
+>(opts: {
+  container: ScopeContainer<TServices>;
+  /** Service key holding the raw Drizzle instance. Default `'db'`. */
+  dbKey?: TDbKey;
+  /** RLS on/off (e.g. from config). Default `true`. */
+  enabled?: boolean;
+  /** Session variables for one scope, from the factory's call arguments. */
+  gucs: (args: TArgs) => SessionVars;
+  /** Extra scoped registrations (ids, tokens, per-scope services). */
+  seed?: (scope: ScopeChild<TExtra & TServices>, args: TArgs) => void;
+}): (args: TArgs) => ScopeChild<TExtra & TServices> {
+  const { container, enabled = true, gucs, seed } = opts;
+  const dbKey = (opts.dbKey ?? 'db') as TDbKey;
+
+  return (args: TArgs) => {
+    const scope = container.createScope<TExtra>();
+    if (enabled) {
+      const rawDb = container.resolve(dbKey);
+      const scopedDb = createScopedDb(rawDb, gucs(args));
+      // A child scope can always register keys typed by its parent's service
+      // map — narrow the view to make the override typecheck.
+      (scope as ScopeChild<TServices>).register(dbKey, () => scopedDb, ServiceLifetime.Scoped);
+    }
+    seed?.(scope, args);
+    return scope;
+  };
 }

@@ -25,13 +25,26 @@ export interface ApiErrorMessengerOptions {
  *
  * - `errors.<key>` — one entry per API error key (fallback: the raw
  *   server `message`, and `errors.internal_server_error` for non-API errors)
- * - `validation.fields.<path>` — display names for validated fields
- * - `validation.messages.<snake_cased_message>` — validation message texts
+ * - `validation.fields.<slug>` — display names for validated fields
+ * - `validation.messages.<slug>` — validation message texts
+ *
+ * `<slug>` is the path/message lowercased with every non-alphanumeric run
+ * collapsed to a single `_` (e.g. path `items.0.name` → `items_0_name`,
+ * message `Expected string to match 'email'` →
+ * `expected_string_to_match_email`) — so every derivable key is a flat,
+ * definable vue-i18n key. Raw paths/messages with dots or punctuation are
+ * not definable (dots nest in vue-i18n), which previously made this branch
+ * unimplementable for most real messages.
  *
  * Framework-free: pass `t`/`te` from your i18n instance (the app-side
  * composable is typically `const { t, te } = useI18n()` + this factory).
  * Eden Treaty error envelopes (`{ value }`) are unwrapped automatically.
  */
+/** Lowercase + collapse every non-alphanumeric run to `_` (trimmed) — a flat, definable vue-i18n key segment. */
+function i18nSlug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
 export function createApiErrorMessenger(options: ApiErrorMessengerOptions) {
   const { t, te } = options;
   const log = options.log ?? ((message, error) => console.error(message, error));
@@ -54,10 +67,10 @@ export function createApiErrorMessenger(options: ApiErrorMessengerOptions) {
 
     if (isValidationError(actualError)) {
       const fieldMessages = actualError.fields.map((f) => {
-        const fieldKey = `validation.fields.${f.path}`;
+        const fieldKey = `validation.fields.${i18nSlug(f.path)}`;
         const fieldName = te(fieldKey) ? t(fieldKey) : f.path;
 
-        const messageKey = `validation.messages.${f.message.toLowerCase().replace(/\s+/g, '_')}`;
+        const messageKey = `validation.messages.${i18nSlug(f.message)}`;
         const message = te(messageKey) ? t(messageKey) : f.message;
 
         return `${fieldName}: ${message}`;
