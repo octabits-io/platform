@@ -54,3 +54,21 @@ export type {
   OrgStoreCoreOptions,
   FetchOrganizationsResult,
 } from './org/orgStore.ts';
+
+// Promise-based confirm dialog (renderer: ./components/ConfirmDialog.vue)
+export { useConfirm, useConfirmState } from './composables/useConfirm.ts';
+export type { ConfirmOptions } from './composables/useConfirm.ts';
+
+// API error → i18n message mapping (errors.* / validation.* key convention)
+export { createApiErrorMessenger } from './composables/apiErrorMessenger.ts';
+export type {
+  ApiErrorLike,
+  ValidationApiErrorLike,
+  ApiErrorMessengerOptions,
+} from './composables/apiErrorMessenger.ts';
+
+// Form dirty tracking
+export { useDirtyTracking } from './composables/useDirtyTracking.ts';
+
+// Offset pagination
+export { usePagination } from './composables/usePagination.ts';
