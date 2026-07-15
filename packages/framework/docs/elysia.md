@@ -131,13 +131,19 @@ of the octabits stack, not a standalone kit.
   fold to the five display states), served with declared `response` schemas
   (Eden narrowing + OpenAPI) and `createErrorMapper`-based error mapping
   (`errorOverrides` for domain keys, e.g. `{ ai_quota_exceeded: 429 }`).
-  Consumer wire fields ride the `extendWorkflow: { schema, project }` seam —
-  schema fragment and projection travel together so declared type and served
-  value cannot drift. **Start/trigger routes stay in the app** (domain body
-  shape, `entityRef` convention, quota/auth policy). The `engine` parameter is
-  the structural `FlowEngineReader` — a partition-bound `WorkflowEngine`
-  satisfies it. `@octabits-io/flow` is an optional peer, pulled in only by this
-  `./flow` subpath.
+  Consumer wire fields ride the `extendWorkflow: { schema, load?, project }`
+  seam — schema fragment and projection travel together so declared type and
+  served value cannot drift, and the optional `load(workflows, ctx)` batches
+  side-table reads once per request before `project(workflow, loaded)` runs
+  per row. `engine` is the structural `FlowEngineReader` (a partition-bound
+  `WorkflowEngine` satisfies it) **or a per-request resolver** `(ctx) =>
+  engine` for hosts whose engine lives in a request scope; `authorize(action,
+  ctx)` gates each route (return a keyed error — `forbidden` → 403). Map/
+  sub-workflow child steps are excluded from the wire by default
+  (`includeChildSteps: true` opts in). **Start/trigger routes stay in the app**
+  (domain body shape, `entityRef` convention, quota/auth policy).
+  `@octabits-io/flow` is an optional peer, pulled in only by this `./flow`
+  subpath.
 - **Env-config helpers** — `getEnv*`, `isProduction`, `parseCsv`,
   `parseCorsOrigins`, and **`assertNotInProduction(name, value?)`** — fails
   startup when a dev-only escape hatch (auth bypass, seed endpoint, debug route)
