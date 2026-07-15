@@ -57,6 +57,12 @@ export interface TreatyClientFactoryOptions {
    * genuinely round-trips Date objects.
    */
   parseDate?: boolean;
+  /**
+   * Additional header source(s), applied after the bearer injector — a later
+   * entry wins on key collision, so consumers can add or override headers
+   * without losing the Authorization injection.
+   */
+  headers?: Treaty.Config['headers'];
   /** Extra Treaty config (fetcher, onRequest, …), applied last. */
   treatyConfig?: Omit<Treaty.Config, 'headers' | 'parseDate'>;
 }
@@ -80,15 +86,23 @@ export function createTreatyClientFactory<App extends AnyElysia>(
   return function getClient(): Treaty.Create<App> {
     if (client) return client;
 
+    const bearerInjector = async () => {
+      const token = await options.getAccessToken();
+      if (token) {
+        return { authorization: `Bearer ${token}` } as Record<string, string>;
+      }
+      return undefined;
+    };
+    const extraHeaders =
+      options.headers === undefined
+        ? []
+        : Array.isArray(options.headers)
+          ? options.headers
+          : [options.headers];
+
     client = treaty<App>(options.getBaseUrl(), {
       parseDate: options.parseDate ?? false,
-      headers: async () => {
-        const token = await options.getAccessToken();
-        if (token) {
-          return { authorization: `Bearer ${token}` } as Record<string, string>;
-        }
-        return undefined;
-      },
+      headers: [bearerInjector, ...extraHeaders],
       ...options.treatyConfig,
     });
 

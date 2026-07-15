@@ -17,6 +17,26 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./auth": {
+      "types": "./dist/auth/index.d.ts",
+      "import": "./dist/auth/index.js",
+      "default": "./dist/auth/index.js"
+    },
+    "./api": {
+      "types": "./dist/api/index.d.ts",
+      "import": "./dist/api/index.js",
+      "default": "./dist/api/index.js"
+    },
+    "./i18n": {
+      "types": "./dist/i18n/index.d.ts",
+      "import": "./dist/i18n/index.js",
+      "default": "./dist/i18n/index.js"
+    },
+    "./locale": {
+      "types": "./dist/locale/index.d.ts",
+      "import": "./dist/locale/index.js",
+      "default": "./dist/locale/index.js"
+    },
     "./zod": {
       "types": "./dist/zod/index.d.ts",
       "import": "./dist/zod/index.js",
@@ -54,6 +74,7 @@
   },
   "devDependencies": {
     "@elysiajs/eden": "^1.4.9",
+    "@octabits-io/framework": "workspace:^",
     "date-fns": "^4.4.0",
     "elysia": "^1.4.29",
     "oidc-client-ts": "^3.5.0",
@@ -63,6 +84,7 @@
   },
   "peerDependencies": {
     "@elysiajs/eden": "^1.4.0",
+    "@octabits-io/framework": "^0.3.0",
     "@internationalized/date": "^3",
     "@nuxt/ui": "^4",
     "date-fns": "^3 || ^4",
@@ -75,6 +97,12 @@
     "zod": "^4"
   },
   "peerDependenciesMeta": {
+    "@elysiajs/eden": {
+      "optional": true
+    },
+    "@octabits-io/framework": {
+      "optional": true
+    },
     "@internationalized/date": {
       "optional": true
     },
@@ -85,6 +113,9 @@
       "optional": true
     },
     "elysia": {
+      "optional": true
+    },
+    "oidc-client-ts": {
       "optional": true
     },
     "typescript": {
