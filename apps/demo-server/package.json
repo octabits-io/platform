@@ -1,9 +1,9 @@
 {
   "name": "@octabits-io/demo-server",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
-  "description": "Contact-desk demo API \u2014 living documentation and pre-release validation harness for @octabits-io/framework",
+  "description": "Contact-desk demo API — living documentation and pre-release validation harness for @octabits-io/framework",
   "exports": {
     ".": {
       "types": "./src/app.ts",
