@@ -1,5 +1,32 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.3.0
+
+### Minor Changes
+
+- [`f71bc25`](https://github.com/octabits-io/platform/commit/f71bc25b357332461c535e100408948fc7e7f9fa) - Split the root barrel by peer weight and add small drops:
+
+  - **Breaking (pre-1.0 minor):** the OIDC harness moved to the new `./auth` subpath and the Eden Treaty client factory to `./api`. The root barrel keeps only the peer-light surface (composables, org store core), so importing a composable no longer welds `oidc-client-ts` / `@elysiajs/eden` to the consumer — both are now optional peers.
+  - `createTreatyClientFactory` accepts a `headers` option, layered after the bearer injector, so consumers can add or override headers without losing Authorization injection.
+  - New `resolveRuntimeConfigValue(appConfigKey, fallback?)` (root): the `window.__APP_CONFIG__` → build-time-fallback lookup, SSR-safe.
+  - New `./i18n` subpath: `kitMessagesEn` / `kitMessagesDe` / `kitMessagesDeFormal` fragments covering the `errors.*` keys of `createApiErrorMessenger` and the `auth.*` session-lifecycle keys (German in both du/Sie registers).
+
+- [`f71bc25`](https://github.com/octabits-io/platform/commit/f71bc25b357332461c535e100408948fc7e7f9fa) - New `./locale` subpath: the locale-map field editor subsystem (reynt catalog [#59](https://github.com/octabits-io/platform/issues/59), the UI half of framework's `LocaleMap`):
+
+  - `useLocaleTabs` / `useLocaleField` — per-locale tab engine with completeness indicators, register-variant (`de-formal`) inheritance (hidden by default, blank override inherits its base, clearing deletes the key), and quick-translate source/target derivation. Locales come in as a reactive `{ locales, defaultLocale }` source param.
+  - `createLocaleDisplay` — collapse a `LocaleMap` to its default-content-locale string for list surfaces.
+  - `pruneLocaleMap` — drop `''` leaves so cleared tabs stop shadowing the fallback locale.
+  - `LOCALE_FIELD_CONTEXT` + `provideLocaleFieldContext` / `useLocaleFieldContext` — app wiring for the components: a `useSource` factory and an optional `useTranslate` provider (the AI-translate button renders only when provided), both invoked in the component's own setup.
+  - Source-shipped components: `LocaleInput.vue`, `LocaleTextarea.vue`, `LocaleTab.vue`, `TranslationBadge.vue` (i18n contract `localeField.*`, messages included in `./i18n`).
+
+  `@octabits-io/framework` (`./utils` locale toolkit) becomes an optional peer, needed only for `./locale`.
+
+- [`f71bc25`](https://github.com/octabits-io/platform/commit/f71bc25b357332461c535e100408948fc7e7f9fa) - Page-chrome layer (reynt catalog [#61](https://github.com/octabits-io/platform/issues/61)):
+
+  - Source-shipped components `PageHeader.vue` / `PageAction.vue` / `PageActionMenu.vue` / `PageUtilityActions.vue` — standardized page header with enforced conventions (max 3 neutral inline icon actions, destructive actions only in the overflow menu, labeled utility buttons), density variants, tooltip/aria normalization. i18n contract `pageChrome.*` (messages included in `./i18n`).
+  - `useHelpPanel` + `HELP_PANEL_KEY` (root): provide/inject registry for a per-tab contextual help panel — actions keyed by active tab, open state persisted to a configurable localStorage key, auto-close on tabs without actions.
+  - `useWizardStepValidation` (on `./zod`): gates a stepper + form wizard by validating only the current step's fields via `schema.pick(...)` — `currentStepValid` / `goNext` / `goPrev` over structural form/stepper surfaces.
+
 ## 0.2.1
 
 ### Patch Changes
