@@ -281,7 +281,7 @@
     }
   },
   "devDependencies": {
-    "@aws-sdk/client-s3": "^3.1085.0",
+    "@aws-sdk/client-s3": "^3.1087.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@octabits-io/flow": "^0.12.0",
     "@testcontainers/postgresql": "^12.0.4",
@@ -300,7 +300,7 @@
     "pg": "^8.22.0",
     "pg-boss": "^12.26.0",
     "testcontainers": "^12.0.4",
-    "tsdown": "^0.22.5",
+    "tsdown": "^0.22.8",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10",
     "wretch": "^3.0.9",
