@@ -52,11 +52,13 @@
       "import": "./dist/ai/index.js",
       "default": "./dist/ai/index.js"
     },
+    "./styles.css": "./src/styles.css",
     "./components/*": "./src/components/*"
   },
   "files": [
     "dist",
     "src/components",
+    "src/styles.css",
     "README.md",
     "LICENSE"
   ],

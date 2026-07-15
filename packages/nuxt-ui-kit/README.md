@@ -72,6 +72,19 @@ code. Register them under your app's own names with one-line re-exports:
 export { default } from '@octabits-io/nuxt-ui-kit/components/SubSidebar.vue'
 ```
 
+**Tailwind setup (required):** the kit's SFCs live in `node_modules`, which
+Tailwind v4's automatic source detection skips — utility classes used only in
+kit markup (e.g. `SubSidebar`'s default `w-[240px]`) would silently be missing
+from your build. Import the kit's stylesheet, which registers the components
+via `@source` (same mechanism `@nuxt/ui` uses):
+
+```css
+/* app/assets/css/main.css */
+@import "tailwindcss";
+@import "@nuxt/ui";
+@import "@octabits-io/nuxt-ui-kit/styles.css";
+```
+
 ## Wiring examples (Nuxt)
 
 ### Auth + API client
