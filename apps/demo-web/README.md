@@ -146,12 +146,21 @@ routing/lazy-loading/SEO machinery would be weight without a job. `createI18n` +
 | OIDC redirect flow (`login`, `handleCallback`) | — | ❌ Needs a real IdP. `/login` calls `checkAuth()` after re-seeding instead, which is the same code path the guard uses. |
 | `useDateRangeInput` (`./dates`) | — | ❌ Bridges separate start/end refs to a `Date[]` range picker. `DateRangeInput.vue` already owns that bridge internally, and this app has no raw range picker. |
 | `formatCurrency` / `formatCheckoutDate` / `formatTimeFromString` (`./dates`) | — | ❌ No money and no check-in/check-out domain in a contact desk. `formatCheckoutDate` *is* exercised indirectly by `PeriodDisplay`. |
-| `./ai` (all) + `components/AiResultReviewCard.vue` | — | ❌ **The one real gap.** The engine polls a workflow-status endpoint (`fetchWorkflowStatus`, `pollFn`, trigger→poll→terminal); the demo server has no AI workflow routes and no LLM. Everything would be a mock talking to a mock, which documents nothing. Covering it needs server-side workflow routes first. |
+| `./ai` — `useAiWorkflowGuard` (and `useAiWorkflow` inside it) | [`components/AiContactBrief.vue`](./app/components/AiContactBrief.vue) — `checkFn`/`pollFn` both read "latest workflow for this entity" (`GET /api/ai/workflows?entityRef=…&limit=1`); rehydration verified in-browser: the modal resumed a run triggered by `curl` before the page ever loaded | ✅ verified in-browser |
+| `./ai` — `createAiProgressCore` | [`stores/aiProgress.ts`](./app/stores/aiProgress.ts) — the core-in-a-Pinia-store pattern (same as `stores/auth.ts`); feeds the contacts navbar "AI running" badge across modal close | ✅ verified in-browser |
+| `./ai` — `useActiveAiWorkflowProbe` | `AiContactBrief.vue` — disables the trigger while a run is in flight (`GET /api/ai/workflows/active`) | ✅ |
+| `./ai` — `useAiCardState` | `AiContactBrief.vue` — idle/active/failed chip over the progress store | ✅ |
+| `./ai` — `createWorkflowRegistry` | [`lib/aiWorkflows.ts`](./app/lib/aiWorkflows.ts) — app-owned definition shape; labels the modal title | ✅ |
+| `components/AiResultReviewCard.vue` | [`AppAiResultReviewCard.ts`](./app/components/AppAiResultReviewCard.ts) re-export in `AiContactBrief.vue` — review-then-apply; "apply" is a domain write (creates a note via `POST /api/notes`) plus `markApplied` | ✅ verified in-browser |
 
-**Not typechecked:** `AiResultReviewCard.vue` is the only kit SFC this app does
-not import, so it is the only one still unchecked in-repo. The other five are
-verified — each was probed with a deliberate type error and `nuxt typecheck`
-caught all five.
+The server side of the seam is [`apps/demo-server/src/routes/ai.ts`](../demo-server/src/routes/ai.ts)
+(`@octabits-io/flow` + the `ai/test` mock model — no API key involved); the
+route serializes flow's `WorkflowWithSteps` into exactly the kit's
+`AiWorkflowData` shape, so the whole transport contract is those two files.
+
+**Typechecked:** with `AiResultReviewCard.vue` adopted, **every** kit SFC is now
+imported here and covered by `nuxt typecheck`. The other five were verified
+earlier — each probed with a deliberate type error, all five caught.
 
 ## Findings
 
@@ -353,6 +362,15 @@ Eden's multipart support was verified rather than assumed: a `File` in the body
 switches it to `FormData`, which matches the server's `t.Object({ file: t.File() })`
 — so `/files` uses the typed Eden call rather than a hand-rolled `fetch`.
 
-**Still not verified:** a real OIDC login (no IdP — see *Auth* above), and the
-`./ai` surface (no AI endpoint on the demo server). Both are honest gaps, not
-oversights.
+**Still not verified:** a real OIDC login (no IdP — see *Auth* above). The
+`./ai` surface — previously the other honest gap — is now covered end to end:
+trigger → parallel steps → review card → apply-creates-note, verified headless
+in-browser with zero console errors.
+
+### AI wiring gotcha: `@` in vue-i18n messages
+
+`@` starts a *linked message* in vue-i18n's message syntax, so a locale string
+containing a bare `@octabits-io/flow` throws `Message compilation error:
+Invalid linked format` **at render time** — `nuxt typecheck` is green, the
+modal just comes up empty. Escape it as `{'@'}octabits-io/flow` (see
+`ai.brief.intro` in `locales/en.json`).

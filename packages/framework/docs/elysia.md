@@ -120,6 +120,24 @@ of the octabits stack, not a standalone kit.
   `Bun.randomUUIDv7()` on every stateless request — shim it in test setup
   *after* importing `elysia` (so Elysia's runtime detection is unaffected):
   `globalThis.Bun = { randomUUIDv7: () => crypto.randomUUID() }`.
+- **`@octabits-io/framework/elysia/flow`** — `createFlowWorkflowRoutes({ engine, … })`:
+  the generic read/control routes over an `@octabits-io/flow` engine — list
+  (newest first, `entityRef`/`status`/`type`/`limit`), active-probe, get,
+  status snapshot, cancel (200 with a body — a 204 with Elysia's empty-string
+  body trips node's `Response` constructor), and resume (event delivery to a
+  `waiting` step). The wire shape is flow's public view (`toPublicWorkflow` +
+  `PUBLIC_WORKFLOW_SCHEMA` — engine internals like `partitionKey`,
+  `idempotencyKey`, `metadata`, `attempts` never leak; engine step statuses
+  fold to the five display states), served with declared `response` schemas
+  (Eden narrowing + OpenAPI) and `createErrorMapper`-based error mapping
+  (`errorOverrides` for domain keys, e.g. `{ ai_quota_exceeded: 429 }`).
+  Consumer wire fields ride the `extendWorkflow: { schema, project }` seam —
+  schema fragment and projection travel together so declared type and served
+  value cannot drift. **Start/trigger routes stay in the app** (domain body
+  shape, `entityRef` convention, quota/auth policy). The `engine` parameter is
+  the structural `FlowEngineReader` — a partition-bound `WorkflowEngine`
+  satisfies it. `@octabits-io/flow` is an optional peer, pulled in only by this
+  `./flow` subpath.
 - **Env-config helpers** — `getEnv*`, `isProduction`, `parseCsv`,
   `parseCorsOrigins`, and **`assertNotInProduction(name, value?)`** — fails
   startup when a dev-only escape hatch (auth bypass, seed endpoint, debug route)

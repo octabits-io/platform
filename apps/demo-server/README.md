@@ -124,6 +124,7 @@ saw nothing but preflight failures. A browser is the only client that tests CORS
 | `./drizzle/config` | [`services/settings.ts`](./src/services/settings.ts) — unscoped `createScopedConfigService` | ✅ |
 | `./drizzle/idempotency` | `POST /api/contacts/:id/welcome` — `begin()` / `commit()` | ✅ |
 | `./elysia` | [`app.ts`](./src/app.ts) — `createElysiaApp`, `createHealthRoutes`, `registerGracefulShutdown`, `statusErrorWithSet`, `errorResponses`, env helpers; [`request-scope.ts`](./src/request-scope.ts) — `createRequestScopePlugin`: contacts + settings resolve via `ctx.scope` (request-seeded `role`, per-request `settingsService` cache), the `guard` rejects unknown roles with `invalid_demo_role` → 400; `successResponses` on every non-200-success route (the Eden narrowing fix); `runElysiaServer` owns [`main.ts`](./src/main.ts)'s tail; `createBearerAuthPlugin` guards `/api/protected`; `buildSwaggerOptions` + `assertNotInProduction` in [`config.ts`](./src/config.ts); [`app.test.ts`](./src/app.test.ts) runs on `…/elysia/testing`'s `testRequest` | ✅ |
+| `./elysia/flow` | [`routes/ai.ts`](./src/routes/ai.ts) — `createFlowWorkflowRoutes` serves the generic workflow read/control routes (list/active/get/snapshot/cancel/resume) over flow's public wire view; `appliedAt` rides the `extendWorkflow` seam, `ai_quota_exceeded → 429` via `errorOverrides`. Only the domain trigger route and `/usage` are hand-written. | ✅ |
 | `./queue` | [`queues/welcome-email.ts`](./src/queues/welcome-email.ts) — `defineQueue` + `BossManager`; dead letters persist to `job_audit_log` via `…/drizzle/job-audit-store` | ✅ |
 | `./storage` + `./storage/postgres` | [`routes/files.ts`](./src/routes/files.ts) — provider + `createWebResponse` + `objectStorageDdl` | ✅ |
 | `./mail` | [`services/mail.ts`](./src/services/mail.ts) — `createBaseMailService` + logger transport | ✅ |
@@ -145,7 +146,7 @@ Honestly not covered:
 | `./elysia/mcp` | Skipped — see below. |
 | `./ioc`'s `withScope`/`forEachScope` | The queue module already owns the worker's scope lifecycle here; a fan-out sweep over one scope would be filler. |
 | `./drizzle/rls`'s `createGucScopeFactory` | The ioc↔rls bridge needs RLS policies + a partitioned schema; this app is single-scope by design (same reason as `./drizzle/rls` above). |
-| `./elysia`'s `createErrorMapper` | This app has no domain key→status overrides — every key hits the built-in conventions. |
+| `./elysia`'s `createErrorMapper` | ~~No domain key→status overrides~~ — now covered: [`routes/ai.ts`](./src/routes/ai.ts) pre-binds `ai_quota_exceeded → 429`. |
 | `./signing`'s `constantTimeEquals` | No inbound webhook to verify. |
 | `./drizzle/crud`'s `createScopedCrudService` | The scoped sibling of the factory used here. Needs a scope column; this app is single-scope. |
 
@@ -153,6 +154,31 @@ Honestly not covered:
 (`elysia-mcp`, `@modelcontextprotocol/sdk`) and its value is an MCP client
 session, which no curl in this README can verify. Mounting it untested would be
 worse documentation than omitting it.
+
+## `@octabits-io/flow` coverage
+
+The durable AI workflow behind `/api/ai/*` consumes the **published**
+`@octabits-io/flow` from npm (not a workspace link — this app also validates
+its packaging). One workflow ships: `contact-brief`, a three-step DAG
+(`fetch` → `summarize` ∥ `followup`) whose two AI steps run in parallel because
+the engine derives that from their dependencies.
+
+| Export | Used in | Covered |
+| --- | --- | --- |
+| `.` (core) — `createWorkflowEngine`, `defineStep` types via `defineAiStep`, registry, `createInMemoryWorkflowStore`; the public wire view (`toPublicWorkflow`, `PUBLIC_WORKFLOW_SCHEMA`) is consumed indirectly through `…/elysia/flow`'s route factory | [`ai/engine.ts`](./src/ai/engine.ts), [`ai/testing.ts`](./src/ai/testing.ts), [`routes/ai.ts`](./src/routes/ai.ts) | ✅ |
+| `./ai` — `defineAiStep`, `buildAiWorkflow`, `createAiWorkflowHooks`, `createCostEstimator`, `createAiQuotaService`, `createAiUsageAggregationService` | [`ai/workflows.ts`](./src/ai/workflows.ts), [`ai/engine.ts`](./src/ai/engine.ts), [`ai/runtime.ts`](./src/ai/runtime.ts); the consumer-SQL `AiUsageStore`/`AiUsageRecorder` seams live in [`ai/usage.ts`](./src/ai/usage.ts) over the `ai_*` tables | ✅ |
+| `./store-pg` — `createPgWorkflowStore`, `flowStoreDdl` | [`ai/runtime.ts`](./src/ai/runtime.ts); DDL applied in [`db/ddl.ts`](./src/db/ddl.ts) next to `objectStorageDdl()` | ✅ |
+| `./dispatcher-pgboss` — dispatcher + step/DLQ workers | [`ai/runtime.ts`](./src/ai/runtime.ts) — on the **same** pg-boss instance `BossManager` owns (`boss.getBoss()`) | ✅ |
+| Not covered | `createPgStepGate`/`flowGateDdl` (global concurrency/rate gates), `createPgEventSink`/`flowEventDdl` (run-history timeline), `defineWaitStep`/`defineMapStep`/`defineSubWorkflowStep`/saga compensation, `createPgBossScheduler` (cron starts), `recoverStuckWorkflows` sweeps — the flow repo's `examples/` cover these | — |
+
+**The model is `MockLanguageModelV4` from `ai/test`** ([`ai/model.ts`](./src/ai/model.ts)) —
+the AI SDK's scripted in-memory implementation of the same `LanguageModelV4`
+interface a real provider ships. No API key, no network; the instrumented-model
+middleware, cost estimator, quota, and usage rollups all run for real against
+it. Swapping in Anthropic is one line. [`ai/ai.test.ts`](./src/ai/ai.test.ts)
+drives the whole thing — HTTP routes included — with the in-memory store and an
+array-backed dispatcher: the entire durable-workflow feature is testable with
+no Docker.
 
 ## Notes for framework readers
 
@@ -182,3 +208,14 @@ Things that cost time here and are worth knowing before you copy this code:
 - **Mount the client-IP plugin before the rate limiter**, or every request keys
   into one shared `'unknown'` bucket. `createElysiaApp`'s `clientIp` option
   guarantees the order — that is the reason to use it.
+- **Avoid `204` + `return undefined` in routes that must also run under node.**
+  Elysia hands node's `Response` constructor an empty-string body, which it
+  rejects for 204 (bun does not) — so a vitest-driven `app.handle` 500s where
+  `bun dev` works. The AI cancel route returns `200 {cancelled}` for this
+  reason; `DELETE /api/notes/:id` keeps the 204 because only bun serves it.
+- **A flow step handler throws to fail; everything else here returns `Result`.**
+  The engine owns retry/DLQ policy, so `ai/workflows.ts`'s handlers convert a
+  failed `Result` into a throw at the boundary.
+- **`defineAiStep` needs explicit generics on dependent steps** — inference
+  can't recover `THost` from `dependencies` (the `THost = unknown` default wins),
+  so `summarize`/`followup` pass `<Input, Output, AiHost, { fetch: typeof fetch }>`.

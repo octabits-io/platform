@@ -13,8 +13,8 @@
     "close": "Close",
     "search": "Search",
     "reset": "Reset",
-    "loading": "Loading…",
-    "none": "—",
+    "loading": "Loading\u2026",
+    "none": "\u2014",
     "saved": "Saved",
     "empty": "Nothing here yet"
   },
@@ -28,7 +28,7 @@
   },
   "session": {
     "expired": "Your session has ended. Please sign in again.",
-    "renewFailed": "Could not refresh your session — retrying."
+    "renewFailed": "Could not refresh your session \u2014 retrying."
   },
   "login": {
     "title": "Sign in",
@@ -78,7 +78,7 @@
     "search": {
       "label": "Find by email",
       "placeholder": "ada{'@'}example.com",
-      "hint": "Exact match via the blind index — partial emails will not match.",
+      "hint": "Exact match via the blind index \u2014 partial emails will not match.",
       "clear": "Clear search",
       "resultCount": "No result | 1 match | {n} matches"
     },
@@ -93,7 +93,7 @@
     "welcome": {
       "action": "Send welcome email",
       "success": "Welcome email queued (job {id})",
-      "replayed": "Already queued for this contact — the idempotent replay was returned."
+      "replayed": "Already queued for this contact \u2014 the idempotent replay was returned."
     },
     "delete": {
       "title": "Delete this contact?",
@@ -104,7 +104,39 @@
       "name": "Name",
       "email": "Email"
     },
-    "empty": "No contacts yet — create one to get started."
+    "empty": "No contacts yet \u2014 create one to get started."
+  },
+  "ai": {
+    "review": {
+      "title": "AI suggestion",
+      "description": "Review the generated result before applying it.",
+      "currentValue": "Current",
+      "apply": "Apply",
+      "dismiss": "Dismiss"
+    },
+    "workflows": {
+      "contactBrief": "Contact brief"
+    },
+    "brief": {
+      "action": "AI contact brief",
+      "title": "AI contact brief",
+      "intro": "Runs a durable {'@'}octabits-io/flow workflow against the scripted in-memory model: fetch, then summary and follow-up draft in parallel.",
+      "start": "Generate brief",
+      "cancel": "Cancel run",
+      "running": "Workflow running\u2026",
+      "failed": "The workflow failed: {error}",
+      "cancelled": "The run was cancelled.",
+      "steps": "Steps",
+      "fields": {
+        "summary": "Summary",
+        "followup": "Follow-up draft"
+      },
+      "appliedTitle": "Follow-up: {name}",
+      "applied": "Follow-up note created",
+      "completedToast": "Contact brief for {name} is ready",
+      "failedToast": "Contact brief for {name} failed"
+    },
+    "activeBadge": "AI running"
   },
   "notes": {
     "title": "Notes",
@@ -124,8 +156,12 @@
       "on": "Created on",
       "showing": "Showing {shown} of {total}"
     },
-    "create": { "success": "Note created" },
-    "edit": { "success": "Note saved" },
+    "create": {
+      "success": "Note created"
+    },
+    "edit": {
+      "success": "Note saved"
+    },
     "delete": {
       "title": "Delete this note?",
       "message": "{title} will be removed permanently.",
@@ -137,7 +173,7 @@
     "title": "Files",
     "description": "Blobs stored in Postgres by the framework's object-storage provider.",
     "upload": "Upload a file",
-    "uploading": "Uploading…",
+    "uploading": "Uploading\u2026",
     "uploaded": "{name} uploaded",
     "download": "Download",
     "columns": {
@@ -150,7 +186,7 @@
   },
   "settings": {
     "title": "Settings",
-    "description": "Backed by the framework's scoped config engine — values are validated, encrypted, and cached; unset keys read back their schema default.",
+    "description": "Backed by the framework's scoped config engine \u2014 values are validated, encrypted, and cached; unset keys read back their schema default.",
     "fields": {
       "supportEmail": "Support email",
       "welcomeSubject": "Welcome email subject"
@@ -172,11 +208,11 @@
   },
   "period": {
     "travel": {
-      "tooltip": "Check-in → check-out",
+      "tooltip": "Check-in \u2192 check-out",
       "nights": "{n} night | {n} nights"
     },
     "booking": {
-      "tooltip": "First → last day covered",
+      "tooltip": "First \u2192 last day covered",
       "days": "{n} day | {n} days"
     }
   },
@@ -185,7 +221,7 @@
     "checkOut": "To",
     "atTime": "{date} at {time}",
     "nextDay": "(next day)",
-    "checking": "Checking availability…",
+    "checking": "Checking availability\u2026",
     "availabilityOk": "Available",
     "availabilityConflict": "Not available",
     "availabilityPartial": "Partially available",
@@ -206,7 +242,7 @@
     "note_not_found": "That note no longer exists.",
     "object_not_found": "That file no longer exists.",
     "invalid_idempotent_replay": "This request was already made with different data.",
-    "rate_limit_exceeded": "Too many requests — slow down for a moment.",
+    "rate_limit_exceeded": "Too many requests \u2014 slow down for a moment.",
     "network_error": "The demo API is unreachable. Is apps/demo-server running on port 3001?"
   },
   "validation": {

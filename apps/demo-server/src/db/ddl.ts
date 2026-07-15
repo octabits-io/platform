@@ -14,6 +14,7 @@
  */
 import type { Pool } from 'pg';
 import { objectStorageDdl } from '@octabits-io/framework/storage/postgres';
+import { flowStoreDdl } from '@octabits-io/flow/store-pg';
 import type { Logger } from '@octabits-io/framework/logger';
 
 const APP_DDL = `
@@ -57,6 +58,45 @@ const APP_DDL = `
   );
   CREATE INDEX IF NOT EXISTS idempotency_key_expires_at_idx ON idempotency_key (expires_at);
 
+  -- Consumer side of flow's AI usage/quota seams (src/ai/usage.ts). The
+  -- flow_workflow/flow_workflow_step tables themselves come from flowStoreDdl()
+  -- below — flow owns that DDL the same way objectStorageDdl() owns its table.
+  CREATE TABLE IF NOT EXISTS ai_step_usage (
+    step_id bigint PRIMARY KEY,
+    workflow_id bigint NOT NULL,
+    model_id text NOT NULL DEFAULT '',
+    input_tokens integer NOT NULL DEFAULT 0,
+    output_tokens integer NOT NULL DEFAULT 0,
+    cache_read_tokens integer NOT NULL DEFAULT 0,
+    cache_write_tokens integer NOT NULL DEFAULT 0,
+    cost_micros bigint NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_workflow_usage (
+    workflow_id bigint PRIMARY KEY,
+    input_tokens bigint NOT NULL DEFAULT 0,
+    output_tokens bigint NOT NULL DEFAULT 0,
+    cache_read_tokens bigint NOT NULL DEFAULT 0,
+    cache_write_tokens bigint NOT NULL DEFAULT 0,
+    cost_micros bigint NOT NULL DEFAULT 0,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_usage_daily (
+    partition_key text NOT NULL,
+    usage_date date NOT NULL,
+    workflow_type text NOT NULL,
+    key_source text NOT NULL,
+    workflow_count integer NOT NULL DEFAULT 0,
+    input_tokens bigint NOT NULL DEFAULT 0,
+    output_tokens bigint NOT NULL DEFAULT 0,
+    cache_read_tokens bigint NOT NULL DEFAULT 0,
+    cache_write_tokens bigint NOT NULL DEFAULT 0,
+    estimated_cost_micros bigint NOT NULL DEFAULT 0,
+    CONSTRAINT ai_usage_daily_pk PRIMARY KEY (partition_key, usage_date, workflow_type, key_source)
+  );
+
   CREATE TABLE IF NOT EXISTS job_audit_log (
     id bigserial PRIMARY KEY,
     job_id text NOT NULL,
@@ -75,5 +115,6 @@ const APP_DDL = `
 export async function ensureSchema(pool: Pool, logger: Logger): Promise<void> {
   await pool.query(APP_DDL);
   await pool.query(objectStorageDdl());
+  await pool.query(flowStoreDdl());
   logger.info('Schema ensured');
 }

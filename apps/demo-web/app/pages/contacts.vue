@@ -7,6 +7,8 @@ import { useConfirm, useDirtyTracking, usePagination } from '@octabits-io/nuxt-u
 import { useApi } from '~/composables/useApi'
 import { useApiError } from '~/composables/useApiError'
 import { useDateFormat } from '~/composables/useDateFormat'
+import { useAiProgressStore } from '~/stores/aiProgress'
+import { aiWorkflowRegistry, CONTACT_BRIEF } from '~/lib/aiWorkflows'
 
 const { t } = useI18n()
 const { api } = useApi()
@@ -152,6 +154,24 @@ async function submitEdit() {
   }
 }
 
+// --- AI contact brief -------------------------------------------------------
+
+/**
+ * The cross-page progress store — the navbar badge reads `hasActive`, which
+ * keeps signalling after the modal closes. (`appliedSignal` is the store's
+ * reload hook; applying a brief creates a note, so notes.vue would be the page
+ * to watch it — nothing to reload here.)
+ */
+const aiProgress = useAiProgressStore()
+
+const aiOpen = ref(false)
+const aiContact = ref<Contact | null>(null)
+
+function openAiBrief(contact: Contact) {
+  aiContact.value = contact
+  aiOpen.value = true
+}
+
 // --- Row actions ----------------------------------------------------------
 
 async function sendWelcome(contact: Contact) {
@@ -205,6 +225,11 @@ const columns = computed<TableColumn<Contact>[]>(() => [
               onSelect: () => { void sendWelcome(row.original) },
             },
             {
+              label: t('ai.brief.action'),
+              icon: 'i-lucide-sparkles',
+              onSelect: () => openAiBrief(row.original),
+            },
+            {
               label: t('common.edit'),
               icon: 'i-lucide-pencil',
               onSelect: () => openEdit(row.original),
@@ -232,6 +257,10 @@ const columns = computed<TableColumn<Contact>[]>(() => [
     <template #header>
       <UDashboardNavbar :title="t('contacts.title')">
         <template #right>
+          <!-- Fed by the ai-progress store — keeps signalling after the modal closes. -->
+          <UBadge v-if="aiProgress.hasActive" color="primary" variant="subtle" icon="i-lucide-sparkles">
+            {{ t('ai.activeBadge') }}
+          </UBadge>
           <UButton :label="t('contacts.new')" icon="i-lucide-plus" @click="openCreate" />
         </template>
       </UDashboardNavbar>
@@ -312,6 +341,17 @@ const columns = computed<TableColumn<Contact>[]>(() => [
               <UButton type="submit" :label="t('common.create')" :loading="creating" />
             </div>
           </UForm>
+        </template>
+      </UModal>
+
+      <!-- AI contact brief. `:key` resets the workflow guard when the target
+           contact changes; the registry supplies the human label. -->
+      <UModal
+        v-model:open="aiOpen"
+        :title="`${aiWorkflowRegistry.getLabel(CONTACT_BRIEF.type, t)} — ${aiContact?.name ?? ''}`"
+      >
+        <template #body>
+          <AiContactBrief v-if="aiContact" :key="aiContact.id" :contact="aiContact" />
         </template>
       </UModal>
 

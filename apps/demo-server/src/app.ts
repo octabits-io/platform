@@ -31,6 +31,7 @@ import type { IoC } from '@octabits-io/framework/ioc';
 import type { AppConfig } from './config.ts';
 import type { DemoServices } from './container.ts';
 import { createContactRoutes } from './routes/contacts.ts';
+import { createAiRoutes, type AiRoutesDeps } from './routes/ai.ts';
 import { createNoteRoutes } from './routes/notes.ts';
 import { createFileRoutes } from './routes/files.ts';
 import { createSettingsRoutes } from './routes/settings.ts';
@@ -45,6 +46,8 @@ export interface CreateDemoAppDeps {
   /** Injectable for tests (issue a key, assert against it). Default: fresh set with a logged bootstrap key. */
   apiKeys?: DemoApiKeys;
   config: AppConfig;
+  /** The flow engine + usage services behind `/api/ai` (built in main.ts / tests). */
+  ai: AiRoutesDeps;
   /** Readiness probe — resolves when the app can serve traffic. */
   checkReady: () =>  Promise<void>;
 }
@@ -54,6 +57,7 @@ export function createApiRoutes(
   container: IoC<DemoServices>,
   scopePlugin: DemoScopePlugin,
   apiKeys: DemoApiKeys,
+  ai: AiRoutesDeps,
 ) {
   // Two resolution styles, on purpose (both are documentation):
   // contacts + settings go through the per-request scope (`ctx.scope`) because
@@ -66,17 +70,18 @@ export function createApiRoutes(
     .use(createSettingsRoutes(scopePlugin))
     .use(createQueueRoutes(container))
     .use(createToolRoutes(container))
-    .use(createProtectedRoutes(apiKeys));
+    .use(createProtectedRoutes(apiKeys))
+    .use(createAiRoutes(ai));
 }
 
-export function createDemoApp({ container, config, checkReady, ...deps }: CreateDemoAppDeps) {
+export function createDemoApp({ container, config, checkReady, ai, ...deps }: CreateDemoAppDeps) {
   const logger = container.resolve('logger');
   const scopePlugin = createDemoScopePlugin(container, logger.child({ component: 'request-scope' }));
   const apiKeys = deps.apiKeys ?? createDemoApiKeys(logger.child({ component: 'api-keys' }));
 
   const routes = new Elysia()
     .use(createHealthRoutes({ checkReady, logger: logger.child({ component: 'health' }) }))
-    .use(createApiRoutes(container, scopePlugin, apiKeys));
+    .use(createApiRoutes(container, scopePlugin, apiKeys, ai));
 
   // `buildSwaggerOptions` is the plain options object; the plugin itself stays
   // a caller-built instance (the framework never depends on `@elysiajs/*`).
@@ -96,6 +101,7 @@ export function createDemoApp({ container, config, checkReady, ...deps }: Create
             { name: 'Queue', description: 'pg-boss monitoring' },
             { name: 'Tools', description: 'Captcha, slugify' },
             { name: 'Protected', description: 'API-key bearer auth' },
+            { name: 'AI', description: 'Durable AI workflows (@octabits-io/flow)' },
           ],
         }),
       ),

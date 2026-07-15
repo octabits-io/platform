@@ -192,7 +192,8 @@ export function createAiUsageRecorder(deps: CreateAiUsageRecorderDeps): AiUsageR
       });
       // The engine fires this hook fire-and-forget; a failed rollup must be
       // visible somewhere, and that somewhere is the log.
-      if (!rolled.ok) logger.error('AI daily usage rollup failed', { workflowId, message: rolled.error.message });
+      if (!rolled.ok)
+        logger.error('AI daily usage rollup failed', undefined, { workflowId, message: rolled.error.message });
     },
   };
 }

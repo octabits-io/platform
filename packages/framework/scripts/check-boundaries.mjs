@@ -27,7 +27,9 @@ const APP_MODULES = ['elysia', 'queue', 'storage', 'mail'];
 // Vendor SDKs that belong to exactly one app module. '@scope' entries match the
 // whole scope. Base-tier vendors (pg, drizzle-orm, jose, zod, altcha-lib,
 // ical.js, @noble/*, …) are not listed — the optional-peer setup governs those.
-const ELYSIA_VENDORS = ['elysia', 'elysia-mcp', 'elysia-rate-limit', '@modelcontextprotocol', '@sinclair/typebox'];
+// '@octabits-io/flow' is elysia-confined like a vendor SDK: only the
+// `./elysia/flow` route factory may touch it (optional peer).
+const ELYSIA_VENDORS = ['elysia', 'elysia-mcp', 'elysia-rate-limit', '@modelcontextprotocol', '@sinclair/typebox', '@octabits-io/flow'];
 const QUEUE_VENDORS = ['pg-boss'];
 const STORAGE_VENDORS = ['@aws-sdk'];
 const MAIL_VENDORS = ['nodemailer', 'node-mailjet', 'wretch'];

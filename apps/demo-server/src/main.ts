@@ -23,6 +23,7 @@ import { schema } from './db/schema.ts';
 import { ensureSchema } from './db/ddl.ts';
 import { buildContainer, createSystemScopeFactory } from './container.ts';
 import { welcomeEmailQueue } from './queues/welcome-email.ts';
+import { createAiRuntime } from './ai/runtime.ts';
 import { createDemoApp } from './app.ts';
 
 await runElysiaServer({
@@ -69,9 +70,22 @@ await runElysiaServer({
     const dlqStarted = await dlq.start({ pollingIntervalSeconds: 5 });
     if (!dlqStarted.ok) throw new Error(`Failed to start welcome-email DLQ handler: ${dlqStarted.error.message}`);
 
+    // The AI workflow engine (`@octabits-io/flow`) reuses the pool (its tables
+    // came up in ensureSchema) and the same pg-boss instance the queue workers
+    // run on. The host handed to AI step handlers is a bundle of root
+    // singletons — nothing per-step to dispose.
+    const ai = createAiRuntime({
+      pool,
+      boss: boss.getBoss(),
+      host: { contactsService: container.resolve('contactsService'), logger },
+      logger,
+    });
+    await ai.start();
+
     const app = createDemoApp({
       container,
       config,
+      ai,
       checkReady: async () => {
         await pool.query('SELECT 1');
       },
@@ -85,6 +99,7 @@ await runElysiaServer({
         logger.info('demo-server listening', { port, url: config.publicBaseUrl }),
       stop: async () => {
         await app.stop();
+        await ai.stop();
         await dlq.stop();
         await worker.stop();
         await boss.stop();

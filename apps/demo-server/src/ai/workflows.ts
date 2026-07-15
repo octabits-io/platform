@@ -47,7 +47,9 @@ const fetch = defineAiStep<ContactBriefInput, { name: string; email: string }, A
   },
 });
 
-const summarize = defineAiStep({
+// The THost generic is explicit on the dependent steps: inference would have to
+// derive it from `dependencies`, but the `THost = unknown` default wins first.
+const summarize = defineAiStep<ContactBriefInput, { summary: string }, AiHost, { fetch: typeof fetch }>({
   type: 'contact-brief.summarize',
   workflowInputSchema: SCHEMA_CONTACT_BRIEF_INPUT,
   outputSchema: z.object({ summary: z.string() }),
@@ -62,7 +64,7 @@ const summarize = defineAiStep({
   },
 });
 
-const followup = defineAiStep({
+const followup = defineAiStep<ContactBriefInput, { draft: string }, AiHost, { fetch: typeof fetch }>({
   type: 'contact-brief.followup',
   workflowInputSchema: SCHEMA_CONTACT_BRIEF_INPUT,
   outputSchema: z.object({ draft: z.string() }),

@@ -77,7 +77,7 @@ export function createDemoAiModel(): LanguageModelV4 {
       const reply = scriptedReply(text);
       return {
         content: [{ type: 'text', text: reply }],
-        finishReason: 'stop' as const,
+        finishReason: { unified: 'stop' as const, raw: 'stop' },
         usage: {
           inputTokens: {
             total: approxTokens(text),

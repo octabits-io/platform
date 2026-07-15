@@ -18,6 +18,8 @@ import { loadConfig } from './config.ts';
 import { buildContainer } from './container.ts';
 import { createDemoApp, type App } from './app.ts';
 import { createDemoApiKeys } from './api-keys.ts';
+import { createInMemoryAiRuntime } from './ai/testing.ts';
+import type { ContactsService } from './services/contacts.ts';
 import type { Schema } from './db/schema.ts';
 
 const silentLogger: Logger = {
@@ -39,7 +41,13 @@ beforeAll(async () => {
   });
   const apiKeys = createDemoApiKeys(silentLogger);
   bearer = apiKeys.issue('test', 'viewer');
-  app = createDemoApp({ container, config, apiKeys, checkReady: async () => {} });
+  // The AI runtime has a real in-memory implementation (see ai/ai.test.ts for
+  // its own coverage) — no inert cast needed.
+  const ai = createInMemoryAiRuntime({
+    host: { contactsService: {} as ContactsService, logger: silentLogger },
+    logger: silentLogger,
+  });
+  app = createDemoApp({ container, config, apiKeys, ai, checkReady: async () => {} });
 });
 
 describe('demo-server routes (no Postgres)', () => {
