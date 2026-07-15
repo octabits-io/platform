@@ -12,7 +12,7 @@
  * production output. That is also why `nuxt build` stays safe here — the seed
  * short-circuits to `false` before it touches storage.
  */
-import { seedAuthBypassSession } from '@octabits-io/nuxt-ui-kit'
+import { seedAuthBypassSession } from '@octabits-io/nuxt-ui-kit/auth'
 
 /** Returns whether a session was seeded (false when one is already live). */
 export function seedDemoSession(): boolean {

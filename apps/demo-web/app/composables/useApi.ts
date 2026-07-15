@@ -19,7 +19,7 @@ import {
   createAccessTokenProvider,
   createTreatyClientFactory,
   resolveApiBaseUrl,
-} from '@octabits-io/nuxt-ui-kit'
+} from '@octabits-io/nuxt-ui-kit/api'
 import { getUserManager } from '~/lib/oidc'
 import { readDemoRole } from '~/composables/useDemoRole'
 

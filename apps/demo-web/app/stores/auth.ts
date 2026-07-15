@@ -7,7 +7,7 @@
  * dependency.
  */
 import { defineStore } from 'pinia'
-import { createAuthSessionCore, defaultAuthUserMapper } from '@octabits-io/nuxt-ui-kit'
+import { createAuthSessionCore, defaultAuthUserMapper } from '@octabits-io/nuxt-ui-kit/auth'
 import { getUserManager } from '~/lib/oidc'
 
 export const useAuthStore = defineStore('auth', () => {

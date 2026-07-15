@@ -10,7 +10,7 @@
  * `05.auth-bypass.client.ts`). The values still matter, because the
  * issuer/clientId pair is what keys the session entry in `localStorage`.
  */
-import { createUserManagerFactory } from '@octabits-io/nuxt-ui-kit'
+import { createUserManagerFactory } from '@octabits-io/nuxt-ui-kit/auth'
 
 export const getUserManager = createUserManagerFactory({
   getConfig: () => {

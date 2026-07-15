@@ -14,7 +14,7 @@
 import {
   attachSessionLifecycleHandlers,
   createLoginRedirector,
-} from '@octabits-io/nuxt-ui-kit'
+} from '@octabits-io/nuxt-ui-kit/auth'
 import { i18n } from '~/lib/i18n'
 import { getUserManager } from '~/lib/oidc'
 import { useAuthStore } from '~/stores/auth'

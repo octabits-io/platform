@@ -6,7 +6,7 @@
  * once at module scope; the store is resolved lazily inside the callbacks,
  * where a Nuxt context is guaranteed.
  */
-import { createAuthGuard } from '@octabits-io/nuxt-ui-kit'
+import { createAuthGuard } from '@octabits-io/nuxt-ui-kit/auth'
 import { useAuthStore } from '~/stores/auth'
 
 const guard = createAuthGuard({
