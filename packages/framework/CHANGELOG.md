@@ -1,5 +1,11 @@
 # @octabits-io/framework
 
+## 0.3.1
+
+### Patch Changes
+
+- [`fc274ea`](https://github.com/octabits-io/platform/commit/fc274ead5423583626444fbd2122db794a1d372f) - `createFlowWorkflowRoutes`: the `/:id` routes' params schema is now loose (`z.looseObject`). The previous strict schema stripped parent path params (e.g. a mounting app's `/tenant/:tenantId`) during validation — before the consumer's request-scope plugin could read them — breaking get/status/cancel/resume for any consumer mounted under a parameterized prefix.
+
 ## 0.3.0
 
 ### Minor Changes

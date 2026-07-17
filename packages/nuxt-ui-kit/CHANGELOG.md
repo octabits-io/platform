@@ -1,5 +1,11 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.4.0
+
+### Minor Changes
+
+- [`fc274ea`](https://github.com/octabits-io/platform/commit/fc274ead5423583626444fbd2122db794a1d372f) - `createAiProgressCore` accepts an optional `onTerminal(tracked)` callback, fired once per tracked workflow when polling observes its transition to a terminal status — alongside the existing `completionSignal` bump, but identifying which workflow finished. Enables per-workflow notifications (completion toasts, badges) in consumers.
+
 ## 0.3.2
 
 ### Patch Changes
