@@ -30,10 +30,5 @@
     "turbo": "^2.10.5",
     "typescript": "^7.0.2",
     "zod": "^4.4.3"
-  },
-  "pnpm": {
-    "overrides": {
-      "yuku-parser": "0.6.5"
-    }
   }
 }

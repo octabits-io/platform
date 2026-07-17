@@ -2,3 +2,7 @@ packages:
   - packages/*
   - proprietary/*
   - apps/*
+
+# 0.6.6+ broke tsdown's dts plugin (2026-07-17); drop on next tsdown bump if build passes
+overrides:
+  yuku-parser: 0.6.5
