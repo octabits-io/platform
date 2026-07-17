@@ -14,15 +14,15 @@
   "dependencies": {
     "@elysiajs/eden": "^1.4.9",
     "@internationalized/date": "^3.12.2",
-    "@nuxt/ui": "^4.9.0",
+    "@nuxt/ui": "^4.10.0",
     "@octabits-io/nuxt-ui-kit": "workspace:*",
-    "@pinia/nuxt": "^1.0.0",
+    "@pinia/nuxt": "^1.0.1",
     "date-fns": "^4.4.0",
     "elysia": "^1.4.29",
     "nuxt": "^4.4.8",
     "oidc-client-ts": "^3.5.0",
     "pinia": "^4.0.2",
-    "vue": "^3.5.39",
+    "vue": "^3.5.40",
     "vue-i18n": "^11.4.6",
     "vue-router": "^5.2.0",
     "zod": "^4.4.3"
