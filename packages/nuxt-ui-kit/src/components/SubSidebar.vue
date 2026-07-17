@@ -18,9 +18,22 @@ const props = withDefaults(defineProps<{
    * e.g. `?s=owner:42`) — the mobile slideover auto-closes when it changes.
    */
   selectionQueryKey?: string
+  /**
+   * Visibility classes for the persistent rail `<aside>`. Override to drive
+   * the rail/slideover switch from something other than the viewport — e.g.
+   * a named container query (`'hidden @3xl/main:flex'`) so the rail collapses
+   * when a docked panel squeezes the content column. Must be complete class
+   * literals (Tailwind extracts literals only) and must pair with
+   * `toggleVisibilityClass` (the toggle shows exactly while the rail hides).
+   */
+  railVisibilityClass?: string
+  /** Visibility classes for the toggle bar that opens the slideover. */
+  toggleVisibilityClass?: string
 }>(), {
   width: 'w-[240px]',
   selectionQueryKey: 's',
+  railVisibilityClass: 'hidden lg:flex',
+  toggleVisibilityClass: 'lg:hidden',
 })
 
 const open = ref(false)
@@ -63,7 +76,7 @@ watch(
       </USlideover>
 
       <aside
-        :class="['hidden shrink-0 flex-col overflow-hidden border-r border-default lg:flex', width]"
+        :class="['shrink-0 flex-col overflow-hidden border-r border-default', railVisibilityClass, width]"
       >
         <div v-if="!headerless" class="border-b border-default px-4 py-3">
           <h2 class="font-display text-lg font-semibold tracking-tight">{{ title }}</h2>
@@ -75,7 +88,7 @@ watch(
       </aside>
 
       <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <div class="flex shrink-0 items-center gap-2 border-b border-default px-3 py-2 lg:hidden">
+        <div :class="['flex shrink-0 items-center gap-2 border-b border-default px-3 py-2', toggleVisibilityClass]">
           <UButton
             :label="buttonLabel"
             icon="i-lucide-panel-left-open"
