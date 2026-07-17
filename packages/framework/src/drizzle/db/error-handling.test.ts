@@ -58,6 +58,22 @@ describe('PG_ERROR_CODE_MAP', () => {
     expect(PG_ERROR_CODE_MAP['40P01']).toBe('deadlock_detected');
   });
 
+  it('maps 23P01 to exclusion_violation', () => {
+    expect(PG_ERROR_CODE_MAP['23P01']).toBe('exclusion_violation');
+  });
+
+  it('maps 42501 to insufficient_privilege', () => {
+    expect(PG_ERROR_CODE_MAP['42501']).toBe('insufficient_privilege');
+  });
+
+  it('maps 55P03 to lock_not_available', () => {
+    expect(PG_ERROR_CODE_MAP['55P03']).toBe('lock_not_available');
+  });
+
+  it('maps 57014 to query_canceled', () => {
+    expect(PG_ERROR_CODE_MAP['57014']).toBe('query_canceled');
+  });
+
   it('returns undefined for unknown codes', () => {
     expect(PG_ERROR_CODE_MAP['99999']).toBeUndefined();
   });
@@ -130,6 +146,26 @@ describe('extractPgError', () => {
   it('recognizes alphanumeric SQLSTATE codes like 40P01', () => {
     expect(extractPgError({ code: '40P01' })).toEqual({ code: '40P01', constraint: undefined });
   });
+
+  it('walks a multi-level cause chain (re-wrapped Drizzle error)', () => {
+    const pgError = Object.assign(new Error('deadlock detected'), { code: '40P01' });
+    const drizzleError = new Error('Failed query: …');
+    (drizzleError as any).cause = pgError;
+    const rewrapped = new Error('transfer step failed');
+    (rewrapped as any).cause = drizzleError;
+
+    expect(extractPgError(rewrapped)).toEqual({
+      code: '40P01',
+      constraint: undefined,
+      message: 'deadlock detected',
+    });
+  });
+
+  it('terminates on a cyclic cause chain', () => {
+    const error = new Error('cyclic');
+    (error as any).cause = error;
+    expect(extractPgError(error)).toBeNull();
+  });
 });
 
 // ============================================================================
@@ -163,7 +199,7 @@ describe('withDbErrorHandling', () => {
       expect(err.key).toBe('database_error');
       expect(err.code).toBe('unique_violation');
       expect(err.constraint).toBe('users_email_unique');
-      expect(err.message).toBe('duplicate key value violates unique constraint');
+      expect(err.message).toBe('[23505] duplicate key value violates unique constraint');
     }
   });
 
@@ -239,6 +275,60 @@ describe('withDbErrorHandling', () => {
     if (!result.ok) expect((result.error as OctDatabaseError).code).toBe('deadlock_detected');
   });
 
+  it('folds the PostgreSQL cause message into the wrapper message', async () => {
+    // Drizzle wraps pg errors: the wrapper says "Failed query: …" and the
+    // actual diagnosis ("deadlock detected") lives only on .cause.
+    const result = await withDbErrorHandling(async () => {
+      const error = new Error('Failed query: insert into "uploaded_asset" …');
+      (error as any).cause = Object.assign(new Error('deadlock detected'), { code: '40P01' });
+      throw error;
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const err = result.error as OctDatabaseError;
+      expect(err.code).toBe('deadlock_detected');
+      expect(err.message).toBe('[40P01 deadlock detected] Failed query: insert into "uploaded_asset" …');
+    }
+  });
+
+  it('folds the pg message from a re-wrapped (multi-level) cause chain', async () => {
+    const result = await withDbErrorHandling(async () => {
+      const pgError = Object.assign(new Error('conflicting key value violates exclusion constraint'), {
+        code: '23P01',
+        constraint: 'resource_range_excl',
+      });
+      const drizzleError = new Error('Failed query: insert into "resource" …');
+      (drizzleError as any).cause = pgError;
+      const rewrapped = new Error('transfer step failed');
+      (rewrapped as any).cause = drizzleError;
+      throw rewrapped;
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const err = result.error as OctDatabaseError;
+      expect(err.code).toBe('exclusion_violation');
+      expect(err.constraint).toBe('resource_range_excl');
+      expect(err.message).toBe(
+        '[23P01 conflicting key value violates exclusion constraint] transfer step failed',
+      );
+    }
+  });
+
+  it('does not duplicate the cause message when the wrapper already contains it', async () => {
+    const result = await withDbErrorHandling(async () => {
+      const error = new Error('deadlock detected');
+      (error as any).cause = Object.assign(new Error('deadlock detected'), { code: '40P01' });
+      throw error;
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as OctDatabaseError).message).toBe('[40P01] deadlock detected');
+    }
+  });
+
   it('uses "Database operation failed" as message for non-Error throws', async () => {
     const result = await withDbErrorHandling(async () => {
       const obj = { code: '23505' };
@@ -248,7 +338,7 @@ describe('withDbErrorHandling', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       const err = result.error as OctDatabaseError;
-      expect(err.message).toBe('Database operation failed');
+      expect(err.message).toBe('[23505] Database operation failed');
     }
   });
 });

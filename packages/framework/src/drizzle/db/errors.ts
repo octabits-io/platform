@@ -9,8 +9,12 @@ export type PostgresErrorCode =
   | 'foreign_key_violation' // 23503
   | 'not_null_violation' // 23502
   | 'check_violation' // 23514
+  | 'exclusion_violation' // 23P01 (e.g. overlapping range EXCLUDE constraints)
+  | 'insufficient_privilege' // 42501 (incl. row-level security policy violations)
   | 'serialization_failure' // 40001
   | 'deadlock_detected' // 40P01
+  | 'lock_not_available' // 55P03 (NOWAIT / lock_timeout)
+  | 'query_canceled' // 57014 (statement_timeout / cancel request)
   | 'unknown';
 
 /**

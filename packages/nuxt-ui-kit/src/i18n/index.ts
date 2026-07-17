@@ -18,6 +18,7 @@ export interface KitMessages {
     validation_error: string;
     unique_violation: string;
     foreign_key_violation: string;
+    exclusion_violation: string;
     service_unavailable: string;
   };
   auth: {
@@ -51,6 +52,7 @@ export const kitMessagesEn: KitMessages = {
     validation_error: 'Validation error',
     unique_violation: 'This value already exists',
     foreign_key_violation: 'Referenced record does not exist',
+    exclusion_violation: 'This entry overlaps with an existing one',
     service_unavailable: 'Service temporarily unavailable. Please try again later.',
   },
   auth: {
@@ -86,6 +88,7 @@ export const kitMessagesDe: KitMessages = {
     validation_error: 'Validierungsfehler',
     unique_violation: 'Dieser Wert existiert bereits',
     foreign_key_violation: 'Der referenzierte Datensatz existiert nicht',
+    exclusion_violation: 'Dieser Eintrag überschneidet sich mit einem bestehenden',
     service_unavailable:
       'Dienst vorübergehend nicht verfügbar. Bitte versuche es später erneut.',
   },
