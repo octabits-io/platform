@@ -157,6 +157,14 @@ export interface CreateFlowWorkflowRoutesOptions<
   extendWorkflow?: WorkflowViewExtension<TExt, TLoad>;
 }
 
+/**
+ * Path params for the `/:id` routes. Loose on purpose: consumers mount these
+ * routes under parent prefixes carrying their own path params (e.g.
+ * `/tenant/:tenantId`), and a strict object would strip those keys during
+ * validation — BEFORE the consumer's request-scope plugin reads them.
+ */
+const SCHEMA_ID_PARAM = z.looseObject({ id: z.coerce.number().int().positive() });
+
 const SCHEMA_STATUS_SNAPSHOT = z.object({
   status: WORKFLOW_STATUS_SCHEMA,
   totalSteps: z.number().int(),
@@ -286,7 +294,7 @@ export function createFlowWorkflowRoutes<
         return toView(status.value, loaded) as never;
       },
       {
-        params: z.object({ id: z.coerce.number().int().positive() }),
+        params: SCHEMA_ID_PARAM,
         response: { 200: workflowSchema, ...errorResponses(400, 403, 404, 429, 500) },
         detail: { summary: 'Get one workflow with its steps' },
       },
@@ -304,7 +312,7 @@ export function createFlowWorkflowRoutes<
         return { status: workflowStatus, totalSteps, completedSteps };
       },
       {
-        params: z.object({ id: z.coerce.number().int().positive() }),
+        params: SCHEMA_ID_PARAM,
         response: { 200: SCHEMA_STATUS_SNAPSHOT, ...errorResponses(400, 403, 404, 429, 500) },
         detail: { summary: 'Get a workflow status snapshot' },
       },
@@ -321,7 +329,7 @@ export function createFlowWorkflowRoutes<
         return { cancelled: true };
       },
       {
-        params: z.object({ id: z.coerce.number().int().positive() }),
+        params: SCHEMA_ID_PARAM,
         response: { 200: z.object({ cancelled: z.boolean() }), ...errorResponses(400, 403, 404, 429, 500) },
         detail: { summary: 'Cancel a running workflow' },
       },
@@ -338,7 +346,7 @@ export function createFlowWorkflowRoutes<
         return { resumed: true };
       },
       {
-        params: z.object({ id: z.coerce.number().int().positive() }),
+        params: SCHEMA_ID_PARAM,
         body: z.object({
           stepKey: z.string().min(1),
           payload: z.record(z.string(), z.unknown()).optional(),

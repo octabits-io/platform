@@ -95,6 +95,31 @@ describe('createAiProgressCore', () => {
     expect(core.hasActive.value).toBe(false);
   });
 
+  it('fires onTerminal once per workflow with the tracked entry', async () => {
+    let status: 'running' | 'completed' = 'running';
+    const onTerminal = vi.fn();
+    const core = createAiProgressCore<{ id: number }>({
+      fetchWorkflowStatus: async () => ({ status, totalSteps: 2, completedSteps: status === 'completed' ? 2 : 1 }),
+      intervalMs: 100,
+      onTerminal,
+    });
+
+    core.track(7, 'demo', 'listing:1');
+    await vi.advanceTimersByTimeAsync(150);
+    expect(onTerminal).not.toHaveBeenCalled();
+
+    status = 'completed';
+    await vi.advanceTimersByTimeAsync(100);
+    expect(onTerminal).toHaveBeenCalledOnce();
+    expect(onTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({ workflowId: 7, workflowType: 'demo', status: 'completed' }),
+    );
+
+    // Terminal workflows leave the poll set — no repeat notification.
+    await vi.advanceTimersByTimeAsync(300);
+    expect(onTerminal).toHaveBeenCalledOnce();
+  });
+
   it('deduplicates track calls and supports dismiss/markApplied/getByEntityRef', () => {
     const core = createAiProgressCore<{ id: number }>({ fetchWorkflowStatus: async () => null });
     core.track(1, 'demo', 'listing:1');

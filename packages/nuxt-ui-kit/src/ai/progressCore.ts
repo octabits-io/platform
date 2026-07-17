@@ -25,6 +25,13 @@ export interface AiProgressCoreOptions {
   fetchWorkflowStatus: (workflowId: number) => Promise<AiWorkflowStatusSnapshot | null>;
   /** Poll cadence while any tracked workflow is active. Default 3000ms. */
   intervalMs?: number;
+  /**
+   * Fired once per workflow when polling observes its transition to a
+   * terminal status (completed/failed/cancelled) — alongside the
+   * `completionSignal` bump, but carrying WHICH workflow finished. Use for
+   * per-workflow notifications (toasts, badges).
+   */
+  onTerminal?: (tracked: TrackedWorkflow) => void;
 }
 
 /**
@@ -115,10 +122,11 @@ export function createAiProgressCore<TDialogRequest>(options: AiProgressCoreOpti
         // Signal when a workflow just transitioned to terminal (for history refresh)
         if (wasActive && isTerminalStatus(workflow.status)) {
           completionSignal.value++;
+          options.onTerminal?.(tracked);
         }
 
         // Terminal workflows stay visible until the user dismisses or clicks
-        // to review — the float shell handles dismiss-on-apply.
+        // to review — the consumer's activity UI handles dismiss-on-apply.
       } catch {
         // Silently ignore — next poll will retry
       }

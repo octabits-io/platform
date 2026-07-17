@@ -261,6 +261,43 @@ describe('createFlowWorkflowRoutes', () => {
     ]);
   });
 
+  it('keeps parent path params visible on the /:id routes (loose params schema)', async () => {
+    // Regression: consumers mount these routes under prefixes with their own
+    // path params (e.g. /tenant/:tenantId) and read them in a request-scope
+    // plugin / the engine resolver. A strict params schema would strip them
+    // during validation, breaking every /:id route for such consumers.
+    const workflow: WorkflowWithSteps = {
+      id: 7, type: 'demo', status: 'completed', partitionKey: 'test',
+      input: {}, output: null, error: null, entityRef: null, idempotencyKey: null,
+      parentWorkflowId: null, parentStepId: null, totalSteps: 1, completedSteps: 1,
+      failedSteps: 0, metadata: null, createdAt: 'c', startedAt: null, completedAt: null,
+      steps: [],
+    };
+    const stub: FlowEngineReader = {
+      getWorkflowStatus: async () => ({ ok: true, value: workflow }),
+      listWorkflows: async () => ({ ok: true, value: [workflow] }),
+      cancelWorkflow: async () => ({ ok: true, value: undefined }),
+      resumeStep: async () => ({ ok: true, value: undefined }),
+    };
+    const seenTenantIds: (string | undefined)[] = [];
+    const app2 = new Elysia().group('/tenant/:tenantId', (g) =>
+      g.use(
+        createFlowWorkflowRoutes({
+          engine: (ctx) => {
+            seenTenantIds.push((ctx as { params?: { tenantId?: string } }).params?.tenantId);
+            return stub;
+          },
+        }),
+      ),
+    );
+
+    const status = await testRequest(app2, 'GET', '/tenant/acme/workflows/7/status');
+    expect(status.status).toBe(200);
+    const get = await testRequest(app2, 'GET', '/tenant/acme/workflows/7');
+    expect(get.status).toBe(200);
+    expect(seenTenantIds).toEqual(['acme', 'acme']);
+  });
+
   it('batches extendWorkflow.load once per request and hands it to project', async () => {
     const loadCalls: number[][] = [];
     const app2 = new Elysia().use(
