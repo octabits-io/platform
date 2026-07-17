@@ -5,9 +5,9 @@
  * harness toasts. Deep-merge a fragment into the app's own messages per
  * locale; app-specific keys (e.g. sign-in branding) stay app-side.
  *
- * German ships in both registers: `de` addresses the reader informally (du),
- * `deFormal` formally (Sie). Pick whichever matches the app's voice — both
- * merge under the app's `de` locale.
+ * Only English ships with the kit — it doubles as the reference for the full
+ * key set. Apps provide their other locales themselves as `KitMessages`
+ * objects, which keeps every translation (and its register/voice) app-side.
  */
 
 export interface KitMessages {
@@ -80,58 +80,3 @@ export const kitMessagesEn: KitMessages = {
   },
 };
 
-export const kitMessagesDe: KitMessages = {
-  errors: {
-    internal_server_error: 'Ein unerwarteter Fehler ist aufgetreten',
-    not_found: 'Ressource nicht gefunden',
-    forbidden: 'Zugriff verweigert',
-    validation_error: 'Validierungsfehler',
-    unique_violation: 'Dieser Wert existiert bereits',
-    foreign_key_violation: 'Der referenzierte Datensatz existiert nicht',
-    exclusion_violation: 'Dieser Eintrag überschneidet sich mit einem bestehenden',
-    service_unavailable:
-      'Dienst vorübergehend nicht verfügbar. Bitte versuche es später erneut.',
-  },
-  auth: {
-    sessionRenewFailedTitle: 'Sitzung konnte nicht erneuert werden',
-    sessionRenewFailedDescription:
-      'Wir konnten deine Sitzung nicht erneuern. Eventuell musst du dich neu anmelden.',
-    sessionExpiredTitle: 'Sitzung abgelaufen',
-    sessionExpiredDescription:
-      'Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.',
-    signingIn: 'Anmeldung wird abgeschlossen...',
-  },
-  localeField: {
-    translate: 'Fehlende Sprachen mit KI übersetzen',
-    translateDone:
-      'Keine Übersetzungen eingefügt | {count} Übersetzung eingefügt | {count} Übersetzungen eingefügt',
-    inheritsBaseLocale: 'Übernimmt die Basissprache',
-    translationStatus: {
-      complete: 'Alle Übersetzungen vollständig',
-      missing: 'Fehlende Übersetzungen — {details}',
-    },
-  },
-  pageChrome: {
-    back: 'Zurück',
-    moreActions: 'Weitere Aktionen',
-    help: 'Hilfe',
-  },
-};
-
-export const kitMessagesDeFormal: KitMessages = {
-  errors: {
-    ...kitMessagesDe.errors,
-    service_unavailable:
-      'Dienst vorübergehend nicht verfügbar. Bitte versuchen Sie es später erneut.',
-  },
-  auth: {
-    ...kitMessagesDe.auth,
-    sessionRenewFailedDescription:
-      'Wir konnten Ihre Sitzung nicht erneuern. Eventuell müssen Sie sich neu anmelden.',
-    sessionExpiredDescription:
-      'Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.',
-  },
-  // Copy below never addresses the reader — same in both registers.
-  localeField: kitMessagesDe.localeField,
-  pageChrome: kitMessagesDe.pageChrome,
-};
