@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/nuxt-ui-kit",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "description": "Frontend kit for Nuxt/Vue admin SPAs: OIDC session harness (oidc-client-ts), Eden Treaty client factory, auth/org store cores, and a route-guard builder — factory-style seams the app wires into its own plugins, stores, and middleware",
   "license": "MIT",
   "type": "module",
@@ -88,7 +88,7 @@
     "@elysiajs/eden": "^1.4.0",
     "@internationalized/date": "^3",
     "@nuxt/ui": "^4",
-    "@octabits-io/framework": "^0.3.0",
+    "@octabits-io/framework": "^0.4.0",
     "date-fns": "^3 || ^4",
     "elysia": ">=1.4 <3",
     "oidc-client-ts": "^3.3.0",

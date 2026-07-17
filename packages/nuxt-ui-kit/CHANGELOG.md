@@ -1,5 +1,21 @@
 # @octabits-io/nuxt-ui-kit
 
+## 1.0.0
+
+### Minor Changes
+
+- [`b57afc7`](https://github.com/octabits-io/platform/commit/b57afc7618acf7f93182713442a92d9728b5e438) - i18n fragments gain `errors.exclusion_violation`
+
+  Matches the framework's new `exclusion_violation` database error code (SQLSTATE
+  23P01, e.g. overlapping range EXCLUDE constraints). `KitMessages` has a new
+  required key, so hand-built message objects need the entry; consumers merging
+  the shipped fragments are unaffected.
+
+### Patch Changes
+
+- Updated dependencies [[`b57afc7`](https://github.com/octabits-io/platform/commit/b57afc7618acf7f93182713442a92d9728b5e438)]:
+  - @octabits-io/framework@0.4.0
+
 ## 0.5.0
 
 ### Minor Changes
