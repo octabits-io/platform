@@ -1,5 +1,11 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.5.0
+
+### Minor Changes
+
+- [`92208e9`](https://github.com/octabits-io/platform/commit/92208e9a2f310f9ee8be33487f92b8ea0371dbe3) - SubSidebar: new `railVisibilityClass` / `toggleVisibilityClass` props so consumers can drive the rail-vs-slideover switch from a container query instead of the viewport (defaults keep the previous `lg:` behavior).
+
 ## 0.4.0
 
 ### Minor Changes
