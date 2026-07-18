@@ -402,6 +402,16 @@ Boot-time HashiCorp Vault secret loader — hydrates `process.env` from KV-v2
 paths declared in a JSON manifest, before config loads. Plain `fetch`, no SDK.
 (Formerly the standalone `@octabits-io/vault` package.)
 
+Configured entirely via env vars: `VAULT_ADDR`, `VAULT_SECRETS_MANIFEST`,
+`VAULT_NAMESPACE`, `VAULT_TIMEOUT_MS`, `VAULT_AUTH_METHOD` (`token` |
+`k8s`) with `VAULT_TOKEN` or `VAULT_K8S_ROLE`/`VAULT_K8S_JWT_PATH`/
+`VAULT_K8S_MOUNT`, and `VAULT_CACERT` — the Vault CLI convention: a path to a
+PEM-encoded CA certificate to trust for the server's TLS certificate (e.g. an
+in-cluster private CA mounted into the pod). When `VAULT_CACERT` is set,
+requests go through `node:https` (works on Node **and** Bun) instead of
+`fetch`, which has no cross-runtime CA option; setting it alongside a
+non-`https` `VAULT_ADDR` fails loud.
+
 ```ts
 import { loadVaultSecrets, parseSecretManifest } from '@octabits-io/framework/vault';
 

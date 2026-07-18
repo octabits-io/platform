@@ -10,6 +10,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
+import { request as httpsRequest } from 'node:https';
 
 /** Default per-request timeout for Vault HTTP calls (login and KV reads). */
 export const DEFAULT_VAULT_TIMEOUT_MS = 10_000;
@@ -26,6 +27,13 @@ export type VaultAuthOptions =
       mount?: string;
       /** Request timeout in milliseconds. @default 10_000 */
       timeoutMs?: number;
+      /**
+       * PEM-encoded CA certificate (contents, not a path) to trust for the
+       * Vault server's TLS certificate — e.g. an in-cluster private CA.
+       * When set, requests go through `node:https` (portable across Node and
+       * Bun) instead of `fetch`, which has no cross-runtime CA option.
+       */
+      caCertPem?: string;
     };
 
 /**
@@ -62,12 +70,12 @@ export async function authenticate(opts: VaultAuthOptions): Promise<string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (opts.namespace) headers['X-Vault-Namespace'] = opts.namespace;
 
-  const response = await fetch(url, {
+  const response = await vaultFetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({ jwt: trimmedJwt, role: opts.role }),
     signal: AbortSignal.timeout(timeoutMs),
-  }).catch((cause: unknown) => {
+  }, opts.caCertPem).catch((cause: unknown) => {
     if (isTimeoutError(cause)) {
       throw new Error(
         `Vault kubernetes login timed out after ${timeoutMs}ms (raise VAULT_TIMEOUT_MS if Vault is slow to respond)`,
@@ -102,6 +110,13 @@ export interface ReadKvV2Options {
   path: string;
   /** Request timeout in milliseconds. @default 10_000 */
   timeoutMs?: number;
+  /**
+   * PEM-encoded CA certificate (contents, not a path) to trust for the
+   * Vault server's TLS certificate — e.g. an in-cluster private CA.
+   * When set, requests go through `node:https` (portable across Node and
+   * Bun) instead of `fetch`, which has no cross-runtime CA option.
+   */
+  caCertPem?: string;
 }
 
 /**
@@ -118,11 +133,11 @@ export async function readKvV2(options: ReadKvV2Options): Promise<Record<string,
   const headers: Record<string, string> = { 'X-Vault-Token': options.token };
   if (options.namespace) headers['X-Vault-Namespace'] = options.namespace;
 
-  const response = await fetch(url, {
+  const response = await vaultFetch(url, {
     method: 'GET',
     headers,
     signal: AbortSignal.timeout(timeoutMs),
-  }).catch((cause: unknown) => {
+  }, options.caCertPem).catch((cause: unknown) => {
     if (isTimeoutError(cause)) {
       throw new Error(
         `Vault KV read for ${options.path} timed out after ${timeoutMs}ms (raise VAULT_TIMEOUT_MS if Vault is slow to respond)`,
@@ -160,6 +175,54 @@ export async function readKvV2(options: ReadKvV2Options): Promise<Record<string,
     }
   }
   return result;
+}
+
+interface VaultRequestInit {
+  method: string;
+  headers: Record<string, string>;
+  body?: string;
+  signal: AbortSignal;
+}
+
+/**
+ * Dispatch a Vault HTTP request: plain `fetch` normally, `node:https` with the
+ * custom CA when `caCertPem` is set. Neither Node's nor Bun's `fetch` accepts a
+ * CA across runtimes (undici wants a `dispatcher`, Bun a `tls` extension), while
+ * both implement `node:https` with the standard `ca` option.
+ */
+function vaultFetch(url: string, init: VaultRequestInit, caCertPem: string | undefined): Promise<Response> {
+  if (caCertPem === undefined) return fetch(url, init);
+
+  return new Promise<Response>((resolve, reject) => {
+    if (init.signal.aborted) {
+      reject(init.signal.reason);
+      return;
+    }
+    const req = httpsRequest(url, { method: init.method, headers: init.headers, ca: caCertPem }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('error', reject);
+      res.on('end', () => {
+        const status = res.statusCode ?? 502;
+        // Response() rejects bodies on null-body statuses.
+        const nullBody = status === 204 || status === 205 || status === 304;
+        resolve(new Response(nullBody ? null : Buffer.concat(chunks).toString('utf8'), { status }));
+      });
+    });
+    // Rejecting with signal.reason keeps timeout mapping identical to the
+    // fetch path ('TimeoutError' from AbortSignal.timeout).
+    init.signal.addEventListener(
+      'abort',
+      () => {
+        req.destroy();
+        reject(init.signal.reason);
+      },
+      { once: true },
+    );
+    req.on('error', reject);
+    if (init.body !== undefined) req.write(init.body);
+    req.end();
+  });
 }
 
 /** `AbortSignal.timeout` rejects with 'TimeoutError'; plain aborts with 'AbortError'. */

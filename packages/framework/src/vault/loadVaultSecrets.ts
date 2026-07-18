@@ -22,6 +22,7 @@
  * the source of truth would mask configuration bugs.
  */
 
+import { readFile } from 'node:fs/promises';
 import { authenticate, readKvV2, type VaultAuthOptions } from './vaultClient.ts';
 import { parseSecretManifest } from './secretManifest.ts';
 
@@ -36,11 +37,12 @@ export async function loadVaultSecrets(): Promise<void> {
 
   const namespace = process.env.VAULT_NAMESPACE || undefined;
   const timeoutMs = resolveTimeoutMs();
-  const authOptions = resolveAuthOptions(addr, namespace, timeoutMs);
+  const caCertPem = await resolveCaCertPem(addr);
+  const authOptions = resolveAuthOptions(addr, namespace, timeoutMs, caCertPem);
   const token = await authenticate(authOptions);
 
   for (const entry of manifest) {
-    const data = await readKvV2({ addr, namespace, token, path: entry.path, timeoutMs });
+    const data = await readKvV2({ addr, namespace, token, path: entry.path, timeoutMs, caCertPem });
     for (const [vaultKey, envVar] of Object.entries(entry.map)) {
       const value = data[vaultKey];
       if (value === undefined) {
@@ -66,10 +68,40 @@ function resolveTimeoutMs(): number | undefined {
   return parsed;
 }
 
+/**
+ * `VAULT_CACERT` follows the Vault CLI convention: a *path* to a PEM-encoded
+ * CA certificate to trust for the Vault server's TLS certificate (e.g. an
+ * in-cluster private CA mounted into the pod). Returned as file contents so
+ * the client never touches the filesystem per request.
+ */
+async function resolveCaCertPem(addr: string): Promise<string | undefined> {
+  const caPath = process.env.VAULT_CACERT?.trim();
+  if (!caPath) return undefined;
+
+  if (!addr.toLowerCase().startsWith('https://')) {
+    throw new Error(
+      `VAULT_CACERT is set but VAULT_ADDR (${addr}) is not https — a CA certificate only applies to TLS connections`,
+    );
+  }
+
+  let pem: string;
+  try {
+    pem = await readFile(caPath, 'utf8');
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`Failed to read VAULT_CACERT at ${caPath}: ${reason}`);
+  }
+  if (!pem.trim()) {
+    throw new Error(`VAULT_CACERT file at ${caPath} is empty`);
+  }
+  return pem;
+}
+
 function resolveAuthOptions(
   addr: string,
   namespace: string | undefined,
   timeoutMs: number | undefined,
+  caCertPem: string | undefined,
 ): VaultAuthOptions {
   const rawMethod = process.env.VAULT_AUTH_METHOD;
   // Empty/whitespace-only counts as unset (fall back to inference).
@@ -94,5 +126,5 @@ function resolveAuthOptions(
   }
   const jwtPath = process.env.VAULT_K8S_JWT_PATH || DEFAULT_K8S_JWT_PATH;
   const mount = process.env.VAULT_K8S_MOUNT || undefined;
-  return { method: 'k8s', addr, namespace, role, jwtPath, mount, timeoutMs };
+  return { method: 'k8s', addr, namespace, role, jwtPath, mount, timeoutMs, caCertPem };
 }

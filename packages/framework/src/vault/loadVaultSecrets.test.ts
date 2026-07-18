@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:https';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadVaultSecrets } from './loadVaultSecrets.ts';
+
+const TESTDATA_DIR = join(dirname(fileURLToPath(import.meta.url)), 'testdata');
+const TLS_CERT_PATH = join(TESTDATA_DIR, 'self-signed-localhost.cert.pem');
+const TLS_KEY_PATH = join(TESTDATA_DIR, 'self-signed-localhost.key.pem');
 
 const VAULT_ENV_KEYS = [
   'VAULT_ADDR',
@@ -14,6 +20,7 @@ const VAULT_ENV_KEYS = [
   'VAULT_K8S_MOUNT',
   'VAULT_TIMEOUT_MS',
   'VAULT_SECRETS_MANIFEST',
+  'VAULT_CACERT',
 ];
 
 const TEST_OUTPUT_KEYS = ['DATABASE_URL', 'STRIPE_SECRET_KEY', 'OTHER_VAR'];
@@ -440,6 +447,186 @@ describe('loadVaultSecrets', () => {
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  describe('VAULT_CACERT', () => {
+    /** In-process HTTPS Vault stand-in using the self-signed testdata cert. */
+    async function startTlsVault(
+      handler: (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => void,
+    ): Promise<{ server: Server; addr: string }> {
+      const server = createServer(
+        { cert: readFileSync(TLS_CERT_PATH), key: readFileSync(TLS_KEY_PATH) },
+        handler,
+      );
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const address = server.address();
+      if (address === null || typeof address === 'string') throw new Error('no server port');
+      return { server, addr: `https://localhost:${address.port}` };
+    }
+
+    async function stopTlsVault(server: Server): Promise<void> {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+
+    it('throws when VAULT_CACERT is set but VAULT_ADDR is not https', async () => {
+      process.env.VAULT_ADDR = 'http://vault:8200';
+      process.env.VAULT_AUTH_METHOD = 'token';
+      process.env.VAULT_TOKEN = 'tok';
+      process.env.VAULT_CACERT = TLS_CERT_PATH;
+      process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+        { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+      ]);
+
+      await expect(loadVaultSecrets()).rejects.toThrow(/VAULT_CACERT is set but VAULT_ADDR .* is not https/);
+      expect(getMockFetch()).not.toHaveBeenCalled();
+    });
+
+    it('throws a clear error when the VAULT_CACERT file cannot be read', async () => {
+      process.env.VAULT_ADDR = 'https://vault:8200';
+      process.env.VAULT_AUTH_METHOD = 'token';
+      process.env.VAULT_TOKEN = 'tok';
+      process.env.VAULT_CACERT = join(TESTDATA_DIR, 'does-not-exist.pem');
+      process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+        { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+      ]);
+
+      await expect(loadVaultSecrets()).rejects.toThrow(/Failed to read VAULT_CACERT at/);
+      expect(getMockFetch()).not.toHaveBeenCalled();
+    });
+
+    it('throws when the VAULT_CACERT file is empty', async () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), 'vault-test-'));
+      const emptyCa = join(tmpDir, 'empty.pem');
+      writeFileSync(emptyCa, '  \n');
+
+      try {
+        process.env.VAULT_ADDR = 'https://vault:8200';
+        process.env.VAULT_AUTH_METHOD = 'token';
+        process.env.VAULT_TOKEN = 'tok';
+        process.env.VAULT_CACERT = emptyCa;
+        process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+          { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+        ]);
+
+        await expect(loadVaultSecrets()).rejects.toThrow(/VAULT_CACERT file at .* is empty/);
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it('hydrates over TLS with a private CA — k8s login and KV read bypass fetch', async () => {
+      const { server, addr } = await startTlsVault((req, res) => {
+        if (req.method === 'POST' && req.url === '/v1/auth/kubernetes/login') {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ auth: { client_token: 'tls-issued-token' } }));
+          return;
+        }
+        if (req.method === 'GET' && req.url === '/v1/secret/data/x') {
+          if (req.headers['x-vault-token'] !== 'tls-issued-token') {
+            res.writeHead(403);
+            res.end('permission denied');
+            return;
+          }
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ data: { data: { foo: 'from-tls-vault' } } }));
+          return;
+        }
+        res.writeHead(404);
+        res.end('not found');
+      });
+      const tmpDir = mkdtempSync(join(tmpdir(), 'vault-test-'));
+      const jwtPath = join(tmpDir, 'token');
+      writeFileSync(jwtPath, 'k8s-jwt');
+
+      try {
+        process.env.VAULT_ADDR = addr;
+        process.env.VAULT_AUTH_METHOD = 'k8s';
+        process.env.VAULT_K8S_ROLE = 'app-api';
+        process.env.VAULT_K8S_JWT_PATH = jwtPath;
+        process.env.VAULT_CACERT = TLS_CERT_PATH;
+        process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+          { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+        ]);
+
+        await loadVaultSecrets();
+
+        expect(process.env.DATABASE_URL).toBe('from-tls-vault');
+        // The CA path must go through node:https, not the (mocked) fetch.
+        expect(getMockFetch()).not.toHaveBeenCalled();
+      } finally {
+        rmSync(tmpDir, { recursive: true, force: true });
+        await stopTlsVault(server);
+      }
+    });
+
+    it('surfaces Vault error statuses over the CA path', async () => {
+      const { server, addr } = await startTlsVault((_req, res) => {
+        res.writeHead(403, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ errors: ['permission denied'] }));
+      });
+
+      try {
+        process.env.VAULT_ADDR = addr;
+        process.env.VAULT_AUTH_METHOD = 'token';
+        process.env.VAULT_TOKEN = 'tok';
+        process.env.VAULT_CACERT = TLS_CERT_PATH;
+        process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+          { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+        ]);
+
+        await expect(loadVaultSecrets()).rejects.toThrow(/KV read for secret\/data\/x returned 403/);
+      } finally {
+        await stopTlsVault(server);
+      }
+    });
+
+    it('maps a hung TLS read to the timeout error after VAULT_TIMEOUT_MS', async () => {
+      const { server, addr } = await startTlsVault(() => {
+        // Never respond — the client's AbortSignal.timeout must fire.
+      });
+
+      try {
+        process.env.VAULT_ADDR = addr;
+        process.env.VAULT_AUTH_METHOD = 'token';
+        process.env.VAULT_TOKEN = 'tok';
+        process.env.VAULT_CACERT = TLS_CERT_PATH;
+        process.env.VAULT_TIMEOUT_MS = '50';
+        process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+          { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+        ]);
+
+        await expect(loadVaultSecrets()).rejects.toThrow(/KV read for secret\/data\/x timed out after 50ms/);
+      } finally {
+        await stopTlsVault(server);
+      }
+    });
+
+    it('fails the TLS handshake without the CA (control test)', async () => {
+      const { server, addr } = await startTlsVault((_req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ data: { data: { foo: 'bar' } } }));
+      });
+
+      try {
+        process.env.VAULT_ADDR = addr;
+        process.env.VAULT_AUTH_METHOD = 'token';
+        process.env.VAULT_TOKEN = 'tok';
+        process.env.VAULT_SECRETS_MANIFEST = JSON.stringify([
+          { path: 'secret/data/x', map: { foo: 'DATABASE_URL' } },
+        ]);
+
+        // No VAULT_CACERT: the real (unmocked) fetch must reject the
+        // self-signed cert — proving the CA option is what makes it work.
+        globalThis.fetch = originalFetch;
+        await expect(loadVaultSecrets()).rejects.toThrow(/KV read for secret\/data\/x failed/);
+        expect(process.env.DATABASE_URL).toBeUndefined();
+      } finally {
+        await stopTlsVault(server);
+      }
+    });
   });
 
   it('throws on a non-numeric VAULT_TIMEOUT_MS', async () => {
