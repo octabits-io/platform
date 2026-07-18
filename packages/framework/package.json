@@ -1,7 +1,7 @@
 {
   "name": "@octabits-io/framework",
   "version": "0.5.0",
-  "description": "Opinionated server framework toolkit: Result types, IoC, logger, RBAC, auth, signing, Vault, captcha, PII encryption, Drizzle helpers, iCal ingestion, Elysia middleware & MCP harness, pg-boss queues, blob storage, and mail dispatch — one package, granular subpath exports",
+  "description": "Opinionated server framework toolkit: Result types, IoC, logger, RBAC, auth, signing, Vault, captcha, PII encryption, Drizzle helpers, iCal ingestion, Elysia middleware & MCP harness, pg-boss queues, blob storage, mail dispatch, and a Zitadel management client — one package, granular subpath exports",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -89,6 +89,16 @@
       "types": "./dist/drizzle/migrate/index.d.ts",
       "import": "./dist/drizzle/migrate/index.js",
       "default": "./dist/drizzle/migrate/index.js"
+    },
+    "./zitadel": {
+      "types": "./dist/zitadel/index.d.ts",
+      "import": "./dist/zitadel/index.js",
+      "default": "./dist/zitadel/index.js"
+    },
+    "./drizzle/backfill": {
+      "types": "./dist/drizzle/backfill/index.d.ts",
+      "import": "./dist/drizzle/backfill/index.js",
+      "default": "./dist/drizzle/backfill/index.js"
     },
     "./drizzle/scope": {
       "types": "./dist/drizzle/scope/index.d.ts",

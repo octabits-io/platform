@@ -653,6 +653,44 @@ await runMigrations({ connectionString, migrationsFolder });
 // optional: ssl, logger, sessionVars (GUCs set before migrate — e.g. RLS system mode)
 ```
 
+#### `@octabits-io/framework/drizzle/backfill`
+
+One-shot **data backfills** — the idempotent layer *above* SQL migrations.
+Markers live in an append-only `data_migration_runs` table (created on demand
+via `CREATE TABLE IF NOT EXISTS`, no migration file — the `__drizzle_migrations`
+category), so a completed backfill costs one ~1ms PK lookup on every deploy.
+
+```ts
+import { runBackfills } from '@octabits-io/framework/drizzle/backfill';
+
+// after runMigrations(...) in the deploy pipeline:
+await runBackfills(db, [
+  {
+    name: 'backfill-invoice-totals-v2',
+    run: async () => {
+      // Idempotent work: select ONLY rows still needing processing
+      // (e.g. WHERE new_col IS NULL AND legacy_col IS NOT NULL).
+      const { processed, failures } = await transformPendingRows();
+      const pending = await countRowsStillNeedingWork();
+      return { processed, failures, pending };
+    },
+  },
+]);
+```
+
+The runner owns the skip / mark / partial-retry protocol: a backfill is marked
+complete only after a fully clean run (`failures === 0 && pending === 0` and no
+`skipMarking` flag); a partial run is left unmarked and retried on the next
+invocation; `failures > 0` throws and aborts the chain so the deploy fails
+loudly. Scope fan-out (per tenant/workspace/…) stays inside your `run()` —
+return `skipMarking: true` when the invocation was filtered to a subset so a
+partial-scope run never claims global completion.
+
+The marker helpers (`ensureDataMigrationRunsTable`, `isDataMigrationCompleted`,
+`markDataMigrationCompleted`) are exported for standalone CLIs that own the
+protocol themselves (e.g. individually invocable backfill commands with
+`--force` flags).
+
 #### `@octabits-io/framework/drizzle/scope`
 
 Generic schema primitives for a **scope-owner** root plus per-scope keys and

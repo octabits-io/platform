@@ -283,6 +283,28 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
 
+  packages/zitadel:
+    dependencies:
+      wretch:
+        specifier: ^3.0.9
+        version: 3.0.9
+    devDependencies:
+      '@octabits-io/framework':
+        specifier: workspace:^
+        version: link:../framework
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      tsdown:
+        specifier: ^0.22.9
+        version: 0.22.9(@volar/typescript@2.4.28)(typescript@7.0.2)(vue-tsc@3.3.7(typescript@7.0.2))
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@26.1.1)(vite@7.3.6(@types/node@26.1.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.49.0)(yaml@2.9.0))
+
 packages:
 
   '@ai-sdk/gateway@4.0.23':

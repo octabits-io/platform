@@ -8,7 +8,7 @@
  *                  signing, vault, captcha, pii, drizzle, ical)
  *       → may import each other; must never import an app module or an
  *         app-tier vendor SDK
- *   app modules   (elysia, queue, storage, mail)
+ *   app modules   (elysia, queue, storage, mail, zitadel)
  *       → may import base modules; must never import each other, and each
  *         is confined to its own vendor SDKs
  *
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 
-const APP_MODULES = ['elysia', 'queue', 'storage', 'mail'];
+const APP_MODULES = ['elysia', 'queue', 'storage', 'mail', 'zitadel'];
 
 // Vendor SDKs that belong to exactly one app module. '@scope' entries match the
 // whole scope. Base-tier vendors (pg, drizzle-orm, jose, zod, altcha-lib,
@@ -32,16 +32,20 @@ const APP_MODULES = ['elysia', 'queue', 'storage', 'mail'];
 const ELYSIA_VENDORS = ['elysia', 'elysia-mcp', 'elysia-rate-limit', '@modelcontextprotocol', '@sinclair/typebox', '@octabits-io/flow'];
 const QUEUE_VENDORS = ['pg-boss'];
 const STORAGE_VENDORS = ['@aws-sdk'];
-const MAIL_VENDORS = ['nodemailer', 'node-mailjet', 'wretch'];
+const MAIL_VENDORS = ['nodemailer', 'node-mailjet'];
+// wretch is shared by exactly two app modules (mail's Brevo provider and the
+// zitadel client) — still forbidden for every other module.
+const HTTP_VENDORS = ['wretch'];
 
 /** module → { internal: allowed other modules ('' = base tier), externals: forbidden packages } */
 const RULES = {
-  elysia: { internal: [''], externals: [...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS] },
-  queue: { internal: [''], externals: [...ELYSIA_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS] },
-  storage: { internal: [''], externals: [...ELYSIA_VENDORS, ...QUEUE_VENDORS, ...MAIL_VENDORS] },
+  elysia: { internal: [''], externals: [...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
+  queue: { internal: [''], externals: [...ELYSIA_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
+  storage: { internal: [''], externals: [...ELYSIA_VENDORS, ...QUEUE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
   mail: { internal: [''], externals: [...ELYSIA_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS] },
-  // base tier: all of src/ outside the four app modules
-  '': { internal: [], externals: [...ELYSIA_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS] },
+  zitadel: { internal: [''], externals: [...ELYSIA_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS] },
+  // base tier: all of src/ outside the app modules
+  '': { internal: [], externals: [...ELYSIA_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
 };
 
 function walk(dir) {

@@ -21,6 +21,7 @@ pnpm add @octabits-io/framework zod
 pnpm add elysia            # for ./elysia
 pnpm add pg-boss           # for ./queue
 pnpm add drizzle-orm pg    # for ./drizzle/*
+pnpm add wretch            # for ./zitadel and ./mail/brevo
 ```
 
 ## Modules
@@ -32,12 +33,13 @@ There is no root export — every module lives behind a subpath.
 | `./result` `./ioc` `./logger` `./utils` | Result types, IoC container (3 lifetimes + scopes), structured logger, helpers | [foundation](./docs/foundation.md) |
 | `./config-schema` `./rbac` `./auth` `./signing` `./vault` `./captcha` `./captcha/altcha` | Zod config fragments, RBAC subset checks, JWT/API-key auth, scoped HKDF signing, Vault secret loader, captcha contract + ALTCHA | [foundation](./docs/foundation.md) |
 | `./pii` | PII encryption: AES-256-GCM + age-format hybrid, blind indexes, per-scope keys | [foundation](./docs/foundation.md) |
-| `./drizzle/*` | Drizzle ORM helpers: error→Result mapping, factory, migrations, scope column-sets, CRUD, RLS (+ GUC-scope factory bridging `./ioc`), idempotency, scoped config, scoped-key store, job-audit store | [foundation](./docs/foundation.md) |
+| `./drizzle/*` | Drizzle ORM helpers: error→Result mapping, factory, migrations, one-shot data backfills, scope column-sets, CRUD, RLS (+ GUC-scope factory bridging `./ioc`), idempotency, scoped config, scoped-key store, job-audit store | [foundation](./docs/foundation.md) |
 | `./ical` | iCal ingestion: fetcher + RRULE-expanding parser + day-blocking layer | [foundation](./docs/foundation.md) |
 | `./elysia` `./elysia/mcp` `./elysia/testing` | Elysia middleware & app skeleton (request-scope + bearer-auth plugins, error mapping, rate limit, server runner); MCP server harness; test-request helpers | [elysia](./docs/elysia.md) |
 | `./queue` | pg-boss queue base: lifecycle facade + declarative queue/worker/DLQ trio (Drizzle DLQ-audit store behind `./drizzle/job-audit-store`) | [queue](./docs/queue.md) |
 | `./storage` `./storage/s3` `./storage/postgres` | Namespaced blob storage contract + providers | [storage](./docs/storage.md) |
 | `./mail` `./mail/smtp` `./mail/mailjet` `./mail/brevo` | Mail transport contract + transactional dispatch layer + providers | [mail](./docs/mail.md) |
+| `./zitadel` | Zitadel Management API client: users, orgs, project grants, roles, invites, classified error taxonomy | [zitadel](./docs/zitadel.md) |
 
 ## Migrating from the split packages
 
