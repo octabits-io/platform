@@ -1,5 +1,12 @@
 # @octabits-io/demo-server
 
+## 0.0.6
+
+### Patch Changes
+
+- Updated dependencies [[`bdf5650`](https://github.com/octabits-io/platform/commit/bdf5650fc6a2957ec6e449cb5126eb27611bf2e6)]:
+  - @octabits-io/framework@0.5.0
+
 ## 0.0.5
 
 ### Patch Changes

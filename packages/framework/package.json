@@ -1,6 +1,6 @@
 {
   "name": "@octabits-io/framework",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Opinionated server framework toolkit: Result types, IoC, logger, RBAC, auth, signing, Vault, captcha, PII encryption, Drizzle helpers, iCal ingestion, Elysia middleware & MCP harness, pg-boss queues, blob storage, and mail dispatch — one package, granular subpath exports",
   "license": "MIT",
   "type": "module",
