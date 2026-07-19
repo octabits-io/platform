@@ -59,6 +59,11 @@ Each provider also ships a low-level client factory
 connection verifier (`verifySmtpConnection` / `verifyMailjetConnection` /
 `verifyBrevoConnection`).
 
+**SMTP TLS posture.** With implicit TLS off (`secure` unset/false), STARTTLS is
+required by default — the connection fails rather than downgrade to plaintext.
+Set `requireTLS: false` in the `smtp` config to reach a plaintext dev/test
+server (Mailpit, Mailhog) that offers no TLS. Never disable it in production.
+
 ## Example
 
 ```ts

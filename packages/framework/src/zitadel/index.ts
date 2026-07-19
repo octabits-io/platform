@@ -113,7 +113,11 @@ export interface ZitadelManagementClientConfig {
 export function classifyZitadelError(err: unknown): ZitadelApiError {
   if (err instanceof Error) {
     const message = err.message;
-    if (/404|not.?found/i.test(message)) {
+    // Zitadel surfaces a missing resource with varying wording — REST says
+    // "not found", the v2 query endpoints say "could not be found" (e.g.
+    // "User could not be found"), and the underlying gRPC status is NOT_FOUND
+    // (code 5). The bare "not found" spelling must not be the only trigger.
+    if (/404|"code"\s*:\s*5\b|not[\s-]?(?:be\s+)?found/i.test(message)) {
       return { key: "not_found", message, cause: err };
     }
     // Zitadel surfaces uniqueness conflicts with varying wording — REST uses

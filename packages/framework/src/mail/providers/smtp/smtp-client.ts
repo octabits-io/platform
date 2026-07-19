@@ -6,6 +6,14 @@ export interface SmtpTransportConfig {
   host: string;
   port: number;
   secure?: boolean;
+  /**
+   * Force STARTTLS on an unencrypted connection. Defaults to `!secure` — so
+   * with implicit TLS off, STARTTLS is required and the connection fails
+   * rather than silently downgrading to plaintext. Set to `false` only to
+   * reach a plaintext dev/test SMTP server (Mailpit, Mailhog) that offers no
+   * TLS; never in production.
+   */
+  requireTLS?: boolean;
   auth: {
     user: string;
     pass: string;
@@ -16,8 +24,9 @@ export interface SmtpTransportConfig {
  * The single source of truth for nodemailer transport options — used by both
  * the send transporter and the connection verifier, so `verify()` validates
  * the exact configuration real sends will use. TLS posture: implicit TLS when
- * `secure` is set; otherwise STARTTLS is REQUIRED (`requireTLS`) — the
- * connection fails rather than silently downgrading to plaintext.
+ * `secure` is set; otherwise STARTTLS is required by default (`requireTLS`) —
+ * the connection fails rather than silently downgrading to plaintext. An
+ * explicit `requireTLS: false` opts out for plaintext dev/test servers.
  */
 function buildSmtpTransportOptions(
   config: SmtpTransportConfig,
@@ -28,7 +37,7 @@ function buildSmtpTransportOptions(
     host: config.host,
     port: config.port,
     secure,
-    requireTLS: !secure,
+    requireTLS: config.requireTLS ?? !secure,
     auth: {
       user: config.auth.user,
       pass: config.auth.pass,

@@ -42,6 +42,27 @@ describe("classifyZitadelError", () => {
         "not_found",
       );
     });
+
+    it('matches the v2 "could not be found" wording', () => {
+      // Real message from GET /v2/users/{id} on a miss (verified against a live
+      // Zitadel in the integration suite). The bare "not found" match missed it.
+      const err = new Error(
+        '{"code":5,"message":"User could not be found (QUERY-Dfbg2)","details":[{"@type":"type.googleapis.com/zitadel.v1.ErrorDetail","id":"QUERY-Dfbg2","message":"User could not be found"}]}',
+      );
+      expect(classifyZitadelError(err).key).toBe("not_found");
+    });
+
+    it("matches the gRPC NOT_FOUND status (code 5)", () => {
+      expect(classifyZitadelError(new Error('{"code":5,"message":"missing"}')).key).toBe(
+        "not_found",
+      );
+    });
+
+    it("does not match an unrelated code containing a 5 (e.g. code 15)", () => {
+      expect(classifyZitadelError(new Error('{"code":15,"message":"data loss"}')).key).toBe(
+        "api_error",
+      );
+    });
   });
 
   describe("api_error fallback", () => {

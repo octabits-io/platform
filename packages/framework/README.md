@@ -67,8 +67,15 @@ pnpm build             # tsdown
 pnpm typecheck         # tsc --noEmit
 pnpm lint              # module-boundary check (scripts/check-boundaries.mjs)
 pnpm test:unit         # fast, no Docker
-pnpm test:integration  # queue against real Postgres via testcontainers (Docker required)
+pnpm test:integration  # real backing services via testcontainers (Docker required)
 ```
+
+Integration tests live next to their module as `<module>/integration.test.ts` and
+each boots its own container(s) via testcontainers: `queue` → pg-boss on Postgres,
+`storage` → MinIO, `vault` → HashiCorp Vault, `mail` → Mailpit (SMTP), `zitadel` →
+Zitadel + Postgres. They validate the vendor adapters against real servers — the
+behaviours mocks can't reach (S3 content-type round-tripping, KV-v2 hydration,
+real SMTP delivery, Zitadel's error wording).
 
 ## License
 

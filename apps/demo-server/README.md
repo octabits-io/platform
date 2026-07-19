@@ -129,18 +129,26 @@ saw nothing but preflight failures. A browser is the only client that tests CORS
 | `./storage` + `./storage/postgres` | [`routes/files.ts`](./src/routes/files.ts) — provider + `createWebResponse` + `objectStorageDdl` | ✅ |
 | `./mail` | [`services/mail.ts`](./src/services/mail.ts) — `createBaseMailService` + logger transport | ✅ |
 
-Honestly not covered:
+Honestly not covered here:
+
+> **Real-service coverage lives elsewhere.** The modules below that were skipped
+> because they need an external server — `./vault`, `./storage/s3`, `./mail/smtp`,
+> and `./zitadel` — are now validated against real backing services (Vault,
+> MinIO, Mailpit, Zitadel) in the framework's own **integration suite** via
+> testcontainers (`packages/framework/src/<module>/integration.test.ts`). The
+> demo stays credential-free and curl-able; the integration tests exercise the
+> vendor adapters.
 
 | Subpath | Why not |
 | --- | --- |
 | `./signing` | No use case here — it signs scoped tokens/tags (e.g. the `<tag>` in a `reply+…` address), which requires the inbound-mail flow below. |
-| `./vault` | Boot-time secret loading from HashiCorp Vault. Would need a Vault instance to demo anything real. |
+| `./vault` | Boot-time secret loading from HashiCorp Vault. Would need a Vault instance to demo anything real — covered by the framework integration suite instead. |
 | `./ical` | No calendar domain in a contact desk. Bolting one on would be filler, not documentation. |
 | `./drizzle/rls` | Row-level security is only meaningful with a partitioned schema + policies; this app is single-scope by design. |
 | `./drizzle/migrate` | Superseded by boot-time DDL (see above) — a demo has to come up clean against a throwaway container. |
 | `./drizzle/scoped-key-store` | Per-scope key management. This app has one age keypair from config, not a key row per scope. |
-| `./storage/s3` | Would need real S3-compatible credentials. The Postgres provider satisfies the identical `ObjectStorageService` contract. |
-| `./mail/smtp`, `./mail/mailjet`, `./mail/brevo` | Each pulls a vendor SDK and needs credentials. The logger transport proves the same `MailTransport` contract; these are the drop-in swap. |
+| `./storage/s3` | Would need real S3-compatible credentials. The Postgres provider satisfies the identical `ObjectStorageService` contract — and the S3 provider has its own MinIO integration test in the framework. |
+| `./mail/smtp`, `./mail/mailjet`, `./mail/brevo` | Each pulls a vendor SDK and needs credentials. The logger transport proves the same `MailTransport` contract; these are the drop-in swap. SMTP has a Mailpit integration test in the framework. |
 | `./mail` inbound/reply-address | `parseBrevoInbound`, `buildReplyAddress`, `screenInboundAttachment` need a real inbound webhook. |
 | `./captcha/altcha` | The no-op provider covers the contract; ALTCHA adds `altcha-lib` and a proof-of-work widget. |
 | `./elysia/mcp` | Skipped — see below. |

@@ -140,6 +140,19 @@ describe('shared SMTP transport options (send + verify use the same builder)', (
     expect(greetingTimeout).toBe(5_000);
   });
 
+  it('honours an explicit requireTLS: false override on a non-secure config', async () => {
+    // Reaching a plaintext dev/test server (e.g. Mailpit) that offers no TLS.
+    const plaintextCfg = { ...smtp, requireTLS: false };
+    createSmtpTransporter(plaintextCfg);
+    await verifySmtpConnection(plaintextCfg);
+
+    const sendOpts = (createTransport.mock.calls[0] as unknown as [Record<string, any>])[0];
+    const verifyOpts = (createTransport.mock.calls[1] as unknown as [Record<string, any>])[0];
+    expect(sendOpts.secure).toBe(false);
+    expect(sendOpts.requireTLS).toBe(false);
+    expect(verifyOpts.requireTLS).toBe(false);
+  });
+
   it('disables requireTLS for implicit-TLS (secure) configs in both paths', async () => {
     const secureCfg = { ...smtp, secure: true };
     createSmtpTransporter(secureCfg);
