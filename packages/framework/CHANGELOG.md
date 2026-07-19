@@ -1,5 +1,29 @@
 # @octabits-io/framework
 
+## 0.7.0
+
+### Minor Changes
+
+- [`91cc6ed`](https://github.com/octabits-io/platform/commit/91cc6eddbd8a2d6a301a4166d6ea669a00740758) - feat(mail): add `requireTLS` override to the SMTP transport config
+
+  `SmtpTransportConfig` now accepts an optional `requireTLS?: boolean`. It still
+  defaults to `!secure` (STARTTLS required when implicit TLS is off, never
+  downgrading to plaintext), but can be set to `false` to reach a plaintext
+  dev/test SMTP server (Mailpit, Mailhog) that offers no TLS. Threaded through
+  both `createSmtpTransport`/`createSmtpTransporter` and `verifySmtpConnection`.
+
+### Patch Changes
+
+- [`91cc6ed`](https://github.com/octabits-io/platform/commit/91cc6eddbd8a2d6a301a4166d6ea669a00740758) - fix(zitadel): classify "could not be found" and gRPC code 5 as `not_found`
+
+  `classifyZitadelError` only matched the bare "not found" wording, so Zitadel's
+  v2 query responses — "User could not be found" with gRPC status `NOT_FOUND`
+  (code 5) — fell through to `api_error`. Callers relying on the `not_found`
+  discriminator (e.g. `getUserById`) therefore misread a genuine miss as an
+  opaque failure. The matcher now also recognises the "could not be found"
+  phrasing and `"code":5`. Surfaced by a new integration test against a real
+  Zitadel instance.
+
 ## 0.6.0
 
 ### Minor Changes
