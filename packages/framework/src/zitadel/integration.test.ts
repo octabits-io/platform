@@ -22,12 +22,14 @@ import { createZitadelManagementClient, type ZitadelManagementClient } from './i
 
 // Exactly 32 characters, as Zitadel requires for the master key.
 const MASTER_KEY = 'MasterkeyNeedsToHave32Characters';
-// A sslip.io domain resolves to 127.0.0.1, which satisfies BOTH sides of
-// Zitadel's single-port design: the Host header matches the instance domain,
-// and the internal REST→gRPC gateway dial (which reuses the request authority)
-// lands on the loopback the server listens on. A plain `localhost` breaks the
-// second half — the gateway resolves it to ::1 and the dial is refused.
-const EXTERNAL_DOMAIN = '127.0.0.1.sslip.io';
+// `localhost` as the external domain satisfies BOTH sides of Zitadel's
+// single-port design without any real DNS: the Host header matches the
+// instance domain, and the internal REST→gRPC gateway dial lands on the
+// loopback the server listens on via the /etc/hosts pin mounted below.
+// (An earlier revision used `127.0.0.1.sslip.io`, but sslip.io answers with a
+// loopback IP, which DNS-rebind-protecting routers — e.g. any FritzBox —
+// silently drop, killing the whole suite with ENOTFOUND on such networks.)
+const EXTERNAL_DOMAIN = 'localhost';
 
 let network: StartedNetwork;
 let postgres: StartedPostgreSqlContainer;
