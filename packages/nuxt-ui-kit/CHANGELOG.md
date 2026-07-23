@@ -1,5 +1,11 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.11.0
+
+### Minor Changes
+
+- [`96bd71b`](https://github.com/octabits-io/platform/commit/96bd71b3ccd44ce6c9f8e115bd846e7dc62348bb) - PageActions: new `help` prop (default `true`) to suppress the built-in Help trigger in nested/panel headers where the page-level header already owns Help.
+
 ## 0.10.0
 
 ### Minor Changes
