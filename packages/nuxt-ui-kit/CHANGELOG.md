@@ -1,5 +1,11 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.10.0
+
+### Minor Changes
+
+- [`ca1eae5`](https://github.com/octabits-io/platform/commit/ca1eae530fea37e481a04f7535a1dba963b9a074) - New `PageActions` component: a declarative, width-aware page-header action cluster. One `PageActionsItem[]` describes every action; `visibility: 'always' | 'auto' | 'menu'` controls placement, and below a header-width threshold (measured by `PageHeader` via ResizeObserver, provided as `PAGE_HEADER_WIDTH`) all `auto` items, utility items, and the Help trigger collapse into the ⋯ menu with their labels intact. Exports `PageActionsItem`, `PAGE_HEADER_WIDTH`, `PAGE_ACTIONS_COLLAPSE_BELOW`.
+
 ## 0.9.1
 
 ### Patch Changes
