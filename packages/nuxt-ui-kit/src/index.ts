@@ -26,7 +26,8 @@ export type {
   ApiErrorMessengerOptions,
 } from './composables/apiErrorMessenger.ts';
 
-// Declarative width-aware header actions (renderer: ./components/PageActions.vue)
+// Declarative width-aware header actions (renderer: ./components/PageActions.vue;
+// AI trigger primitive: ./components/AiButton.vue)
 export { PAGE_HEADER_WIDTH, PAGE_ACTIONS_COLLAPSE_BELOW } from './components/pageActions.ts';
 export type { PageActionsItem } from './components/pageActions.ts';
 

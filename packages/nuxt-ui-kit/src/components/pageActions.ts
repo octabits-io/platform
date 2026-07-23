@@ -11,6 +11,14 @@ export interface PageActionsItem {
   key: string;
   icon: string;
   label: string;
+  /**
+   * 'ai' renders the item in the AI cluster: sparkles + primary-soft (AiButton
+   * styling). One inline AI item → verb-labeled button; several → a labeled
+   * "AI ∨" dropdown. Collapsed AI items form their own menu group.
+   */
+  kind?: 'action' | 'ai';
+  /** Menu-only helper text (shown in the AI dropdown / overflow rows). */
+  description?: string;
   /** Inline button tone. At most ONE 'primary' item should be visible per state. */
   tone?: 'primary' | 'neutral';
   /**

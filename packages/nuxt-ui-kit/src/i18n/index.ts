@@ -41,6 +41,7 @@ export interface KitMessages {
     back: string;
     moreActions: string;
     help: string;
+    ai: string;
   };
 }
 
@@ -77,6 +78,7 @@ export const kitMessagesEn: KitMessages = {
     back: 'Back',
     moreActions: 'More actions',
     help: 'Help',
+    ai: 'AI',
   },
 };
 
