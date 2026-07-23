@@ -2,7 +2,7 @@
 // Shipped as source: the consumer's Vite compiles this SFC. All imports are
 // explicit — no reliance on the consumer's auto-import configuration.
 // i18n key contract: pageChrome.back (+ PageActionMenu/PageUtilityActions keys).
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, type RouteLocationRaw } from 'vue-router'
 import UButton from '@nuxt/ui/components/Button.vue'
@@ -10,6 +10,7 @@ import USkeleton from '@nuxt/ui/components/Skeleton.vue'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import PageActionMenu from './PageActionMenu.vue'
 import PageUtilityActions from './PageUtilityActions.vue'
+import { PAGE_HEADER_WIDTH } from './pageActions.ts'
 
 /**
  * Standard page header.
@@ -27,6 +28,11 @@ import PageUtilityActions from './PageUtilityActions.vue'
  * - Header height, spacing, and tooltip behavior are normalized via `PageAction`.
  * - Utility triggers (Help, AI history, …) live in `#utility` (default =
  *   `PageUtilityActions`) and render as LABELED buttons, not icon-only.
+ *
+ * Prefer driving all of the above declaratively with `PageActions` (place it
+ * in `#actions`, pass `:utility="false"`): it enforces the conventions and
+ * collapses 'auto'/utility items into the ⋯ menu on narrow headers using the
+ * width this component provides via `PAGE_HEADER_WIDTH`.
  */
 const props = withDefaults(defineProps<{
   title?: string
@@ -56,6 +62,22 @@ const props = withDefaults(defineProps<{
 const { t } = useI18n()
 const router = useRouter()
 
+// Measured content width for PageActions' collapse decision. null until the
+// first observation (treated as wide — the flex-wrap fallback covers it).
+const wrapperEl = ref<HTMLElement | null>(null)
+const headerWidth = ref<number | null>(null)
+provide(PAGE_HEADER_WIDTH, headerWidth)
+
+let observer: ResizeObserver | null = null
+onMounted(() => {
+  if (!wrapperEl.value || typeof ResizeObserver === 'undefined') return
+  observer = new ResizeObserver((entries) => {
+    headerWidth.value = entries[0]?.contentRect.width ?? null
+  })
+  observer.observe(wrapperEl.value)
+})
+onBeforeUnmount(() => observer?.disconnect())
+
 function onBack() {
   if (typeof props.back === 'object' && props.back && 'to' in props.back) {
     router.push(props.back.to)
@@ -80,7 +102,7 @@ const titleClass = computed(() => props.density === 'compact' ? 'font-display te
 </script>
 
 <template>
-  <div :class="wrapperClass">
+  <div ref="wrapperEl" :class="wrapperClass">
     <UButton
       v-if="back"
       icon="i-lucide-arrow-left"
