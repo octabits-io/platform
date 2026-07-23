@@ -218,9 +218,11 @@ Things that cost time here and are worth knowing before you copy this code:
   guarantees the order — that is the reason to use it.
 - **Avoid `204` + `return undefined` in routes that must also run under node.**
   Elysia hands node's `Response` constructor an empty-string body, which it
-  rejects for 204 (bun does not) — so a vitest-driven `app.handle` 500s where
-  `bun dev` works. The AI cancel route returns `200 {cancelled}` for this
-  reason; `DELETE /api/notes/:id` keeps the 204 because only bun serves it.
+  rejects for 204 (bun does not) — so a node-driven `app.handle` 500s where
+  `bun dev` works. The tests here run on `bun test` now, so they no longer
+  trip this, but the AI cancel route keeps `200 {cancelled}` as a worked
+  example for node-serving consumers; `DELETE /api/notes/:id` keeps the 204
+  because only bun serves it.
 - **A flow step handler throws to fail; everything else here returns `Result`.**
   The engine owns retry/DLQ policy, so `ai/workflows.ts`'s handlers convert a
   failed `Result` into a throw at the boundary.

@@ -8,7 +8,7 @@
  * model's scripted outputs, and the token/cost rollup the instrumented model
  * captured. The only stubbed domain piece is `contactsService`.
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll } from 'bun:test';
 import { testRequest } from '@octabits-io/framework/elysia/testing';
 import type { Logger } from '@octabits-io/framework/logger';
 import type { AppDatabase } from '@octabits-io/framework/drizzle/factory';

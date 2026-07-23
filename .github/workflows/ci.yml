@@ -23,6 +23,11 @@ jobs:
         # Version is read from the root package.json "packageManager" field.
         uses: pnpm/action-setup@v4
 
+      - name: Setup Bun
+        # demo-server runs its tests with `bun test` (runtime-faithful for the
+        # only Bun-runtime app in the repo).
+        uses: oven-sh/setup-bun@v2
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:

@@ -8,7 +8,7 @@
  * genuinely needs Postgres belongs in a docker-backed integration run, not
  * here.
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll } from 'bun:test';
 import { testRequest, testAuthenticatedRequest } from '@octabits-io/framework/elysia/testing';
 import type { Logger } from '@octabits-io/framework/logger';
 import type { AppDatabase } from '@octabits-io/framework/drizzle/factory';
