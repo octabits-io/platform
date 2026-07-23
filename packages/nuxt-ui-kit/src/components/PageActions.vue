@@ -32,9 +32,14 @@ const props = withDefaults(defineProps<{
   utilityItems?: PageActionsItem[]
   /** Header width (px) below which 'auto'/utility items collapse into the menu. */
   collapseBelow?: number
+  /** Render the built-in Help trigger (when a help registry with actions is
+   *  provided). Disable in nested/panel headers where the page-level header
+   *  already owns Help. */
+  help?: boolean
 }>(), {
   utilityItems: () => [],
   collapseBelow: PAGE_ACTIONS_COLLAPSE_BELOW,
+  help: true,
 });
 
 const { t } = useI18n();
@@ -48,7 +53,7 @@ const collapsed = computed(() => {
   return width != null && width < props.collapseBelow;
 });
 
-const showHelp = computed(() => Boolean(helpPanel?.hasActions.value));
+const showHelp = computed(() => props.help && Boolean(helpPanel?.hasActions.value));
 
 const inlineItems = computed(() => props.items.filter(item =>
   (item.visibility ?? 'auto') === 'always'
