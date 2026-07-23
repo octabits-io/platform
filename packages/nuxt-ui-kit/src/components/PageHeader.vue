@@ -15,9 +15,13 @@ import PageUtilityActions from './PageUtilityActions.vue'
  * Standard page header.
  *
  * Conventions enforced by this component and its siblings:
- * - State-changing decision actions (confirm, publish, cancel, …) render
- *   labeled via `show-label`; generic reversible tools (edit, preview,
- *   download, add) stay icon-only with tooltips.
+ * - EVERY inline `#actions` button is labeled (`show-label`) — no icon-only
+ *   buttons in the header. Hierarchy comes from tone alone: at most ONE
+ *   `tone="primary"` (solid) per state — the state's main next step — ghost
+ *   neutral for the rest.
+ * - Actions that are destructive only in *some* states (e.g. cancel) render
+ *   inline while they are the state's decision counterpart, and move to the
+ *   overflow menu (red) once they become destructive maintenance.
  * - Max 3 inline actions visible per state in `#actions`; more go in `overflowItems`.
  * - Destructive actions are ALWAYS placed inside the overflow menu, never inline.
  * - Header height, spacing, and tooltip behavior are normalized via `PageAction`.
@@ -99,7 +103,9 @@ const titleClass = computed(() => props.density === 'compact' ? 'font-display te
       <slot name="badges" />
     </div>
 
-    <div class="ml-auto flex items-center gap-1">
+    <!-- flex-wrap: labeled actions overflow narrow (mobile) viewports otherwise —
+         the outer header wraps rows, but this cluster must wrap internally too. -->
+    <div class="ml-auto flex flex-wrap items-center gap-1">
       <slot name="actions" />
       <PageActionMenu
         v-if="overflowItems.length"
