@@ -1,5 +1,12 @@
 # @octabits-io/demo-web
 
+## 0.0.14
+
+### Patch Changes
+
+- Updated dependencies [[`771692c`](https://github.com/octabits-io/platform/commit/771692c6f89a987b22ca7160c1064a965f72eb26)]:
+  - @octabits-io/nuxt-ui-kit@0.12.0
+
 ## 0.0.13
 
 ### Patch Changes
