@@ -1,5 +1,11 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.9.0
+
+### Minor Changes
+
+- [`053cf62`](https://github.com/octabits-io/platform/commit/053cf622544c6eef7bf30331f19354de646df1b0) - PageAction: new `disabledReason` prop. When set, the button renders disabled and the tooltip shows "label — reason", so a blocked action keeps its purpose visible instead of the reason replacing the label. The disabled-hover span wrapper (disabled buttons don't dispatch pointer events) is handled internally — consumers no longer need the outer-UTooltip + `pointer-events-none` workaround.
+
 ## 0.8.0
 
 ### Minor Changes
