@@ -1,5 +1,11 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.9.1
+
+### Patch Changes
+
+- [`be72fa8`](https://github.com/octabits-io/platform/commit/be72fa8e4bf2d30ccbc8ecc18beb3025770b756b) - PageHeader: the actions/utility cluster now wraps on narrow viewports. Previously it was a no-wrap flex row, so labeled actions pushed the overflow menu and Help button off-screen on mobile.
+
 ## 0.9.0
 
 ### Minor Changes
