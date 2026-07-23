@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ref } from 'vue';
 import {
   calculateDays,
+  calculateNights,
   createDateFormatter,
   shiftIso,
   useDateRangeInput,
@@ -11,6 +12,18 @@ describe('calculateDays', () => {
   it('counts inclusive days', () => {
     expect(calculateDays({ start: '2025-01-01', end: '2025-01-03' })).toBe(3);
     expect(calculateDays({ start: '2025-01-01', end: '2025-01-01' })).toBe(1);
+  });
+});
+
+describe('calculateNights', () => {
+  it('counts nights with an exclusive end (departure semantics)', () => {
+    expect(calculateNights({ start: '2025-01-01', end: '2025-01-03' })).toBe(2);
+    expect(calculateNights({ start: '2025-01-01', end: '2025-01-01' })).toBe(0);
+    expect(calculateNights({ start: '2027-06-01', end: '2027-06-21' })).toBe(20);
+  });
+
+  it('is negative for reversed periods', () => {
+    expect(calculateNights({ start: '2025-01-03', end: '2025-01-01' })).toBe(-2);
   });
 });
 

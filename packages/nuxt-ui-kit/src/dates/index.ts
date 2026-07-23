@@ -15,6 +15,14 @@ export function calculateDays(period: Period): number {
   return differenceInDays(new Date(period.end), new Date(period.start)) + 1;
 }
 
+/**
+ * Number of nights in a period whose `end` is **exclusive** (departure
+ * semantics). Example: `{ start: "2025-01-01", end: "2025-01-03" }` → 2 nights.
+ */
+export function calculateNights(period: Period): number {
+  return differenceInDays(new Date(period.end), new Date(period.start));
+}
+
 /** Shift an ISO date string by n days; `''` stays `''`. */
 export function shiftIso(iso: string, days: number): string {
   if (!iso || days === 0) return iso;
