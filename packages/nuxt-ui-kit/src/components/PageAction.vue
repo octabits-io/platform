@@ -30,25 +30,38 @@ const props = withDefaults(defineProps<{
   showLabel?: boolean
   /** Whether the tooltip should respect global disabled state. */
   tooltipDisabled?: boolean
+  /**
+   * Why the action is currently unavailable. When set, the button renders
+   * disabled and the tooltip shows "label — reason", keeping the action's
+   * purpose visible alongside the blocker. Hover on the disabled button works
+   * via an internal span wrapper (disabled buttons don't dispatch pointer
+   * events).
+   */
+  disabledReason?: string | null
 }>(), {
   tone: 'neutral',
   loading: false,
   disabled: false,
   showLabel: false,
   tooltipDisabled: false,
+  disabledReason: null,
 })
 
 const slots = useSlots()
 
 const hasLabelSlot = computed(() => Boolean(slots.default))
 const isIconOnly = computed(() => !hasLabelSlot.value && !props.showLabel)
+const isBlocked = computed(() => Boolean(props.disabledReason))
+const tooltipText = computed(() =>
+  props.disabledReason ? `${props.label} — ${props.disabledReason}` : props.label,
+)
 
 const buttonProps = computed<Partial<ButtonProps>>(() => {
   const base: Partial<ButtonProps> = {
     icon: props.icon,
     size: 'sm',
     loading: props.loading,
-    disabled: props.disabled || props.loading,
+    disabled: props.disabled || props.loading || isBlocked.value,
     to: props.to,
     target: props.target,
   }
@@ -72,8 +85,25 @@ if (import.meta.dev && !props.label) {
 </script>
 
 <template>
-  <UTooltip v-if="isIconOnly" :text="label" :disabled="tooltipDisabled">
+  <UTooltip
+    v-if="isIconOnly || isBlocked"
+    :text="tooltipText"
+    :disabled="!isBlocked && tooltipDisabled"
+  >
+    <!-- Disabled buttons don't dispatch pointer events: when blocked, the span
+         is the hover target and the button opts out of pointer events. -->
+    <span v-if="isBlocked" class="inline-flex">
+      <UButton
+        v-bind="buttonProps"
+        class="pointer-events-none"
+        :aria-label="tooltipText"
+        :label="!isIconOnly && showLabel ? label : undefined"
+      >
+        <slot v-if="!isIconOnly" />
+      </UButton>
+    </span>
     <UButton
+      v-else
       v-bind="buttonProps"
       :aria-label="label"
     />

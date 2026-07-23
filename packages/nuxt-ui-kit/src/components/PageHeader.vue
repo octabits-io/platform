@@ -15,7 +15,10 @@ import PageUtilityActions from './PageUtilityActions.vue'
  * Standard page header.
  *
  * Conventions enforced by this component and its siblings:
- * - Max 3 neutral icon buttons inline in `#actions`; more go in `overflowItems`.
+ * - State-changing decision actions (confirm, publish, cancel, …) render
+ *   labeled via `show-label`; generic reversible tools (edit, preview,
+ *   download, add) stay icon-only with tooltips.
+ * - Max 3 inline actions visible per state in `#actions`; more go in `overflowItems`.
  * - Destructive actions are ALWAYS placed inside the overflow menu, never inline.
  * - Header height, spacing, and tooltip behavior are normalized via `PageAction`.
  * - Utility triggers (Help, AI history, …) live in `#utility` (default =
