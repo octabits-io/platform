@@ -1,5 +1,11 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.8.0
+
+### Minor Changes
+
+- [`16f9a89`](https://github.com/octabits-io/platform/commit/16f9a89235e47664c0413d4ccd7d5806043e5cf5) - Add `FlexiblePeriodInput` component (date window + stay length in nights, composing `DateRangeInput kind="travel"`) and `calculateNights` date helper (exclusive-end night count).
+
 ## 0.7.0
 
 ### Minor Changes
