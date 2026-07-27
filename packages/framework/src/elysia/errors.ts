@@ -30,6 +30,7 @@ export type ErrorStatusOverrides = Record<string, number>;
  * - `missing_*` / `incomplete_*` / `*_not_configured` → 422
  * - `already_*` / `*_conflict` → 409
  * - `rate_limit_exceeded` / `*_rate_limited` → 429
+ * - `*_invalid_status` → 409
  * - everything else → 500
  *
  * The rules are checked in the order listed above, so an earlier, more specific
@@ -56,6 +57,10 @@ export function getStatusCodeForError(error: KeyedError, overrides?: ErrorStatus
   if (key.startsWith('missing_') || key.startsWith('incomplete_') || key.endsWith('_not_configured')) return 422;
   if (key.startsWith('already_') || key.endsWith('_conflict')) return 409;
   if (key === 'rate_limit_exceeded' || key.endsWith('_rate_limited')) return 429;
+  // "Entity is in status X, expected Y" — a conflict with current state, not a
+  // server fault. Appended last so it can't re-map keys an earlier rule already
+  // caught (`invalid_*` keys with the prefix stay 400).
+  if (key.endsWith('_invalid_status')) return 409;
 
   return 500;
 }
@@ -305,7 +310,12 @@ export const createErrorHandler = (logger: Logger, options: ErrorHandlerOptions 
       if (error instanceof ApiError) {
         set.status = error.statusCode;
         // 5xx messages may carry internals (e.g. an unknown-key OctError mapped
-        // via mapResultError) — redact in production, keep the stable key.
+        // via mapResultError) — redact in production, keep the stable key. The
+        // redaction makes the client response useless for diagnosis, so the
+        // full error must be logged here or it is lost entirely.
+        if (error.statusCode >= 500) {
+          logger.error(`Domain error mapped to ${error.statusCode} (key: ${error.key})`, error);
+        }
         const message = error.statusCode >= 500 && production ? 'Internal error' : error.message;
         return { key: error.key, message };
       }

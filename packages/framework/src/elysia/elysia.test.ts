@@ -64,6 +64,12 @@ describe('getStatusCodeForError', () => {
     expect(getStatusCodeForError({ key: 'rate_limit', message: '' })).toBe(500); // not a convention
   });
 
+  it('maps *_invalid_status keys to 409', () => {
+    expect(getStatusCodeForError({ key: 'booking_draft_invalid_status', message: '' })).toBe(409);
+    expect(getStatusCodeForError({ key: 'invoice_invalid_status', message: '' })).toBe(409);
+    expect(getStatusCodeForError({ key: 'invalid_status', message: '' })).toBe(400); // `invalid_*` prefix wins
+  });
+
   it('keeps existing conventions unshadowed by the newer 409/429 rules', () => {
     // Each of these matches a new rule too — the earlier, more specific rule wins.
     expect(getStatusCodeForError({ key: 'invalid_state_conflict', message: '' })).toBe(400);
@@ -409,6 +415,25 @@ describe('createErrorHandler', () => {
     const res = await app.handle(new Request('http://localhost/'));
     expect(res.status).toBe(500);
     expect(await res.json()).toEqual({ key: 'weird_internal_thing', message: 'Internal error' });
+  });
+
+  it('logs 5xx ApiErrors (the redacted response is otherwise the only trace)', async () => {
+    const logged: string[] = [];
+    const spyLogger: import('../logger/index.ts').Logger = {
+      ...silentLogger,
+      error: (message: string) => { logged.push(message); },
+      child: () => spyLogger,
+    };
+    const app = new Elysia()
+      .use(createErrorHandler(spyLogger, { production: true }))
+      .get('/5xx', () => { throw mapResultError({ key: 'weird_internal_thing', message: 'internals' }); })
+      .get('/4xx', () => { throw mapResultError({ key: 'invalid_email', message: 'bad email' }); });
+
+    await app.handle(new Request('http://localhost/5xx'));
+    expect(logged).toEqual(['Domain error mapped to 500 (key: weird_internal_thing)']);
+
+    await app.handle(new Request('http://localhost/4xx'));
+    expect(logged).toHaveLength(1); // 4xx is a client outcome, not logged here
   });
 
   it('keeps 4xx ApiError messages in production', async () => {
