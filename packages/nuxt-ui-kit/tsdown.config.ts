@@ -10,6 +10,7 @@ export default defineConfig({
     "zod/index": "src/zod/index.ts",
     "dates/index": "src/dates/index.ts",
     "ai/index": "src/ai/index.ts",
+    "events/index": "src/events/index.ts",
   },
   format: "esm",
   // Emit .js/.d.ts (matching the exports map) instead of tsdown's default .mjs/.d.mts.

@@ -18,6 +18,7 @@ const links = computed<NavigationMenuItem[][]>(() => [[
   { label: t('nav.notes'), icon: 'i-lucide-notebook-pen', to: '/notes' },
   { label: t('nav.files'), icon: 'i-lucide-paperclip', to: '/files' },
   { label: t('nav.settings'), icon: 'i-lucide-settings', to: '/settings' },
+  { label: t('nav.events'), icon: 'i-lucide-radio', to: '/events' },
 ]])
 
 async function onLogout() {

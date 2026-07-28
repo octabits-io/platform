@@ -7,7 +7,7 @@
  * Rename a response field on the server and this app stops compiling.
  *
  * Three kit seams do the work:
- *   - `resolveApiBaseUrl` — configured URL → page origin (prod) → localhost:3001
+ *   - `resolveApiBaseUrl` — configured URL → page origin (prod) → localhost:3101
  *   - `createAccessTokenProvider` — bearer from the OIDC session (the bypass
  *     secret, here)
  *   - `createTreatyClientFactory` — lazy singleton; `parseDate: false` by
@@ -28,7 +28,7 @@ export function useApiBase(): string {
   return resolveApiBaseUrl({
     configuredUrl: useRuntimeConfig().public.apiBase,
     isProductionBuild: import.meta.env.PROD,
-    devFallbackPort: 3001,
+    devFallbackPort: 3101,
   })
 }
 

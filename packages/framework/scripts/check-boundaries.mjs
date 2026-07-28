@@ -5,7 +5,7 @@
  * The package has two tiers under src/:
  *
  *   base modules  (result, ioc, logger, utils, config-schema, rbac, auth,
- *                  signing, vault, captcha, pii, drizzle, ical)
+ *                  signing, vault, captcha, pii, drizzle, ical, events)
  *       → may import each other; must never import an app module or an
  *         app-tier vendor SDK
  *   app modules   (elysia, queue, storage, mail, zitadel)

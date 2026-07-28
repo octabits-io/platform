@@ -24,7 +24,8 @@
     "notes": "Notes",
     "files": "Files",
     "settings": "Settings",
-    "logout": "Sign out"
+    "logout": "Sign out",
+    "events": "Live events"
   },
   "session": {
     "expired": "Your session has ended. Please sign in again.",
@@ -243,7 +244,7 @@
     "object_not_found": "That file no longer exists.",
     "invalid_idempotent_replay": "This request was already made with different data.",
     "rate_limit_exceeded": "Too many requests \u2014 slow down for a moment.",
-    "network_error": "The demo API is unreachable. Is apps/demo-server running on port 3001?"
+    "network_error": "The demo API is unreachable. Is apps/demo-server running on port 3101?"
   },
   "validation": {
     "fields": {
@@ -257,6 +258,23 @@
     "messages": {
       "expected_string_to_match_email": "must be a valid email address",
       "expected_string_length_greater_or_equal_to_1": "must not be empty"
+    }
+  },
+  "events": {
+    "title": "Live events",
+    "subtitle": "SSE stream from the demo server: durable (outbox + replay) and ephemeral (fire-and-forget) lanes.",
+    "emitDurable": "Emit durable event",
+    "emitEphemeral": "Emit ephemeral event",
+    "receivedCount": "{count} received",
+    "empty": "No events yet - emit one, or open this page twice and emit from the other tab.",
+    "demoMessage": "hello from demo-web",
+    "state": {
+      "idle": "Idle",
+      "connecting": "Connecting",
+      "connected": "Live",
+      "reconnecting": "Reconnecting",
+      "degraded": "Degraded",
+      "stopped": "Stopped"
     }
   }
 }

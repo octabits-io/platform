@@ -18,6 +18,7 @@
  */
 import { pgTable, primaryKey, text, timestamp, uuid, index } from 'drizzle-orm/pg-core';
 import { bytea, scopedConfigColumns } from '@octabits-io/framework/drizzle/scope';
+import { eventOutboxColumns } from '@octabits-io/framework/drizzle/event-outbox';
 import { idempotencyKeyColumns } from '@octabits-io/framework/drizzle/idempotency';
 import { jobAuditColumns } from '@octabits-io/framework/drizzle/job-audit-store';
 
@@ -77,5 +78,13 @@ export const idempotencyKey = pgTable(
  */
 export const jobAuditLog = pgTable('job_audit_log', { ...jobAuditColumns });
 
-export const schema = { contacts, notes, settings, idempotencyKey, jobAuditLog };
+/**
+ * Transactional event outbox — `eventOutboxColumns` from
+ * `…/drizzle/event-outbox`, unscoped (no scope column, single-scope demo).
+ * The bigserial `id` is the envelope `seq`; rows are written by
+ * `eventPublisher.emit(…, tx)` in the same transaction as the state change.
+ */
+export const eventOutbox = pgTable('event_outbox', { ...eventOutboxColumns });
+
+export const schema = { contacts, notes, settings, idempotencyKey, jobAuditLog, eventOutbox };
 export type Schema = typeof schema;

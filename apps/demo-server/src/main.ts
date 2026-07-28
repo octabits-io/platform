@@ -21,6 +21,9 @@ import { createPostgresObjectStorageService } from '@octabits-io/framework/stora
 import { loadConfig } from './config.ts';
 import { schema } from './db/schema.ts';
 import { ensureSchema } from './db/ddl.ts';
+import { createPgNotifyListener } from '@octabits-io/framework/events/postgres';
+import { createEventRelay } from '@octabits-io/framework/events';
+import { EVENT_CHANNEL } from './container.ts';
 import { buildContainer, createSystemScopeFactory } from './container.ts';
 import { welcomeEmailQueue } from './queues/welcome-email.ts';
 import { createAiRuntime } from './ai/runtime.ts';
@@ -74,6 +77,23 @@ await runElysiaServer({
     // came up in ensureSchema) and the same pg-boss instance the queue workers
     // run on. The host handed to AI step handlers is a bundle of root
     // singletons — nothing per-step to dispose.
+    // Events: the LISTEN side. One dedicated connection (never pooled — a
+    // pooled checkout would silently drop the LISTEN registration), the same
+    // channel the outbox store notifies on, and the relay bridging it to the
+    // in-process hub with watermark catch-up.
+    const eventListener = createPgNotifyListener({
+      connectionString: config.database.url,
+      channel: EVENT_CHANNEL,
+      logger: logger.child({ component: 'event-listener' }),
+    });
+    const eventRelay = createEventRelay({
+      hub: container.resolve('eventHub'),
+      store: container.resolve('eventOutboxStore'),
+      listener: eventListener,
+      logger: logger.child({ component: 'event-relay' }),
+    });
+    await eventRelay.start();
+
     const ai = createAiRuntime({
       pool,
       boss: boss.getBoss(),
@@ -99,6 +119,7 @@ await runElysiaServer({
         logger.info('demo-server listening', { port, url: config.publicBaseUrl }),
       stop: async () => {
         await app.stop();
+        await eventRelay.stop();
         await ai.stop();
         await dlq.stop();
         await worker.stop();

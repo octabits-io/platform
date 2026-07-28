@@ -10,13 +10,14 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
 
   /**
-   * Deliberately not 3000. When its port is taken Nuxt walks *upwards* to the
-   * next free one — from 3000 that is 3001, the demo server's port. It will
-   * happily bind there: Bun holds `*:3001` while Nuxt takes `[::1]:3001`, the
-   * OS permits both, and `localhost` resolves to `::1` first — so the SPA
-   * silently shadows the API it is trying to call, and every request returns
-   * the app's own HTML. Starting at 3100 keeps the whole fallback range clear
-   * of 3001.
+   * Port-fallback trap, know it before renumbering: when its port is taken,
+   * Nuxt walks *upwards* to the next free one — and it will happily shadow a
+   * Bun server on the way (Bun holds `*:PORT` while Nuxt takes `[::1]:PORT`,
+   * the OS permits both, and `localhost` resolves to `::1` first — so every
+   * API request silently returns the app's own HTML). With the API on 3101,
+   * one step above this port, that means: never start a second demo-web
+   * while 3100 is taken — the fallback instance lands exactly on the API's
+   * port.
    */
   devServer: { port: 3100 },
 

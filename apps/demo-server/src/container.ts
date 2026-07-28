@@ -25,8 +25,12 @@ import { createDateProvider } from '@octabits-io/framework/utils';
 import type { DateProvider } from '@octabits-io/framework/utils';
 import type { BlindIndexService, PiiEncryptionService } from '@octabits-io/framework/pii';
 import { createBlindIndexService, createPiiEncryptionService, identityToRecipient } from '@octabits-io/framework/pii';
+import type { EventHub, EventPublisher } from '@octabits-io/framework/events';
+import { createEventHub, createEventPublisher } from '@octabits-io/framework/events';
+import type { DrizzleEventOutboxStore } from '@octabits-io/framework/drizzle/event-outbox';
+import { createDrizzleEventOutboxStore } from '@octabits-io/framework/drizzle/event-outbox';
 import type { Schema } from './db/schema.ts';
-import { idempotencyKey } from './db/schema.ts';
+import { eventOutbox, idempotencyKey } from './db/schema.ts';
 import { createContactsService, type ContactsService } from './services/contacts.ts';
 import { createNotesService, type NotesService } from './services/notes.ts';
 import { createSettingsService, type SettingsService } from './services/settings.ts';
@@ -49,6 +53,9 @@ export interface DemoServices {
   settingsService: SettingsService;
   mailService: DemoMailService;
   idempotency: IdempotencyService;
+  eventOutboxStore: DrizzleEventOutboxStore;
+  eventHub: EventHub;
+  eventPublisher: EventPublisher;
 }
 
 export interface BuildContainerDeps {
@@ -133,8 +140,31 @@ export async function buildContainer(deps: BuildContainerDeps): Promise<IoC<Demo
     single,
   );
 
+  // Events: the outbox store (row + NOTIFY in one transaction), the
+  // in-process fan-out hub, and the emit facade. Single-scope demo — the
+  // store takes no scope column and every envelope uses the constant
+  // `DEMO_EVENT_SCOPE`. The LISTEN/relay side is wired in main.ts (it owns a
+  // dedicated connection with its own lifecycle).
+  container.register(
+    'eventOutboxStore',
+    (c) => createDrizzleEventOutboxStore({ db: c.resolve('db'), table: eventOutbox, channel: EVENT_CHANNEL }),
+    single,
+  );
+  container.register('eventHub', (c) => createEventHub({ logger: c.resolve('logger') }), single);
+  container.register(
+    'eventPublisher',
+    (c) => createEventPublisher({ store: c.resolve('eventOutboxStore') }),
+    single,
+  );
+
   return container;
 }
+
+/** The one NOTIFY channel this app uses (store send side + listener in main.ts). */
+export const EVENT_CHANNEL = 'demo_events';
+
+/** The single scope every demo event lives in (single-tenant deployment path). */
+export const DEMO_EVENT_SCOPE = 'demo';
 
 /**
  * `QueueScopeFactory`-shaped seam handed to the queue worker + DLQ handler.

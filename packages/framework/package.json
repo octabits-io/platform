@@ -135,6 +135,26 @@
       "import": "./dist/ical/index.js",
       "default": "./dist/ical/index.js"
     },
+    "./events": {
+      "types": "./dist/events/index.d.ts",
+      "import": "./dist/events/index.js",
+      "default": "./dist/events/index.js"
+    },
+    "./events/postgres": {
+      "types": "./dist/events/postgres.d.ts",
+      "import": "./dist/events/postgres.js",
+      "default": "./dist/events/postgres.js"
+    },
+    "./drizzle/event-outbox": {
+      "types": "./dist/drizzle/event-outbox/index.d.ts",
+      "import": "./dist/drizzle/event-outbox/index.js",
+      "default": "./dist/drizzle/event-outbox/index.js"
+    },
+    "./elysia/events": {
+      "types": "./dist/elysia/events.d.ts",
+      "import": "./dist/elysia/events.js",
+      "default": "./dist/elysia/events.js"
+    },
     "./elysia": {
       "types": "./dist/elysia/index.d.ts",
       "import": "./dist/elysia/index.js",

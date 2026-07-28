@@ -52,6 +52,11 @@
       "import": "./dist/ai/index.js",
       "default": "./dist/ai/index.js"
     },
+    "./events": {
+      "types": "./dist/events/index.d.ts",
+      "import": "./dist/events/index.js",
+      "default": "./dist/events/index.js"
+    },
     "./styles.css": "./src/styles.css",
     "./components/*": "./src/components/*"
   },

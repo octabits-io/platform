@@ -50,6 +50,15 @@ itself, so it has no Nuxt dependency, only `vue`.
   an app-side `useDateFormat`), plus source-shipped `./components/DateInput.vue`,
   `DateRangeInput.vue` (travel/booking end-date semantics, blocked dates via
   props, injected `availabilityCheck`), and `PeriodDisplay.vue`
+- **`./events`** — the browser side of `@octabits-io/framework/events`:
+  `createEventStreamClient`, a fetch-based SSE reader (the stream is
+  authenticated with an `Authorization` header, which native `EventSource`
+  cannot set — so reconnect, `Last-Event-ID` replay, and full-jitter backoff
+  live here), with a durable-only watermark, bounded seen-id dedupe, a
+  `degraded` state for honest fallback-polling UX, and a content-type guard
+  (a 200 `text/html` SPA fallback is a failure, not a stream);
+  `createSseFrameParser`; `useEventStream` (reactive connection state +
+  scope-bound lifecycle)
 - **`./ai`** — frontend AI-workflow engine: `useAiWorkflow` /
   `useAiWorkflowGuard` (poll-driven state over injected transport),
   `createAiProgressCore` (cross-page tracking + completion/applied signals —

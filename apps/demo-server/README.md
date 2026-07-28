@@ -25,7 +25,7 @@ pnpm --filter @octabits-io/demo-server dev     # bun --watch
 # or: pnpm --filter @octabits-io/demo-server start
 ```
 
-Then `curl http://localhost:3001/health/ready` → `{"status":"ok","db":"connected"}`.
+Then `curl http://localhost:3101/health/ready` → `{"status":"ok","db":"connected"}`.
 
 Zero configuration is required — every value in [`.env.example`](./.env.example)
 has a working default, including committed **dev** PII keys. The app refuses to
@@ -128,6 +128,7 @@ saw nothing but preflight failures. A browser is the only client that tests CORS
 | `./queue` | [`queues/welcome-email.ts`](./src/queues/welcome-email.ts) — `defineQueue` + `BossManager`; dead letters persist to `job_audit_log` via `…/drizzle/job-audit-store` | ✅ |
 | `./storage` + `./storage/postgres` | [`routes/files.ts`](./src/routes/files.ts) — provider + `createWebResponse` + `objectStorageDdl` | ✅ |
 | `./mail` | [`services/mail.ts`](./src/services/mail.ts) — `createBaseMailService` + logger transport | ✅ |
+| `./events` + `./events/postgres` + `./drizzle/event-outbox` | [`routes/events.ts`](./src/routes/events.ts) — two-lane event fan-out end to end: `eventPublisher.emit(…, tx)` writes the outbox row + NOTIFY at COMMIT (durable) or inline payload (ephemeral); [`main.ts`](./src/main.ts) runs the dedicated LISTEN connection + relay; `GET /api/events/stream` serves SSE via `.mount()` (plain fetch handler — no Elysia type budget, no Eden types; the browser side is `@octabits-io/nuxt-ui-kit/events`). Try it: open `/events` in demo-web, or `curl -N localhost:3101/api/events/stream` and `POST /api/events/demo` with `{"lane":"durable"}` — reconnect with `Last-Event-ID: 0` to watch the outbox replay. | ✅ |
 
 Honestly not covered here:
 

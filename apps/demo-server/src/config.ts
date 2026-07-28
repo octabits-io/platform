@@ -96,8 +96,8 @@ export function loadConfig(): AppConfig {
   );
 
   const parsed = parseConfig({
-    port: getEnvNumber('PORT', 3001),
-    publicBaseUrl: getEnv('PUBLIC_BASE_URL', 'http://localhost:3001'),
+    port: getEnvNumber('PORT', 3101),
+    publicBaseUrl: getEnv('PUBLIC_BASE_URL', 'http://localhost:3101'),
     database: {
       url: getEnv('DATABASE_URL', 'postgres://demo:demo@localhost:5433/demo'),
     },

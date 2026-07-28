@@ -109,6 +109,18 @@ const APP_DDL = `
     created_at timestamptz NOT NULL DEFAULT now(),
     completed_at timestamptz
   );
+
+  CREATE TABLE IF NOT EXISTS event_outbox (
+    id bigserial PRIMARY KEY,
+    event_id text NOT NULL,
+    type text NOT NULL,
+    at timestamptz NOT NULL,
+    data jsonb,
+    actor jsonb,
+    audience jsonb,
+    resources jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );
 `;
 
 /** Create every table this app needs. Idempotent — safe on every boot. */

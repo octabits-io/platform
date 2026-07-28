@@ -40,6 +40,7 @@ import { createToolRoutes } from './routes/tools.ts';
 import { createDemoScopePlugin, type DemoScopePlugin } from './request-scope.ts';
 import { createDemoApiKeys, type DemoApiKeys } from './api-keys.ts';
 import { createProtectedRoutes } from './routes/protected.ts';
+import { createEventRoutes, createEventStreamMount } from './routes/events.ts';
 
 export interface CreateDemoAppDeps {
   container: IoC<DemoServices>;
@@ -71,7 +72,11 @@ export function createApiRoutes(
     .use(createQueueRoutes(container))
     .use(createToolRoutes(container))
     .use(createProtectedRoutes(apiKeys))
-    .use(createAiRoutes(ai));
+    .use(createAiRoutes(ai))
+    .use(createEventRoutes(container))
+    // The SSE stream goes through .mount() — a plain fetch handler, no Elysia
+    // type budget, no Eden types (see routes/events.ts).
+    .mount('/events/stream', createEventStreamMount(container));
 }
 
 export function createDemoApp({ container, config, checkReady, ai, ...deps }: CreateDemoAppDeps) {

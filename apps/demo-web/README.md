@@ -24,7 +24,7 @@ The server comes first — this app is a pure client and has no data of its own.
 # 1. Postgres for the demo server
 docker compose -f apps/demo-server/docker-compose.yml up -d --wait
 
-# 2. The API on :3001
+# 2. The API on :3101
 pnpm --filter @octabits-io/demo-server start
 
 # 3. This app on :3100
@@ -35,12 +35,14 @@ pnpm --filter @octabits-io/demo-web dev
 Then open <http://localhost:3100> — the bypass session is seeded automatically,
 so you land on the dashboard with no login.
 
-**Why 3100 and not 3000.** When its port is taken, Nuxt walks *upwards* to the
-next free one, and from 3000 that is 3001 — the demo server's port. It binds
-there quite happily: Bun holds `*:3001` while Nuxt takes `[::1]:3001`, the OS
-permits both, and `localhost` resolves to `::1` first. The SPA then silently
-shadows the API it is trying to call and every request returns the app's own
-HTML. Starting at 3100 keeps the whole fallback range clear of 3001.
+**The port-fallback trap.** When its port is taken, Nuxt walks *upwards* to
+the next free one — and it will happily shadow a Bun server on the way: Bun
+holds `*:PORT` while Nuxt takes `[::1]:PORT`, the OS permits both, and
+`localhost` resolves to `::1` first. The SPA then silently shadows the API it
+is trying to call and every request returns the app's own HTML. With the API
+on 3101 — one step above this app's 3100 — that means: never start a second
+demo-web instance while 3100 is taken, or the fallback lands exactly on the
+API's port.
 
 | Task | Command |
 | --- | --- |
@@ -49,7 +51,7 @@ HTML. Starting at 3100 keeps the whole fallback range clear of 3001.
 | Production build | `pnpm --filter @octabits-io/demo-web build` |
 
 `NUXT_PUBLIC_API_BASE` overrides the API URL; unset, the kit's
-`resolveApiBaseUrl` falls back to `http://localhost:3001` in dev.
+`resolveApiBaseUrl` falls back to `http://localhost:3101` in dev.
 
 ## Auth: there is no IdP
 
@@ -148,6 +150,7 @@ routing/lazy-loading/SEO machinery would be weight without a job. `createI18n` +
 | `formatCurrency` / `formatCheckoutDate` / `formatTimeFromString` (`./dates`) | — | ❌ No money and no check-in/check-out domain in a contact desk. `formatCheckoutDate` *is* exercised indirectly by `PeriodDisplay`. |
 | `./ai` — `useAiWorkflowGuard` (and `useAiWorkflow` inside it) | [`components/AiContactBrief.vue`](./app/components/AiContactBrief.vue) — `checkFn`/`pollFn` both read "latest workflow for this entity" (`GET /api/ai/workflows?entityRef=…&limit=1`); rehydration verified in-browser: the modal resumed a run triggered by `curl` before the page ever loaded | ✅ verified in-browser |
 | `./ai` — `createAiProgressCore` | [`stores/aiProgress.ts`](./app/stores/aiProgress.ts) — the core-in-a-Pinia-store pattern (same as `stores/auth.ts`); feeds the contacts navbar "AI running" badge across modal close | ✅ verified in-browser |
+| `./events` — `useEventStream` (and `createEventStreamClient`/`createSseFrameParser` inside it) | [`pages/events.vue`](./app/pages/events.vue) — one stream for the page's lifetime against `/api/events/stream`; reactive state badge, both lanes rendered live, dedupe + `Last-Event-ID` replay observable by emitting durable events across a reconnect | ✅ |
 | `./ai` — `useActiveAiWorkflowProbe` | `AiContactBrief.vue` — disables the trigger while a run is in flight (`GET /api/ai/workflows/active`) | ✅ |
 | `./ai` — `useAiCardState` | `AiContactBrief.vue` — idle/active/failed chip over the progress store | ✅ |
 | `./ai` — `createWorkflowRegistry` | [`lib/aiWorkflows.ts`](./app/lib/aiWorkflows.ts) — app-owned definition shape; labels the modal title | ✅ |
@@ -253,7 +256,7 @@ moral: **for an `ssr: false` SPA, `curl /` proves only that Nuxt can serve an
 empty shell.** It cannot distinguish a working app from a blank page.
 
 **(a) No CORS on the demo server → every API call blocked.** The SPA is a
-different origin (`:3100`) than the API (`:3001`), so the browser preflighted
+different origin (`:3100`) than the API (`:3101`), so the browser preflighted
 and the server — which had never wired `cors` — refused. `curl` sails through
 unaffected because it does not enforce the same-origin policy. Fixed in
 `apps/demo-server`: `cors()` now mounts through `createElysiaApp`'s `plugins`
