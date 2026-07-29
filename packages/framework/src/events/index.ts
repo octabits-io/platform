@@ -41,7 +41,12 @@ export {
 } from './codec.ts';
 export { EVENT_ENVELOPE_SCHEMA, EVENT_ACTOR_SCHEMA, EVENT_AUDIENCE_SCHEMA } from './schema.ts';
 export { createEventHub, type EventHub, type EventHubSubscriber, type PublishStats, type CreateEventHubDeps } from './hub.ts';
-export { createEventPublisher, type EventPublisher, type CreateEventPublisherDeps } from './publisher.ts';
+export {
+  createEventPublisher,
+  type EventPublisher,
+  type EventDataMap,
+  type CreateEventPublisherDeps,
+} from './publisher.ts';
 export { createEventRelay, type EventRelay, type CreateEventRelayDeps } from './relay.ts';
 export {
   createEventStreamHandler,

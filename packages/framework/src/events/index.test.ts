@@ -6,6 +6,7 @@
  * silently loses events if the watermark logic regresses.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 import {
   MAX_NOTIFY_PAYLOAD_BYTES,
   createEventHub,
@@ -180,6 +181,64 @@ describe('publisher', () => {
     await expect(
       publisher.emit({ type: 'order.created', scopeKey: 'scope-a', lane: 'durable', data: {} }),
     ).rejects.toThrow('insert failed');
+  });
+
+  it('validates data against the registered payload schema', async () => {
+    const store = storeStub({ append: vi.fn(async () => ({ seq: 1 })) });
+    const publisher = createEventPublisher<{ 'order.created': { orderId: number } }>({
+      store,
+      payloadSchemas: { 'order.created': z.object({ orderId: z.number() }) },
+    });
+
+    await publisher.emit({
+      type: 'order.created',
+      scopeKey: 'scope-a',
+      lane: 'durable',
+      data: { orderId: 1 },
+    });
+    expect(store.append).toHaveBeenCalledTimes(1);
+
+    await expect(
+      publisher.emit({
+        type: 'order.created',
+        scopeKey: 'scope-a',
+        lane: 'durable',
+        // Wrong shape on purpose — the runtime schema must catch what a cast slipped past.
+        data: { orderId: 'not-a-number' } as unknown as { orderId: number },
+      }),
+    ).rejects.toThrow();
+    expect(store.append).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats the schema registry as authoritative: unregistered types throw', async () => {
+    const store = storeStub();
+    const publisher = createEventPublisher({
+      store,
+      payloadSchemas: { 'order.created': z.object({ orderId: z.number() }) },
+    });
+    await expect(
+      publisher.emit({ type: 'order.deleted', scopeKey: 'scope-a', lane: 'ephemeral', data: {} }),
+    ).rejects.toThrow('No payload schema registered for event type "order.deleted"');
+    expect(store.notify).not.toHaveBeenCalled();
+  });
+
+  it('validates without stripping — consumer-merged extras on data survive', async () => {
+    const store = storeStub();
+    const publisher = createEventPublisher({
+      store,
+      payloadSchemas: { 'order.created': z.object({ orderId: z.number() }) },
+    });
+    const emitted = await publisher.emit({
+      type: 'order.created',
+      scopeKey: 'scope-a',
+      lane: 'ephemeral',
+      data: { orderId: 1, activity: { id: 5 } },
+    });
+    expect(emitted.data).toEqual({ orderId: 1, activity: { id: 5 } });
+    expect(store.notify).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { orderId: 1, activity: { id: 5 } } }),
+      undefined,
+    );
   });
 });
 
