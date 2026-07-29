@@ -11,6 +11,7 @@
  * subset of IoC's `DisposableServiceResolver`, so a scope passes straight in.
  * The queue module never imports the IoC module.
  */
+import { z } from 'zod';
 import { IoC, ServiceLifetime } from '@octabits-io/framework/ioc';
 import type { DisposableServiceResolver } from '@octabits-io/framework/ioc';
 import type { Logger } from '@octabits-io/framework/logger';
@@ -55,7 +56,7 @@ export interface DemoServices {
   idempotency: IdempotencyService;
   eventOutboxStore: DrizzleEventOutboxStore;
   eventHub: EventHub;
-  eventPublisher: EventPublisher;
+  eventPublisher: EventPublisher<DemoEventMap>;
 }
 
 export interface BuildContainerDeps {
@@ -151,9 +152,17 @@ export async function buildContainer(deps: BuildContainerDeps): Promise<IoC<Demo
     single,
   );
   container.register('eventHub', (c) => createEventHub({ logger: c.resolve('logger') }), single);
+  // Typed emit, both layers: the DemoEventMap generic pins each event type to
+  // its payload shape at compile time, and the same schemas passed as
+  // `payloadSchemas` make the registry authoritative at runtime (unregistered
+  // types throw, invalid payloads throw, extras on `data` survive).
   container.register(
     'eventPublisher',
-    (c) => createEventPublisher({ store: c.resolve('eventOutboxStore') }),
+    (c) =>
+      createEventPublisher<DemoEventMap>({
+        store: c.resolve('eventOutboxStore'),
+        payloadSchemas: DEMO_EVENT_SCHEMAS,
+      }),
     single,
   );
 
@@ -165,6 +174,18 @@ export const EVENT_CHANNEL = 'demo_events';
 
 /** The single scope every demo event lives in (single-tenant deployment path). */
 export const DEMO_EVENT_SCOPE = 'demo';
+
+/**
+ * The app's event vocabulary, declared once as Zod schemas. The map type is
+ * derived from it, so the publisher's compile-time contract and its runtime
+ * `payloadSchemas` registry can never drift apart.
+ */
+export const DEMO_EVENT_SCHEMAS = {
+  'demo.message.recorded': z.object({ message: z.string() }),
+  'demo.signal.pinged': z.object({ message: z.string() }),
+} as const;
+
+export type DemoEventMap = { [K in keyof typeof DEMO_EVENT_SCHEMAS]: z.infer<(typeof DEMO_EVENT_SCHEMAS)[K]> };
 
 /**
  * `QueueScopeFactory`-shaped seam handed to the queue worker + DLQ handler.

@@ -77,8 +77,12 @@ export function createEventRoutes(container: IoC<DemoServices>) {
 }
 
 function demoEvent(lane: 'durable' | 'ephemeral', message: string) {
+  // `const type` keeps the literal union — the publisher is parameterized
+  // over DemoEventMap, so a type outside the map (or a payload of the wrong
+  // shape) is a compile error here and a throw at runtime.
+  const type = lane === 'durable' ? ('demo.message.recorded' as const) : ('demo.signal.pinged' as const);
   return {
-    type: lane === 'durable' ? 'demo.message.recorded' : 'demo.signal.pinged',
+    type,
     scopeKey: DEMO_EVENT_SCOPE,
     lane,
     data: { message },

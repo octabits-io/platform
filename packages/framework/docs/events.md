@@ -98,6 +98,37 @@ await db.transaction(async (tx) => {
 await publisher.emit({ type: 'sync.progress', scopeKey, lane: 'ephemeral', data: { done: 3, total: 9 } });
 ```
 
+#### Typed emit (opt-in)
+
+The framework never knows your event taxonomy, but the publisher can hold you
+to it. Declare the vocabulary once as Zod schemas, derive the `EventDataMap`
+from it, and both layers enforce the same contract:
+
+```ts
+const EVENT_SCHEMAS = {
+  'order.created': z.object({ orderId: z.number() }),
+  'sync.progress': z.object({ done: z.number(), total: z.number() }),
+} as const;
+type AppEvents = { [K in keyof typeof EVENT_SCHEMAS]: z.infer<(typeof EVENT_SCHEMAS)[K]> };
+
+const publisher = createEventPublisher<AppEvents>({ store, payloadSchemas: EVENT_SCHEMAS });
+
+await publisher.emit({ type: 'order.created', scopeKey, lane: 'durable', data: { orderId: 7 } });
+// type not in the map, or data of the wrong shape → compile error
+```
+
+- The generic makes `emit` correlate `type` with its payload shape at compile
+  time; `payloadSchemas` enforces it at runtime for whatever the type system
+  couldn't see (casts, JSON boundaries).
+- When `payloadSchemas` is present it is **authoritative**: emitting an
+  unregistered type throws, and a schema-failing payload throws — the same
+  emit-site-programming-error stance as the envelope validation (inside a
+  transaction, the throw is the rollback).
+- Validation only checks, it never strips — consumer-merged extras on `data`
+  (e.g. an inline activity row) survive untouched.
+- Both default off: an unparameterized publisher without `payloadSchemas`
+  behaves exactly as before (`type: string`, `data: unknown`).
+
 ### 3. Listener + relay + hub (the process serving subscribers)
 
 ```ts
