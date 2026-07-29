@@ -83,6 +83,7 @@ describe('createEventStreamClient', () => {
   });
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   async function drainMicrotasks(): Promise<void> {
@@ -110,6 +111,9 @@ describe('createEventStreamClient', () => {
   });
 
   it('sends Last-Event-ID on reconnect after a server close', async () => {
+    // Pin the jitter: reconnect delays are Math.random() * retryMs, and this
+    // test asserts an exact call count within a fixed window.
+    vi.spyOn(Math, 'random').mockReturnValue(0.99);
     const first = `id: 9\ndata: ${JSON.stringify(envelope('evt-9', 9))}\n\n`;
     const fetchImpl = vi.fn(async () => streamResponse(first));
     const client = createEventStreamClient({
