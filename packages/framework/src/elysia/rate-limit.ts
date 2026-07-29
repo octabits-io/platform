@@ -59,6 +59,15 @@ export interface RateLimitOptions {
    * library's default key generator is used.
    */
   keyByClientIp?: boolean;
+  /**
+   * Path prefixes exempt from the limiter. A request whose URL pathname equals
+   * an entry or starts with `entry + '/'` is skipped entirely. Intended for
+   * routes that live outside the plugin hook chain and enforce their own
+   * limits — e.g. a `.mount()`ed SSE endpoint (mounted fetch handlers never
+   * see the client-IP plugin, so their requests would all share one 'unknown'
+   * bucket; such endpoints cap per subscriber instead). Default `[]`.
+   */
+  skipPaths?: string[];
   /** `key` field of the 429 JSON body. Defaults to `rate_limit_exceeded`. */
   errorKey?: string;
   /** `message` field of the 429 JSON body. Defaults to a generic notice. */
@@ -150,6 +159,7 @@ export function createRateLimit(options: RateLimitOptions) {
     errorMessage = DEFAULT_ERROR_MESSAGE,
     scoping,
     logger,
+    skipPaths = [],
   } = options;
 
   const matchesSkipCidr = skipCidrs.length > 0 ? createCidrMatcher(skipCidrs) : null;
@@ -159,6 +169,13 @@ export function createRateLimit(options: RateLimitOptions) {
     duration: windowMs,
     ...(scoping ? { scoping } : {}),
     skip: (req, key) => {
+      // Exempted path prefixes (self-limiting endpoints, e.g. mounted SSE).
+      if (skipPaths.length > 0) {
+        const pathname = new URL(req.url).pathname;
+        if (skipPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+          return true;
+        }
+      }
       // Internal server-to-server callers (e.g. SSR) bypass via a shared secret.
       if (internalSecret) {
         const provided = req.headers.get(internalSecretHeader);

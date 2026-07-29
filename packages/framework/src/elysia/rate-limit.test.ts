@@ -56,6 +56,23 @@ describe('createRateLimit', () => {
     expect(second.status).toBe(200);
   });
 
+  it('skips rate limiting for exempted path prefixes (skipPaths)', async () => {
+    const app = new Elysia()
+      .use(createRateLimit({ max: 1, skipPaths: ['/events'] }))
+      .get('/events', () => 'stream')
+      .get('/events/sub', () => 'sub')
+      .get('/eventsish', () => 'other')
+      .get('/', () => 'ok');
+    // Exact match and sub-paths are exempt — unlimited requests pass.
+    expect((await app.handle(new Request('http://localhost/events'))).status).toBe(200);
+    expect((await app.handle(new Request('http://localhost/events'))).status).toBe(200);
+    expect((await app.handle(new Request('http://localhost/events/sub'))).status).toBe(200);
+    // A sibling path sharing the prefix string is NOT exempt…
+    expect((await app.handle(new Request('http://localhost/eventsish'))).status).toBe(200);
+    // …and normal routes still count against the (shared-bucket) limit.
+    expect((await app.handle(new Request('http://localhost/'))).status).toBe(429);
+  });
+
   it('skips rate limiting for client IPs inside a trusted CIDR range', async () => {
     const app = new Elysia()
       // trustAll so the forwarded IP is honored and surfaces as derived.clientIp
