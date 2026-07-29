@@ -1,5 +1,12 @@
 # @octabits-io/demo-server
 
+## 0.0.11
+
+### Patch Changes
+
+- Updated dependencies [[`dfa40ee`](https://github.com/octabits-io/platform/commit/dfa40eef8bac6be5929508b4650bbd877b0be70e)]:
+  - @octabits-io/framework@0.9.0
+
 ## 0.0.10
 
 ### Patch Changes

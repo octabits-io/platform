@@ -1,5 +1,11 @@
 # @octabits-io/framework
 
+## 0.9.0
+
+### Minor Changes
+
+- [`dfa40ee`](https://github.com/octabits-io/platform/commit/dfa40eef8bac6be5929508b4650bbd877b0be70e) - `createRateLimit`: new `skipPaths` option — path prefixes exempt from the limiter. For self-limiting endpoints that live outside the plugin hook chain, e.g. a `.mount()`ed SSE stream whose requests never see the client-IP plugin and would otherwise all share one "unknown" bucket.
+
 ## 0.8.0
 
 ### Minor Changes
