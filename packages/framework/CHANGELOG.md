@@ -1,5 +1,11 @@
 # @octabits-io/framework
 
+## 0.10.0
+
+### Minor Changes
+
+- [`4b6d5ec`](https://github.com/octabits-io/platform/commit/4b6d5ecdaac4b4fa5bd39e3ec719b44719b1ebf0) - events: make `EventPublisher`/`createEventPublisher` generic over a consumer `EventDataMap` (event type → payload shape), so `emit` correlates `type` with its `data` at compile time, and add an optional `payloadSchemas` registry to `createEventPublisherDeps` that enforces the same contract at runtime (authoritative: unregistered types throw, invalid payloads throw, validation never strips). Unparameterized publishers behave exactly as before.
+
 ## 0.9.0
 
 ### Minor Changes
