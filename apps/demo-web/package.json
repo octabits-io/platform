@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@elysiajs/eden": "^1.4.9",
-    "@internationalized/date": "^3.12.2",
+    "@internationalized/date": "^3.12.3",
     "@nuxt/ui": "^4.10.0",
     "@octabits-io/nuxt-ui-kit": "workspace:*",
     "@pinia/nuxt": "^1.0.1",
@@ -30,6 +30,6 @@
   "devDependencies": {
     "@octabits-io/demo-server": "workspace:*",
     "typescript": "^6.0.3",
-    "vue-tsc": "^3.3.8"
+    "vue-tsc": "^3.3.9"
   }
 }
