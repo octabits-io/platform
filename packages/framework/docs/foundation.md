@@ -896,6 +896,43 @@ runs — same wiring against a database without RLS policies. The container is
 addressed structurally (`ScopeContainer`/`ScopeChild`), so wrapped containers
 work.
 
+**`createPinnedGucScopeFactory({ container, dbKey?, enabled?, gucs, seed? })`** —
+the per-scope-transaction sibling: `(args) => Promise<scope>` where the child
+scope's `db` is a **transaction-bound** Drizzle from ONE `runWithGucs`
+transaction opened at scope creation (the factory resolves once
+`BEGIN` + `set_config` are on the wire) and parked until
+`dispose({ commit })` — COMMIT on `true`, ROLLBACK on `false`. Because the
+db IS a Drizzle-managed transaction, nested `db.transaction()` gets real
+savepoint semantics. The scope holds a pool client for its lifetime; a
+mid-scope SQL error aborts the transaction until dispose; failing to
+dispose leaks the client (use lifecycle owners that guarantee dispose —
+`createRequestScopePlugin`, `withScope`).
+
+**Choosing between the two scope models** — the trade is NOT the wire
+round-trips (per-call costs 3 per operation, pinned ~N+3 per scope); at
+sub-millisecond RTT that difference is noise. The trade is **intra-scope
+query parallelism versus transactional atomicity**:
+
+- **Per-call (`createGucScopeFactory`) — the default.** Each operation takes
+  its own pool connection, so concurrent queries inside one scope
+  (`Promise.all` fan-out) genuinely run in parallel. Choose it for
+  request-scoped read paths with internal fan-out. A real-world A/B (in-cluster
+  Postgres, ~0.5 ms RTT) measured the pinned model 5–47 % *slower* p50 on
+  exactly such routes — worst where fan-out was highest — because pinning
+  serializes a scope's queries onto one connection.
+- **Pinned (`createPinnedGucScopeFactory`).** Choose it when the scope's
+  work is (a) **strictly sequential** (workflow steps, background jobs —
+  serialization then costs nothing and you save the per-call overhead),
+  (b) needs **whole-scope atomicity** (all writes commit or roll back
+  together at dispose), or (c) the database is **far away** — at ~20 ms RTT
+  the per-call model's extra round-trips (~2 per operation) dominate and
+  the math flips in pinned's favor. Budget one held connection per live
+  scope when sizing pools.
+
+Both factories accept identical options, so consumers can switch per scope
+kind — or expose it as config for cheap re-measurement when deployment
+geometry changes.
+
 **List-valued GUCs** — single values are parameterized safely, but a list
 joined into one GUC (split DB-side via `string_to_array(…, ',')`) has an
 in-band separator: use `assertSafeGucListValue(values)` /
