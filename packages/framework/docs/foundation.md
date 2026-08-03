@@ -886,6 +886,18 @@ operation runs inside a short transaction that applies transaction-local
 `releaseScopedClient`, and `endPoolGracefully`. Policies and concrete GUC
 values stay in the consumer.
 
+The scoped proxy is **fail-closed against Drizzle surface drift**: every
+member of the db must be classified — wrapped (`QUERY_BUILDER_METHODS`,
+`QUERY_NAMESPACE_METHODS`, `transaction`/`execute`/`query`/`$with`) or
+explicitly allowlisted as unable to execute SQL
+(`SCOPED_DB_PASSTHROUGH_PROPS`). An unclassified member (e.g. a builder entry
+point added by a new drizzle-orm version) **throws on use** instead of
+silently running without the GUCs, and a classification contract test
+(`rls/classification.test.ts`) enumerates the installed drizzle-orm's actual
+db surface so any addition/rename fails the unit suite at upgrade time.
+Absent properties still read as `undefined` (feature detection and `await`'s
+`then` probe are unaffected).
+
 **`createGucScopeFactory({ container, dbKey?, enabled?, gucs, seed? })`** — the
 bridge to `…/ioc` every RLS consumer otherwise hand-writes per scope kind
 (request/system/grant scope): returns `(args) => scope` where the child scope's

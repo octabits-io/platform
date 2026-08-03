@@ -155,6 +155,37 @@ describe('createScopedDb', () => {
     expect((scoped as unknown as { tables: { marker: boolean } }).tables.marker).toBe(true);
   });
 
+  it('fail-closed: an unclassified db function throws on invocation instead of running GUC-less', () => {
+    const { db } = makeDb();
+    (db as Record<string, unknown>).$futureBuilder = () => 'raw';
+    const scoped = createScopedDb(db, GUCS) as unknown as Record<string, () => unknown>;
+    // `typeof` probes keep working — the error fires at the call.
+    expect(typeof scoped.$futureBuilder).toBe('function');
+    expect(() => scoped.$futureBuilder!()).toThrow(/not classified/);
+  });
+
+  it('fail-closed: an unclassified object-valued namespace throws on access (v1 _query drift guard)', () => {
+    const { db } = makeDb();
+    (db as Record<string, unknown>)._query = { amenity: { findMany: async () => [] } };
+    const scoped = createScopedDb(db, GUCS) as unknown as Record<string, unknown>;
+    expect(() => scoped._query).toThrow(/not classified/);
+  });
+
+  it('fail-closed: absent props stay undefined (feature detection, await-then probe)', () => {
+    const { db } = makeDb();
+    const scoped = createScopedDb(db, GUCS) as unknown as Record<string, unknown>;
+    expect(scoped.then).toBeUndefined();
+    expect(scoped.somethingDrizzleNeverHad).toBeUndefined();
+  });
+
+  it('fail-closed: an unclassified query-namespace method throws on invocation', () => {
+    const { db } = makeDb();
+    (db.query as unknown as Record<string, Record<string, unknown>>).amenity!.findMagic = () => 'raw';
+    const scoped = createScopedDb(db, GUCS);
+    const amenity = (scoped.query as unknown as Record<string, Record<string, () => unknown>>).amenity!;
+    expect(() => amenity.findMagic!()).toThrow(/not classified/);
+  });
+
   it('caches the awaited chain result (no double execution)', async () => {
     const { db } = makeDb();
     const scoped = createScopedDb(db, GUCS) as unknown as { select(): { from(t: unknown): { where(w: unknown): PromiseLike<unknown> } } };

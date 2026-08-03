@@ -8,6 +8,8 @@
  *   Single-statement operations (builder chains, `query.*.find*`, `execute`)
  *   take a pinned-client fast path that sends `BEGIN; SELECT set_config(...)`
  *   as ONE simple-query packet — 3 wire round-trips per call instead of 4.
+ *   The proxy is fail-closed: unclassified Drizzle members throw instead of
+ *   running GUC-less (see `SCOPED_DB_PASSTHROUGH_PROPS`).
  * - `runWithGucs` / `withSystemMode` — one-shot scoped transactions (Drizzle
  *   managed, savepoint-correct for nested `tx.transaction()` calls).
  * - `acquireScopedClient` / `releaseScopedClient` — the pinned-connection
@@ -48,9 +50,12 @@ export interface RlsDatabase extends DbOrTx, DbTransactionRunner, DbRelationalQu
  * the chain is awaited.
  *
  * IMPORTANT: every top-level Drizzle query-builder entry point must be listed
- * here. Anything missing falls through to the raw `db` object and runs
- * *without* the GUCs — meaning the scope GUC is unset and RLS policies that
- * compare against `current_setting(..., true)` silently match zero rows.
+ * here. The proxy is fail-closed: a member that is neither listed here nor in
+ * {@link SCOPED_DB_PASSTHROUGH_PROPS} (nor one of the specially wrapped
+ * `transaction`/`execute`/`query`/`$with`) throws on use instead of silently
+ * running without the GUCs — where RLS policies comparing against
+ * `current_setting(..., true)` would match zero rows. `classification.test.ts`
+ * asserts the classification is complete against the installed drizzle-orm.
  */
 export const QUERY_BUILDER_METHODS = new Set([
   'select',
@@ -75,6 +80,49 @@ export const QUERY_BUILDER_METHODS = new Set([
  * Use `runWithGucs(db, gucs, (tx) => …)` for chains that need them.
  */
 const UNSUPPORTED_SYNC_BUILDER_METHODS = new Set(['toSQL', 'getSQL', 'prepare', 'as']);
+
+/**
+ * Relational-query terminal methods wrapped by the scoped proxy
+ * (`db.query.<table>.<method>`). Any other function-valued member of a
+ * table's query namespace throws on invocation (fail-closed, same rationale
+ * as {@link SCOPED_DB_PASSTHROUGH_PROPS}).
+ */
+export const QUERY_NAMESPACE_METHODS = new Set(['findFirst', 'findMany']);
+
+/**
+ * Properties of the (augmented) Drizzle db the scoped proxy hands through to
+ * the raw instance untouched — the deny-by-default escape hatch. Every member
+ * of the db must be classified: wrapped ({@link QUERY_BUILDER_METHODS},
+ * `transaction`, `execute`, `query`, `$with`) or listed here as unable to
+ * execute SQL on its own. An unclassified member THROWS instead of silently
+ * running GUC-less — the drift guard for Drizzle upgrades (e.g. a newly added
+ * builder entry point or a `_query` compat namespace fails loudly on first
+ * use instead of returning RLS-empty rows). `classification.test.ts` keeps
+ * this classification in sync with the installed drizzle-orm.
+ */
+export const SCOPED_DB_PASSTHROUGH_PROPS = new Set([
+  // Drizzle internals / metadata — none executes SQL by itself.
+  '_',
+  'dialect',
+  'session',
+  '$client',
+  '$cache',
+  // Neon `$withAuth` token field — plain data, undefined on node-postgres.
+  'authToken',
+  // The factory augmentation's schema references.
+  'tables',
+  'schema',
+]);
+
+function unclassifiedDbPropMessage(prop: string): string {
+  return (
+    `scopedDb: '${prop}' is not classified in the RLS scoped-db proxy, so it ` +
+    `would run WITHOUT the scope's GUCs (RLS policies would silently match ` +
+    `zero rows). If it is a new Drizzle query entry point, add it to ` +
+    `QUERY_BUILDER_METHODS; if it cannot execute SQL, add it to ` +
+    `SCOPED_DB_PASSTHROUGH_PROPS.`
+  );
+}
 
 type AnyRecord = Record<string, unknown>;
 type AnyFn = (...args: unknown[]) => unknown;
@@ -349,7 +397,7 @@ function createQueryNamespaceProxy<TDb extends RlsDatabase>(
           const methodName = methodNameProp;
           const original = t[methodName];
           if (typeof original !== 'function') return original;
-          if (methodName === 'findFirst' || methodName === 'findMany') {
+          if (QUERY_NAMESPACE_METHODS.has(methodName)) {
             return (...args: unknown[]) =>
               runWithGucsPinned(rawDb, gucs, async (tx) => {
                 const txQuery = tx.query as unknown as Record<string, AnyRecord>;
@@ -363,7 +411,16 @@ function createQueryNamespaceProxy<TDb extends RlsDatabase>(
                 return await (fn as AnyFn).apply(txTable, args);
               });
           }
-          return (original as AnyFn).bind(t);
+          // Fail-closed: an unlisted terminal method (a future Drizzle
+          // addition) would execute GUC-less if handed through raw.
+          return () => {
+            throw new TypeError(
+              `scopedDb: 'query.${tableName}.${methodName}' is not classified ` +
+                `in the RLS scoped-db proxy, so it would run WITHOUT the ` +
+                `scope's GUCs. If it executes a relational query, add it to ` +
+                `QUERY_NAMESPACE_METHODS.`,
+            );
+          };
         },
       });
     },
@@ -432,8 +489,24 @@ export function createScopedDb<TDb extends RlsDatabase>(
         }
       }
 
-      // Pass-through for tables/schema/$client and anything else.
-      return Reflect.get(target, prop, receiver);
+      // Fail-closed drift guard: every remaining member must be explicitly
+      // classified. Symbols and absent props pass through untouched (`await`'s
+      // `then` probe, feature detection); Object.prototype members (toString,
+      // hasOwnProperty, …) pass; SCOPED_DB_PASSTHROUGH_PROPS pass. Anything
+      // else is an unclassified piece of Drizzle surface — using it would
+      // silently bypass the GUCs, so refuse loudly instead. Functions throw on
+      // invocation (keeps `typeof` probes working); other values throw on
+      // access (an executable namespace like a v1 `_query` must not escape).
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof prop !== 'string') return value;
+      if (value === undefined || value === null) return value;
+      if (SCOPED_DB_PASSTHROUGH_PROPS.has(prop) || prop in Object.prototype) return value;
+      if (typeof value === 'function') {
+        return () => {
+          throw new TypeError(unclassifiedDbPropMessage(prop));
+        };
+      }
+      throw new TypeError(unclassifiedDbPropMessage(prop));
     },
   }) as TDb;
 }
