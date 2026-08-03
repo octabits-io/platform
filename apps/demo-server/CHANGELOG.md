@@ -1,5 +1,12 @@
 # @octabits-io/demo-server
 
+## 0.0.13
+
+### Patch Changes
+
+- Updated dependencies [[`0623bf6`](https://github.com/octabits-io/platform/commit/0623bf69090ba302e2bda24da638dd840df17263)]:
+  - @octabits-io/framework@0.11.0
+
 ## 0.0.12
 
 ### Patch Changes
