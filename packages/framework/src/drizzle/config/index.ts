@@ -114,8 +114,13 @@ export interface ConfigCipher<E extends OctError = OctError> {
  * gates writes). `invalidate` clears every cacheable key for one scope.
  */
 export interface ScopedConfigCache<TConfigMap extends Record<string, unknown>> {
-  get<K extends keyof TConfigMap>(scopeValue: string, key: K): TConfigMap[K] | undefined;
-  set<K extends keyof TConfigMap>(scopeValue: string, key: K, value: TConfigMap[K]): void;
+  /**
+   * `undefined` = cache miss. `null` = a memoized ABSENT resolution (no stored
+   * row and no non-null schema default) — the engine caches absence so a
+   * null-defaulted key doesn't force a DB query on every read that includes it.
+   */
+  get<K extends keyof TConfigMap>(scopeValue: string, key: K): TConfigMap[K] | null | undefined;
+  set<K extends keyof TConfigMap>(scopeValue: string, key: K, value: TConfigMap[K] | null): void;
   invalidate(scopeValue: string): void;
 }
 
@@ -356,8 +361,10 @@ export function createScopedConfigService<
     scope ? (eq(t[scope.column], scopeValue) as SQL) : undefined;
 
   // Request-scoped caches — safe because a config service is bound to one
-  // scope and is expected to live for one request/unit of work.
-  const requestScoped = new Map<keyof TConfigMap, TConfigMap[keyof TConfigMap]>();
+  // scope and is expected to live for one request/unit of work. `null` marks
+  // a memoized ABSENT resolution (see ScopedConfigCache) — consumers still see
+  // the key omitted from results, but the engine won't re-query it.
+  const requestScoped = new Map<keyof TConfigMap, TConfigMap[keyof TConfigMap] | null>();
   let allConfigsCache: Partial<TConfigMap> | null = null;
 
   function isEncrypted(key: keyof TConfigMap): boolean {
@@ -509,6 +516,13 @@ export function createScopedConfigService<
         assignConfigValue(target, key, parsed.data.value);
         requestScoped.set(key, parsed.data.value);
         if (cache) cache.set(scopeValue, key, parsed.data.value as TConfigMap[keyof TConfigMap]);
+      } else {
+        // Memoize the ABSENT resolution (null default / no row) in both cache
+        // tiers. The result still omits the key — consumer-visible semantics
+        // are unchanged — but without this, any read batch containing a
+        // null-defaulted key was a guaranteed DB query, every time (perf §9).
+        requestScoped.set(key, null);
+        if (cache) cache.set(scopeValue, key, null);
       }
       return;
     }
@@ -552,12 +566,19 @@ export function createScopedConfigService<
     const missing: K[] = [];
     for (const key of keys) {
       if (requestScoped.has(key)) {
-        assignConfigValue(result as Partial<TConfigMap>, key, requestScoped.get(key)!);
+        // `null` marks a memoized absent resolution — leave the key out of the
+        // result exactly like a fresh absent read would.
+        const memo = requestScoped.get(key);
+        if (memo !== null && memo !== undefined) {
+          assignConfigValue(result as Partial<TConfigMap>, key, memo);
+        }
       } else if (cache && isCacheable(key)) {
         const cached = cache.get(scopeValue, key);
         if (cached !== undefined) {
-          assignConfigValue(result as Partial<TConfigMap>, key, cached as TConfigMap[keyof TConfigMap]);
-          requestScoped.set(key, cached as TConfigMap[keyof TConfigMap]);
+          if (cached !== null) {
+            assignConfigValue(result as Partial<TConfigMap>, key, cached as TConfigMap[keyof TConfigMap]);
+          }
+          requestScoped.set(key, cached as TConfigMap[keyof TConfigMap] | null);
         } else {
           missing.push(key);
         }
@@ -645,10 +666,10 @@ export function createScopedConfigCache<TConfigMap extends Record<string, unknow
     `${encodeURIComponent(scopeValue)}:${encodeURIComponent(String(key))}`;
 
   return {
-    get<K extends keyof TConfigMap>(scopeValue: string, key: K): TConfigMap[K] | undefined {
-      return cache.get(cacheKey(scopeValue, key)) as TConfigMap[K] | undefined;
+    get<K extends keyof TConfigMap>(scopeValue: string, key: K): TConfigMap[K] | null | undefined {
+      return cache.get(cacheKey(scopeValue, key)) as TConfigMap[K] | null | undefined;
     },
-    set<K extends keyof TConfigMap>(scopeValue: string, key: K, value: TConfigMap[K]): void {
+    set<K extends keyof TConfigMap>(scopeValue: string, key: K, value: TConfigMap[K] | null): void {
       if (!cacheable.has(key)) return;
       cache.set(cacheKey(scopeValue, key), value);
     },

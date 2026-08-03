@@ -851,7 +851,11 @@ split — no tenant vocabulary in the core.
 - `createScopedConfigCache` builds the optional cross-scope cache over a
   foundation `LruCache`, gated by `cacheableKeys` (transactional keys are never
   cached); `readConfig` also keeps a request-scoped cache, both invalidated on
-  write.
+  write. Both tiers store `null` as a **memoized absent resolution** (no stored
+  row and no non-null default — the key stays omitted from results, but the
+  engine won't re-query it), while `undefined` remains the miss signal; a
+  custom `ScopedConfigCache` or backing `LruCache` must preserve stored
+  `null`s and keep them distinct from a miss.
 
 #### `@octabits-io/framework/drizzle/rls`
 

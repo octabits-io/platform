@@ -598,3 +598,126 @@ describe('unscoped config store (no scope)', () => {
     expect(store.has(':tenant_name')).toBe(true); // '' scope partition
   });
 });
+
+// ---------------------------------------------------------------------------
+// Null-default keys — memoized absent resolutions (perf: reynt §9)
+// ---------------------------------------------------------------------------
+
+describe('null-default keys are memoized as absent resolutions', () => {
+  type NullableMap = { theme: string | null; page_size: number };
+  const NULLABLE_DEFAULTS: NullableMap = { theme: null, page_size: 20 };
+  const nullableSchema: ConfigSchema<NullableMap> = {
+    safeParse({ key, value }) {
+      const k = key as keyof NullableMap;
+      if (!(k in NULLABLE_DEFAULTS)) return { success: false, error: { message: `unknown key ${key}` } };
+      const applied = value === undefined || value === null ? NULLABLE_DEFAULTS[k] : value;
+      return { success: true, data: { value: applied as NullableMap[keyof NullableMap] } };
+    },
+  };
+
+  /** Mock db that counts SELECT batches so re-query behavior is observable. */
+  function makeCountingDb(rows: Array<{ key: string; value: unknown; encrypted: boolean }> = []) {
+    let selects = 0;
+    const db: ConfigDatabase = {
+      select: () => {
+        selects++;
+        return { from: () => ({ where: async () => rows }) };
+      },
+      insert: () => ({
+        values: () => ({ onConflictDoUpdate: async () => {} }),
+      }),
+    };
+    return { db, selectCount: () => selects };
+  }
+
+  function makeLru() {
+    const store = new Map<string, unknown>();
+    const lru: ConfigLruCache = {
+      get: (k) => store.get(k),
+      set: (k, v) => void store.set(k, v),
+      delete: (k) => store.delete(k),
+    };
+    return { lru, store };
+  }
+
+  function makeNullableService(
+    db: ConfigDatabase,
+    cache?: ReturnType<typeof createScopedConfigCache<NullableMap>>,
+  ) {
+    return createScopedConfigService<NullableMap, 'tenantId'>({
+      db,
+      table: tenantConfig,
+      scope: { column: 'tenantId', value: 't1' },
+      schema: nullableSchema,
+      cacheableKeys: ['theme', 'page_size'],
+      keys: ['theme', 'page_size'],
+      cache,
+    });
+  }
+
+  it('omits the key from the result but does NOT re-query it within a scope', async () => {
+    const { db, selectCount } = makeCountingDb();
+    const service = makeNullableService(db);
+
+    const first = await service.readConfig('theme');
+    expect('theme' in first).toBe(false); // consumer-visible semantics unchanged
+    expect(selectCount()).toBe(1);
+
+    const second = await service.readConfig('theme');
+    expect('theme' in second).toBe(false);
+    expect(selectCount()).toBe(1); // memoized — no second query
+  });
+
+  it('keeps destructuring-default semantics (key absent, not null)', async () => {
+    const { db } = makeCountingDb();
+    const service = makeNullableService(db);
+    const { theme = 'fallback' } = await service.readConfig('theme');
+    expect(theme).toBe('fallback');
+  });
+
+  it('a batch containing a null-default key stops forcing queries once resolved', async () => {
+    const { db, selectCount } = makeCountingDb([{ key: 'page_size', value: 50, encrypted: false }]);
+    const service = makeNullableService(db);
+
+    const first = await service.readConfig('theme', 'page_size');
+    expect(first).toEqual({ page_size: 50 });
+    expect(selectCount()).toBe(1);
+
+    // Previously the null-resolved 'theme' re-queried on EVERY batch.
+    const second = await service.readConfig('theme', 'page_size');
+    expect(second).toEqual({ page_size: 50 });
+    expect(selectCount()).toBe(1);
+  });
+
+  it('caches the absent resolution cross-scope (shared cache, fresh service)', async () => {
+    const { lru, store } = makeLru();
+    const cache = createScopedConfigCache<NullableMap>({ cache: lru, cacheableKeys: ['theme', 'page_size'] });
+
+    const a = makeCountingDb();
+    await makeNullableService(a.db, cache).readConfig('theme');
+    expect(a.selectCount()).toBe(1);
+    expect(store.get('t1:theme')).toBeNull(); // absence marker stored
+
+    // A fresh service (new request) over the same shared cache: zero queries.
+    const b = makeCountingDb();
+    const result = await makeNullableService(b.db, cache).readConfig('theme');
+    expect('theme' in result).toBe(false);
+    expect(b.selectCount()).toBe(0);
+  });
+
+  it('writeConfig invalidation clears the memoized absence (fresh read sees the new value)', async () => {
+    const { lru } = makeLru();
+    const cache = createScopedConfigCache<NullableMap>({ cache: lru, cacheableKeys: ['theme', 'page_size'] });
+    const { db, selectCount } = makeCountingDb();
+    const service = makeNullableService(db, cache);
+
+    await service.readConfig('theme');
+    expect(selectCount()).toBe(1);
+
+    await service.writeConfig({ theme: 'dark' });
+
+    // Both tiers were invalidated — the next read queries again.
+    await service.readConfig('theme');
+    expect(selectCount()).toBe(2);
+  });
+});
