@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Pool, PoolClient } from 'pg';
+import { pgTable, text as pgText } from 'drizzle-orm/pg-core';
 import { IoC, ServiceLifetime } from '../../ioc/index.ts';
+import { createDrizzle } from '../factory/index.ts';
 import {
   createScopedDb,
   createGucScopeFactory,
@@ -10,6 +12,7 @@ import {
   withSystemMode,
   acquireScopedClient,
   releaseScopedClient,
+  escapeGucLiteral,
   QUERY_BUILDER_METHODS,
   type RlsDatabase,
 } from './index.ts';
@@ -49,11 +52,19 @@ function makeDb() {
 const GUCS = { 'app.tenant_id': 't1' };
 
 describe('runWithGucs', () => {
-  it('sets every GUC inside the tx before running fn', async () => {
+  it('sets every GUC inside the tx in ONE statement before running fn', async () => {
     const { db, tx, gucCalls } = makeDb();
     const out = await runWithGucs(db, { a: '1', b: '2' }, async (t) => { expect(t).toBe(tx); return 'ok'; });
     expect(out).toBe('ok');
-    expect(gucCalls.length).toBe(2);
+    // Both GUCs merged into a single `select set_config(...), set_config(...)`.
+    expect(gucCalls.length).toBe(1);
+    expect(gucCalls[0]![0]).toContain('set_config');
+  });
+
+  it('skips the set_config statement entirely for an empty GUC set', async () => {
+    const { db, gucCalls } = makeDb();
+    await runWithGucs(db, {}, async () => 'ok');
+    expect(gucCalls.length).toBe(0);
   });
 });
 
@@ -152,6 +163,109 @@ describe('createScopedDb', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Pinned fast path — real Drizzle over a mock Pool, asserting the wire profile
+// ---------------------------------------------------------------------------
+
+describe('createScopedDb pinned fast path', () => {
+  const marker = pgTable('marker', { id: pgText('id').primaryKey() });
+  const schema = { marker };
+
+  function makePinnedHarness(opts?: { failOn?: string }) {
+    const texts: string[] = [];
+    const release = vi.fn();
+    const client = {
+      query: vi.fn(async (cfg: string | { text: string }, _params?: unknown[]) => {
+        const text = typeof cfg === 'string' ? cfg : cfg.text;
+        texts.push(text);
+        if (opts?.failOn && text.startsWith(opts.failOn)) {
+          throw new Error(`${opts.failOn} failed`);
+        }
+        return { rows: [], rowCount: 0, command: 'SELECT', fields: [] };
+      }),
+      release,
+    };
+    const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+    const db = createDrizzle(schema, { pool });
+    return { db, texts, release, client, pool };
+  }
+
+  it('runs a builder chain in exactly 3 round-trips: BEGIN+set_config packet, statement, COMMIT', async () => {
+    const { db, texts, release } = makePinnedHarness();
+    const scoped = createScopedDb(db, { 'app.tenant_id': 't1' });
+    const rows = await scoped.select().from(marker);
+    expect(rows).toEqual([]);
+    expect(texts).toHaveLength(3);
+    expect(texts[0]).toBe("BEGIN; SELECT set_config('app.tenant_id', 't1', true)");
+    expect(texts[2]).toBe('COMMIT');
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release.mock.calls[0]).toEqual([]); // released clean
+  });
+
+  it('merges multiple GUCs into the single BEGIN packet', async () => {
+    const { db, texts } = makePinnedHarness();
+    const scoped = createScopedDb(db, { 'app.tenant_id': 't1', 'app.role': 'member' });
+    await scoped.select().from(marker);
+    expect(texts[0]).toBe(
+      "BEGIN; SELECT set_config('app.tenant_id', 't1', true), set_config('app.role', 'member', true)",
+    );
+  });
+
+  it('escapes GUC values as literals in the packet', async () => {
+    const { db, texts } = makePinnedHarness();
+    const scoped = createScopedDb(db, { 'app.tenant_id': "o'brien" });
+    await scoped.select().from(marker);
+    expect(texts[0]).toBe("BEGIN; SELECT set_config('app.tenant_id', 'o''brien', true)");
+  });
+
+  it('wraps the relational query namespace through the pinned path', async () => {
+    const { db, texts } = makePinnedHarness();
+    const scoped = createScopedDb(db, { 'app.tenant_id': 't1' });
+    const rows = await scoped.query.marker!.findMany();
+    expect(rows).toEqual([]);
+    expect(texts[0]).toContain('BEGIN; SELECT set_config');
+    expect(texts[texts.length - 1]).toBe('COMMIT');
+  });
+
+  it('ROLLBACKs, releases clean, and rethrows when the statement fails', async () => {
+    const { db, texts, release } = makePinnedHarness({ failOn: 'select' });
+    const scoped = createScopedDb(db, { 'app.tenant_id': 't1' });
+    // Drizzle wraps statement errors in DrizzleQueryError ("Failed query: …").
+    await expect(async () => { await scoped.select().from(marker) }).rejects.toThrow('Failed query');
+    expect(texts[texts.length - 1]).toBe('ROLLBACK');
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release.mock.calls[0]).toEqual([]); // rollback succeeded → recycle
+  });
+
+  it('destroys the client and rethrows when COMMIT fails (silent-write-loss regression)', async () => {
+    const { db, release } = makePinnedHarness({ failOn: 'COMMIT' });
+    const scoped = createScopedDb(db, { 'app.tenant_id': 't1' });
+    await expect(async () => { await scoped.select().from(marker) }).rejects.toThrow('COMMIT failed');
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release.mock.calls[0]![0]).toBeInstanceOf(Error); // destroyed
+  });
+
+  it('destroys the client when the BEGIN packet fails', async () => {
+    const { db, release } = makePinnedHarness({ failOn: 'BEGIN' });
+    const scoped = createScopedDb(db, { 'app.tenant_id': 't1' });
+    await expect(async () => { await scoped.select().from(marker) }).rejects.toThrow('BEGIN failed');
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release.mock.calls[0]![0]).toBeInstanceOf(Error);
+  });
+});
+
+describe('escapeGucLiteral', () => {
+  it('quotes plain values', () => {
+    expect(escapeGucLiteral('t1')).toBe("'t1'");
+  });
+  it('doubles single quotes', () => {
+    expect(escapeGucLiteral("o'brien")).toBe("'o''brien'");
+  });
+  it('E-prefixes and escapes backslashes (standard_conforming_strings-proof)', () => {
+    expect(escapeGucLiteral('a\\b')).toBe(" E'a\\\\b'");
+  });
+});
+
 describe('withSystemMode', () => {
   it('applies the system-mode GUC (default app.system_mode)', async () => {
     const { db, gucCalls } = makeDb();
@@ -183,7 +297,7 @@ function makeClient(opts?: { failOn?: string }) {
 }
 
 describe('acquireScopedClient', () => {
-  it('BEGINs, applies session vars, and returns the createDb-built db', async () => {
+  it('BEGINs and applies all session vars in ONE packet, returns the createDb-built db', async () => {
     const { client, queries } = makeClient();
     const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
     const createDb = vi.fn((c: PoolClient) => ({ boundTo: c }));
@@ -194,20 +308,25 @@ describe('acquireScopedClient', () => {
       createDb,
     });
 
+    // One combined round-trip: BEGIN + both set_configs, literals escaped.
     expect(queries.map((q) => q.text)).toEqual([
-      'BEGIN',
-      'SELECT set_config($1, $2, true)',
-      'SELECT set_config($1, $2, true)',
+      "BEGIN; SELECT set_config('app.tenant_id', 't1', true), set_config('app.role', 'member', true)",
     ]);
-    expect(queries[1]!.params).toEqual(['app.tenant_id', 't1']);
-    expect(queries[2]!.params).toEqual(['app.role', 'member']);
+    expect(queries[0]!.params).toBeUndefined();
     expect(createDb).toHaveBeenCalledWith(client, undefined);
     expect(out.client).toBe(client);
     expect(out.db).toEqual({ boundTo: client });
   });
 
-  it('rolls back, destroys the client, and rethrows when set_config fails', async () => {
-    const { client, queries, release } = makeClient({ failOn: 'SELECT set_config' });
+  it('sends a bare BEGIN when there are no session vars', async () => {
+    const { client, queries } = makeClient();
+    const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+    await acquireScopedClient({ pool, sessionVars: {}, createDb: vi.fn(() => ({})) });
+    expect(queries.map((q) => q.text)).toEqual(['BEGIN']);
+  });
+
+  it('rolls back, destroys the client, and rethrows when the BEGIN packet fails', async () => {
+    const { client, queries, release } = makeClient({ failOn: 'BEGIN' });
     const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
 
     await expect(
@@ -216,9 +335,12 @@ describe('acquireScopedClient', () => {
         sessionVars: { 'app.tenant_id': 't1' },
         createDb: vi.fn(),
       }),
-    ).rejects.toThrow('SELECT set_config failed');
+    ).rejects.toThrow('BEGIN failed');
 
-    expect(queries.map((q) => q.text)).toEqual(['BEGIN', 'SELECT set_config($1, $2, true)', 'ROLLBACK']);
+    expect(queries.map((q) => q.text)).toEqual([
+      "BEGIN; SELECT set_config('app.tenant_id', 't1', true)",
+      'ROLLBACK',
+    ]);
     expect(release).toHaveBeenCalledTimes(1);
     expect(release.mock.calls[0]![0]).toBeInstanceOf(Error); // destroyed, not recycled
   });

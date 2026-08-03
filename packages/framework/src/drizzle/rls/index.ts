@@ -5,7 +5,11 @@
  * - `createScopedDb(rawDb, gucs)` — a Drizzle proxy that wraps every top-level
  *   operation in a short transaction whose first statement is
  *   `set_config(name, value, true)` (transaction-local, PgBouncer-safe).
- * - `runWithGucs` / `withSystemMode` — one-shot scoped transactions.
+ *   Single-statement operations (builder chains, `query.*.find*`, `execute`)
+ *   take a pinned-client fast path that sends `BEGIN; SELECT set_config(...)`
+ *   as ONE simple-query packet — 3 wire round-trips per call instead of 4.
+ * - `runWithGucs` / `withSystemMode` — one-shot scoped transactions (Drizzle
+ *   managed, savepoint-correct for nested `tx.transaction()` calls).
  * - `acquireScopedClient` / `releaseScopedClient` — the pinned-connection
  *   model (BEGIN at scope acquire, COMMIT/ROLLBACK at dispose).
  * - `endPoolGracefully` — pool drain with a hard timeout for SIGTERM.
@@ -16,9 +20,11 @@
  * GUC values are set by the consumer's IoC scope factories.
  */
 import { sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
 import type { Pool, PoolClient } from 'pg';
 import type { Logger as DrizzleLogger } from 'drizzle-orm';
 import { ServiceLifetime } from '../../ioc/index.ts';
+import { augmentDrizzle } from '../factory/drizzle.ts';
 
 /**
  * GUC key/value pairs applied via `set_config(name, value, true)` at the
@@ -80,9 +86,10 @@ type AnyFn = (...args: unknown[]) => unknown;
 
 /**
  * Run `fn` inside a transaction on `rawDb`, with `gucs` applied via
- * transaction-local `set_config(...)` first. The `tx` passed to `fn` is the
- * raw transaction-bound Drizzle (already augmented by the factory) so `fn`
- * can use it as a normal db/transaction without further proxying.
+ * transaction-local `set_config(...)` first (all GUCs in ONE statement). The
+ * `tx` passed to `fn` is the raw transaction-bound Drizzle (already augmented
+ * by the factory) so `fn` can use it as a normal db/transaction without
+ * further proxying — including savepoint-correct nested `tx.transaction()`.
  */
 export async function runWithGucs<TDb extends RlsDatabase, T>(
   rawDb: TDb,
@@ -90,11 +97,160 @@ export async function runWithGucs<TDb extends RlsDatabase, T>(
   fn: (tx: TDb) => Promise<T>,
 ): Promise<T> {
   return rawDb.transaction(async (tx) => {
-    for (const [name, value] of Object.entries(gucs)) {
-      await (tx as RlsDatabase).execute(sql`select set_config(${name}, ${value}, true)`);
+    const entries = Object.entries(gucs);
+    if (entries.length > 0) {
+      await (tx as RlsDatabase).execute(
+        sql`select ${sql.join(
+          entries.map(([name, value]) => sql`set_config(${name}, ${value}, true)`),
+          sql`, `,
+        )}`,
+      );
     }
     return fn(tx as TDb);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Pinned-client fast path (#2 wire-amplification): for single-statement
+// operations the Drizzle-managed transaction costs 4 round-trips
+// (BEGIN / set_config / stmt / COMMIT). Checking out the client ourselves lets
+// us send `BEGIN; SELECT set_config(...)` as ONE simple-query packet
+// (multi-statement text without bind parameters), cutting each call to 3.
+// ---------------------------------------------------------------------------
+
+/**
+ * Escape a string as a Postgres literal for inclusion in the combined
+ * `BEGIN; SELECT set_config(...)` simple query (bind parameters are not
+ * allowed in multi-statement packets). Mirrors pg's `Client#escapeLiteral`
+ * exactly — quote doubling plus `E''` prefixing when a backslash is present —
+ * so it is safe regardless of `standard_conforming_strings`.
+ */
+export function escapeGucLiteral(value: string): string {
+  let hasBackslash = false;
+  let escaped = "'";
+  for (const c of value) {
+    if (c === "'") {
+      escaped += "''";
+    } else if (c === '\\') {
+      escaped += '\\\\';
+      hasBackslash = true;
+    } else {
+      escaped += c;
+    }
+  }
+  escaped += "'";
+  return hasBackslash ? ` E${escaped}` : escaped;
+}
+
+/** `BEGIN` + all `set_config(...)` calls as one multi-statement text. */
+function buildBeginWithGucs(gucs: SessionVars): string {
+  const entries = Object.entries(gucs);
+  if (entries.length === 0) return 'BEGIN';
+  const configs = entries
+    .map(
+      ([name, value]) =>
+        `set_config(${escapeGucLiteral(name)}, ${escapeGucLiteral(value)}, true)`,
+    )
+    .join(', ');
+  return `BEGIN; SELECT ${configs}`;
+}
+
+/**
+ * A raw db qualifies for the pinned fast path when it exposes its pg Pool as
+ * `$client` (node-postgres Drizzle does) and carries the schema module (the
+ * factory's augmentation) so a client-bound Drizzle can be rebuilt. A
+ * PoolClient-backed db is excluded (`release` present) — it is already pinned
+ * and `connect()`-ing it again would be wrong.
+ */
+function resolvePinnablePool(rawDb: RlsDatabase): Pool | undefined {
+  const candidate = (rawDb as { $client?: unknown }).$client;
+  if (!candidate || typeof candidate !== 'object') return undefined;
+  const poolLike = candidate as { connect?: unknown; release?: unknown };
+  if (typeof poolLike.connect !== 'function') return undefined;
+  if (typeof poolLike.release === 'function') return undefined;
+  const schema = (rawDb as { schema?: unknown }).schema;
+  if (!schema || typeof schema !== 'object') return undefined;
+  return candidate as Pool;
+}
+
+/**
+ * Client-bound augmented Drizzle instances, cached per PoolClient — pool
+ * clients are recycled, so with a pool of N this holds at most N entries per
+ * schema and evicts automatically when a client is destroyed.
+ */
+const clientDbCache = new WeakMap<object, { schema: unknown; db: unknown }>();
+
+function clientBoundDb<TDb extends RlsDatabase>(rawDb: TDb, client: PoolClient): TDb {
+  const schema = (rawDb as { schema?: unknown }).schema as Record<string, unknown>;
+  const cached = clientDbCache.get(client);
+  if (cached && cached.schema === schema) return cached.db as TDb;
+  // Reuse the raw db's logger so scoped queries keep logging like unscoped
+  // ones (Drizzle stores it on the session; NoopLogger when unset).
+  const logger = (rawDb as { session?: { logger?: DrizzleLogger } }).session?.logger;
+  const db = augmentDrizzle(drizzle({ client, schema, logger }), schema);
+  clientDbCache.set(client, { schema, db });
+  return db as unknown as TDb;
+}
+
+/**
+ * Fast-path variant of {@link runWithGucs} for `fn`s that never call
+ * `tx.transaction()` (the scoped proxy's internal single-statement replays):
+ * pins a client, opens the transaction and sets all GUCs in one packet, and
+ * hand-manages COMMIT/ROLLBACK. Falls back to {@link runWithGucs} when the
+ * raw db doesn't expose a pinnable pool (mocks, client-bound dbs).
+ *
+ * NOT safe for arbitrary user callbacks: the `tx` handed to `fn` is a plain
+ * client-bound Drizzle whose `.transaction()` would issue a bare BEGIN inside
+ * the already-open transaction (no savepoint semantics).
+ */
+async function runWithGucsPinned<TDb extends RlsDatabase, T>(
+  rawDb: TDb,
+  gucs: SessionVars,
+  fn: (tx: TDb) => Promise<T>,
+): Promise<T> {
+  const pool = resolvePinnablePool(rawDb);
+  if (!pool) return runWithGucs(rawDb, gucs, fn);
+
+  const client = await pool.connect();
+  try {
+    await client.query(buildBeginWithGucs(gucs));
+  } catch (err) {
+    // Mirror acquireScopedClient: try to roll back partial state, then destroy
+    // the client so a bad connection is not returned to the pool.
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // Already broken — just destroy it.
+    }
+    client.release(err as Error);
+    throw err;
+  }
+
+  let result: T;
+  try {
+    result = await fn(clientBoundDb(rawDb, client));
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+      client.release();
+    } catch (rollbackErr) {
+      // Release WITH the error so pg destroys the connection rather than
+      // recycling one with unknown transaction state.
+      client.release(rollbackErr as Error);
+    }
+    throw err;
+  }
+
+  try {
+    await client.query('COMMIT');
+  } catch (err) {
+    // COMMIT failure is a real write failure — destroy the connection and
+    // rethrow; callers must not treat the work as persisted.
+    client.release(err as Error);
+    throw err;
+  }
+  client.release();
+  return result;
 }
 
 /**
@@ -117,7 +273,9 @@ function createDeferredBuilder<TDb extends RlsDatabase>(
   let cached: Promise<unknown> | undefined;
   const exec = (): Promise<unknown> => {
     if (cached) return cached;
-    cached = runWithGucs(rawDb, gucs, async (tx) => {
+    // Pinned fast path is safe here: the replayed chain is a single statement
+    // and never calls tx.transaction().
+    cached = runWithGucsPinned(rawDb, gucs, async (tx) => {
       let cursor: unknown = tx;
       for (const { method, args } of calls) {
         const fn = (cursor as AnyRecord)[method];
@@ -198,7 +356,7 @@ function createQueryNamespaceProxy<TDb extends RlsDatabase>(
           if (typeof original !== 'function') return original;
           if (methodName === 'findFirst' || methodName === 'findMany') {
             return (...args: unknown[]) =>
-              runWithGucs(rawDb, gucs, async (tx) => {
+              runWithGucsPinned(rawDb, gucs, async (tx) => {
                 const txQuery = tx.query as unknown as Record<string, AnyRecord>;
                 const txTable = txQuery[tableName];
                 const fn = txTable?.[methodName];
@@ -237,7 +395,10 @@ export function createScopedDb<TDb extends RlsDatabase>(
     get(target, prop, receiver) {
       const rd = target as unknown as TDb;
 
-      // Override transaction: set GUCs at the start, then hand `tx` to the user.
+      // Override transaction: set GUCs at the start, then hand `tx` to the
+      // user. Deliberately the Drizzle-managed path (NOT the pinned fast
+      // path): the user callback may call tx.transaction() again, which needs
+      // Drizzle's savepoint semantics.
       if (prop === 'transaction') {
         return <T,>(callback: (tx: TDb) => Promise<T>) =>
           runWithGucs(rd, gucs, callback);
@@ -262,7 +423,7 @@ export function createScopedDb<TDb extends RlsDatabase>(
         // Wrap execute(): always runs inside the wrapped tx.
         if (prop === 'execute') {
           return (...args: unknown[]) =>
-            runWithGucs(rd, gucs, async (tx) =>
+            runWithGucsPinned(rd, gucs, async (tx) =>
               (tx.execute as AnyFn).apply(tx, args),
             );
         }
@@ -324,10 +485,9 @@ export async function acquireScopedClient<TDb>(opts: {
   const { pool, sessionVars, createDb, logger } = opts;
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    for (const [name, value] of Object.entries(sessionVars)) {
-      await client.query(`SELECT set_config($1, $2, true)`, [name, value]);
-    }
+    // BEGIN and all set_config calls in ONE simple-query packet (literals
+    // escaped — bind parameters are not allowed in multi-statement text).
+    await client.query(buildBeginWithGucs(sessionVars));
   } catch (err) {
     // Try to roll back any partial state, then destroy the client so the bad
     // connection is not returned to the pool.
