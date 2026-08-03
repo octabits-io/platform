@@ -6,6 +6,7 @@ import { createDrizzle } from '../factory/index.ts';
 import {
   createScopedDb,
   createGucScopeFactory,
+  createPinnedGucScopeFactory,
   assertSafeGucListValue,
   joinGucList,
   runWithGucs,
@@ -435,5 +436,107 @@ describe('createGucScopeFactory', () => {
     const { factory } = harness(true);
     expect(factory({ scopeId: 'a' }).resolve('label')).toBe('seeded:a');
     expect(factory({ scopeId: 'b' }).resolve('label')).toBe('seeded:b');
+  });
+});
+
+describe('createPinnedGucScopeFactory', () => {
+  interface Services {
+    db: ReturnType<typeof makeDb>['db'];
+    label: string;
+  }
+
+  function harness(enabled: boolean, dbOverrides?: Partial<RlsDatabase>) {
+    const made = makeDb();
+    const rawDb = Object.assign(made.db, dbOverrides);
+    const root = new IoC<Services>();
+    root.register('db', () => rawDb);
+    root.register('label', () => 'root');
+    const factory = createPinnedGucScopeFactory<Services, { scopeId: string }>({
+      container: root,
+      enabled,
+      gucs: ({ scopeId }) => ({ 'app.scope_id': scopeId }),
+      seed: (scope, { scopeId }) => {
+        scope.register('label', () => `seeded:${scopeId}`, ServiceLifetime.Scoped);
+      },
+    });
+    return { factory, rawDb, tx: made.tx, gucCalls: made.gucCalls };
+  }
+
+  it('hands out the transaction-bound db with GUCs already applied', async () => {
+    const { factory, tx, gucCalls } = harness(true);
+    const scope = await factory({ scopeId: 's1' });
+    // The scope db IS the transaction — not a proxy, not the raw db.
+    expect(scope.resolve('db')).toBe(tx);
+    // set_config went out before the factory resolved.
+    expect(gucCalls.length).toBe(1);
+    expect(gucCalls[0]![0]).toContain('app.scope_id');
+    expect(scope.resolve('label')).toBe('seeded:s1');
+    await scope.dispose({ commit: true });
+  });
+
+  it('commit-dispose completes the parked transaction exactly once', async () => {
+    const txDone = vi.fn();
+    const { factory } = harness(true, {
+      transaction: (async (fn: (t: unknown) => Promise<unknown>) => {
+        const made = makeDb();
+        const out = await fn(made.tx);
+        txDone();
+        return out;
+      }) as RlsDatabase['transaction'],
+    });
+    const scope = await factory({ scopeId: 's1' });
+    expect(txDone).not.toHaveBeenCalled(); // parked while the scope lives
+    await scope.dispose({ commit: true });
+    expect(txDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('rollback-dispose aborts the transaction without surfacing an error', async () => {
+    const txCompleted = vi.fn();
+    const { factory } = harness(true, {
+      transaction: (async (fn: (t: unknown) => Promise<unknown>) => {
+        const made = makeDb();
+        const out = await fn(made.tx); // rejects on cb throw = drizzle ROLLBACK
+        txCompleted();
+        return out;
+      }) as RlsDatabase['transaction'],
+    });
+    const scope = await factory({ scopeId: 's1' });
+    await expect(scope.dispose({ commit: false })).resolves.toBeUndefined();
+    expect(txCompleted).not.toHaveBeenCalled();
+  });
+
+  it('rejects at scope creation when BEGIN/set_config fails', async () => {
+    const { factory } = harness(true, {
+      transaction: (async () => {
+        throw new Error('connect refused');
+      }) as RlsDatabase['transaction'],
+    });
+    await expect(factory({ scopeId: 's1' })).rejects.toThrow('connect refused');
+  });
+
+  it('rethrows a COMMIT failure from commit-dispose, swallows it on rollback', async () => {
+    const makeFailingCommit = () =>
+      harness(true, {
+        transaction: (async (fn: (t: unknown) => Promise<unknown>) => {
+          const made = makeDb();
+          try {
+            await fn(made.tx);
+          } catch (err) {
+            throw err; // rollback path: propagate the abort marker
+          }
+          throw new Error('commit failed'); // COMMIT blew up after fn resolved
+        }) as RlsDatabase['transaction'],
+      });
+
+    const committing = await makeFailingCommit().factory({ scopeId: 's1' });
+    await expect(committing.dispose({ commit: true })).rejects.toThrow('commit failed');
+  });
+
+  it('skips the db override when disabled, still seeds, stays async', async () => {
+    const { factory, rawDb } = harness(false);
+    const scope = await factory({ scopeId: 's2' });
+    expect(scope.resolve('db')).toBe(rawDb);
+    expect(scope.resolve('label')).toBe('seeded:s2');
+    await scope.dispose({ commit: true });
   });
 });

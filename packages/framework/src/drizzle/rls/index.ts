@@ -609,6 +609,8 @@ export interface ScopeChild<TServices> {
   ): void;
   resolve<K extends keyof TServices>(key: K): TServices[K];
   dispose(opts?: { commit: boolean }): Promise<void>;
+  /** Register a cleanup hook run (LIFO) by `dispose` — the `../../ioc` scope has this. */
+  onDispose(fn: (opts?: { commit?: boolean }) => void | Promise<void>): void;
 }
 
 /**
@@ -657,6 +659,106 @@ export function createGucScopeFactory<
       // A child scope can always register keys typed by its parent's service
       // map — narrow the view to make the override typecheck.
       (scope as ScopeChild<TServices>).register(dbKey, () => scopedDb, ServiceLifetime.Scoped);
+    }
+    seed?.(scope, args);
+    return scope;
+  };
+}
+
+/** Internal control-flow marker: dispose({commit:false}) aborting the parked tx. */
+class PinnedScopeRollback extends Error {
+  constructor() {
+    super('pinned scope rolled back');
+  }
+}
+
+/**
+ * Per-request pinned-transaction variant of {@link createGucScopeFactory}
+ * (§19 model B): ONE transaction per scope instead of one per call. The
+ * factory opens a {@link runWithGucs} transaction, hands the transaction-bound
+ * Drizzle out as the scope's `db`, and parks the transaction callback until
+ * the scope is disposed — `dispose({commit:true})` COMMITs, `{commit:false}`
+ * ROLLBACKs. Wire profile: BEGIN + one set_config statement + N queries +
+ * COMMIT per request, versus 3 round-trips per query on the per-call proxy.
+ *
+ * Because the db handed out IS a Drizzle-managed transaction:
+ * - nested `db.transaction(fn)` gets correct savepoint semantics;
+ * - a mid-request SQL error aborts the transaction — subsequent queries fail
+ *   with `current transaction is aborted` until the scope disposes (the
+ *   historical pinned-model behavior; the request is failing anyway);
+ * - concurrent queries on the scope serialize on its one connection
+ *   (`Promise.all` is safe but not parallel);
+ * - the underlying pool client is checked out for the scope's lifetime —
+ *   size pools accordingly.
+ *
+ * The factory is async (resolves once BEGIN + set_config are on the wire);
+ * `createRequestScopePlugin`'s `createScope` accepts promises. Failing to
+ * dispose the scope leaks a pool client — use lifecycle owners that
+ * guarantee dispose (the request-scope plugin, `withScope`).
+ */
+export function createPinnedGucScopeFactory<
+  TServices extends Record<TDbKey, RlsDatabase>,
+  TArgs,
+  TExtra = object,
+  TDbKey extends keyof TServices & string = 'db' & keyof TServices & string,
+>(opts: {
+  container: ScopeContainer<TServices>;
+  /** Service key holding the raw Drizzle instance. Default `'db'`. */
+  dbKey?: TDbKey;
+  /** RLS on/off (e.g. from config). Default `true`. */
+  enabled?: boolean;
+  /** Session variables for one scope, from the factory's call arguments. */
+  gucs: (args: TArgs) => SessionVars;
+  /** Extra scoped registrations (ids, tokens, per-scope services). */
+  seed?: (scope: ScopeChild<TExtra & TServices>, args: TArgs) => void;
+}): (args: TArgs) => Promise<ScopeChild<TExtra & TServices>> {
+  const { container, enabled = true, gucs, seed } = opts;
+  const dbKey = (opts.dbKey ?? 'db') as TDbKey;
+
+  return async (args: TArgs) => {
+    const scope = container.createScope<TExtra>();
+    if (enabled) {
+      const rawDb = container.resolve(dbKey);
+
+      let handOut!: (tx: TServices[TDbKey] | undefined) => void;
+      const handedOut = new Promise<TServices[TDbKey] | undefined>((resolve) => {
+        handOut = resolve;
+      });
+      let settle!: (commit: boolean) => void;
+      const parked = new Promise<boolean>((resolve) => {
+        settle = resolve;
+      });
+
+      // Captured instead of rejected anywhere: `finished` must never be an
+      // unhandled rejection, and the error surfaces either at scope creation
+      // (BEGIN/set_config failed → db never handed out) or at commit-dispose
+      // (COMMIT failed → the work did not persist).
+      let txError: unknown;
+      const finished = runWithGucs(rawDb as RlsDatabase, gucs(args), async (tx) => {
+        handOut(tx as TServices[TDbKey]);
+        if (!(await parked)) throw new PinnedScopeRollback();
+      }).catch((err) => {
+        if (!(err instanceof PinnedScopeRollback)) txError = err;
+        // No-op when the tx was already handed out; unblocks scope creation
+        // when BEGIN/set_config failed before the handover.
+        handOut(undefined);
+      });
+
+      const db = await handedOut;
+      if (db === undefined) {
+        throw txError ?? new Error('pinned scope transaction ended before handover');
+      }
+
+      (scope as ScopeChild<TServices>).register(dbKey, () => db, ServiceLifetime.Scoped);
+      scope.onDispose(async (disposeOpts) => {
+        const commit = disposeOpts?.commit ?? true;
+        settle(commit);
+        await finished;
+        // COMMIT failure is a real write failure — rethrow so the request
+        // does not report success. Rollback-path errors are swallowed
+        // (the work is being discarded; mirrors releaseScopedClient).
+        if (commit && txError) throw txError;
+      });
     }
     seed?.(scope, args);
     return scope;
