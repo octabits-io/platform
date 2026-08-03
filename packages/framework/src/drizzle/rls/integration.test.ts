@@ -16,8 +16,9 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { sql } from 'drizzle-orm';
 import { pgTable, text } from 'drizzle-orm/pg-core';
 import pg from 'pg';
+import { IoC } from '../../ioc/index.ts';
 import { createDrizzle, type AppDatabase } from '../factory/index.ts';
-import { createScopedDb, runWithGucs, withSystemMode } from './index.ts';
+import { createPinnedGucScopeFactory, createScopedDb, runWithGucs, withSystemMode } from './index.ts';
 
 const note = pgTable('note', {
   id: text('id').primaryKey(),
@@ -170,6 +171,106 @@ describe('Drizzle-managed paths (merged set_config statement)', () => {
       }),
     ).rejects.toThrow('abort');
     const rows = await scoped.select().from(note);
+    expect(rows.map((r) => r.id)).toEqual(['n1']);
+  });
+});
+
+describe('createPinnedGucScopeFactory (per-request pinned transaction)', () => {
+  // NOTE: the app pool is max:1 and a pinned scope HOLDS that connection —
+  // never touch `db` (or a second scope) while a scope is open in these tests.
+  function makeFactory() {
+    const root = new IoC<{ db: AppDatabase<typeof schema> }>();
+    root.register('db', () => db);
+    return createPinnedGucScopeFactory<{ db: AppDatabase<typeof schema> }, { tenantId: string }>({
+      container: root,
+      gucs: ({ tenantId }) => ({ 'app.tenant_id': tenantId }),
+    });
+  }
+
+  it('the scope db is tenant-scoped across multiple queries in one transaction', async () => {
+    const scope = await makeFactory()({ tenantId: 't1' });
+    try {
+      const sdb = scope.resolve('db');
+      const first = await sdb.select().from(note);
+      expect(first.map((r) => r.tenantId)).toEqual(['t1']);
+      // Second query on the same scope: the GUC is transaction-local and the
+      // whole scope IS one transaction — still scoped, no re-set needed.
+      const second = await sdb.select().from(note);
+      expect(second.map((r) => r.id)).toEqual(['n1']);
+    } finally {
+      await scope.dispose({ commit: true });
+    }
+  });
+
+  it('commit persists writes; rollback discards them', async () => {
+    const factory = makeFactory();
+
+    const committing = await factory({ tenantId: 't1' });
+    await committing.resolve('db').insert(note).values({ id: 'p1', tenantId: 't1', body: 'kept' });
+    await committing.dispose({ commit: true });
+
+    const discarding = await factory({ tenantId: 't1' });
+    await discarding.resolve('db').insert(note).values({ id: 'p2', tenantId: 't1', body: 'dropped' });
+    await discarding.dispose({ commit: false });
+
+    const ids = (await withSystemMode(db, async (tx) => tx.select().from(note))).map((r) => r.id);
+    expect(ids).toContain('p1');
+    expect(ids).not.toContain('p2');
+    await withSystemMode(db, async (tx) => tx.delete(note).where(sql`id = 'p1'`));
+  });
+
+  it('nested db.transaction() gets savepoint semantics inside the scope', async () => {
+    const scope = await makeFactory()({ tenantId: 't1' });
+    try {
+      const sdb = scope.resolve('db');
+      await expect(
+        sdb.transaction(async (inner) => {
+          await inner.insert(note).values({ id: 'p3', tenantId: 't1', body: 'savepoint' });
+          throw new Error('inner abort');
+        }),
+      ).rejects.toThrow('inner abort');
+      // The inner rollback must NOT have aborted the outer request
+      // transaction — further work on the scope still succeeds.
+      await sdb.insert(note).values({ id: 'p4', tenantId: 't1', body: 'after' });
+    } finally {
+      await scope.dispose({ commit: true });
+    }
+    const ids = (await withSystemMode(db, async (tx) => tx.select().from(note))).map((r) => r.id);
+    expect(ids).not.toContain('p3');
+    expect(ids).toContain('p4');
+    await withSystemMode(db, async (tx) => tx.delete(note).where(sql`id = 'p4'`));
+  });
+
+  it('Promise.all on the scope db serializes safely on the one connection', async () => {
+    const scope = await makeFactory()({ tenantId: 't1' });
+    try {
+      const sdb = scope.resolve('db');
+      const results = await Promise.all(
+        Array.from({ length: 5 }, () => sdb.select().from(note)),
+      );
+      for (const rows of results) expect(rows.map((r) => r.id)).toEqual(['n1']);
+    } finally {
+      await scope.dispose({ commit: true });
+    }
+  });
+
+  it('a rejected write aborts the request transaction until dispose (documented pinned-model behavior)', async () => {
+    const scope = await makeFactory()({ tenantId: 't1' });
+    try {
+      const sdb = scope.resolve('db');
+      // WITH CHECK rejects the cross-tenant write...
+      await expect(
+        sdb.insert(note).values({ id: 'p5', tenantId: 't2', body: 'forbidden' }),
+      ).rejects.toThrow();
+      // ...and the transaction is now aborted: further statements fail until
+      // the scope disposes (25P02 under drizzle's "Failed query" wrapper).
+      // This is the accepted trade of model B.
+      await expect(sdb.select().from(note)).rejects.toThrow(/Failed query|aborted/);
+    } finally {
+      await scope.dispose({ commit: false });
+    }
+    // The connection returns to the pool clean and usable.
+    const rows = await createScopedDb(db, { 'app.tenant_id': 't1' }).select().from(note);
     expect(rows.map((r) => r.id)).toEqual(['n1']);
   });
 });
