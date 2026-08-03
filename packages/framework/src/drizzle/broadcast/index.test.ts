@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
-import { createBroadcastChannel, type BroadcastDatabase } from './index.ts';
+import { createBroadcastChannel, type DbOrTx } from './index.ts';
 import type { EventNotificationListener } from '../../events/types.ts';
 
 const PAYLOAD_SCHEMA = z.object({
@@ -11,7 +11,7 @@ type Payload = z.infer<typeof PAYLOAD_SCHEMA>;
 
 function makeFakeDb(behavior?: (query: unknown) => Promise<unknown>) {
   const execute = vi.fn(behavior ?? (async (_query: unknown) => []));
-  const db: BroadcastDatabase = { execute };
+  const db: DbOrTx = { execute };
   return { db, execute };
 }
 
@@ -71,7 +71,7 @@ describe('createBroadcastChannel', () => {
       expect(execute).not.toHaveBeenCalled();
     });
 
-    it('swallows database failures outside a transaction (TTL backstop takes over)', async () => {
+    it('swallows database failures (TTL backstop takes over)', async () => {
       const logger = makeLogger();
       const channel = createBroadcastChannel({
         channel: 'test_channel',
@@ -86,16 +86,33 @@ describe('createBroadcastChannel', () => {
       ).resolves.toBeUndefined();
       expect(logger.warn).toHaveBeenCalledTimes(1);
     });
+  });
 
-    it('rethrows database failures when a tx is passed (the tx is aborted anyway)', async () => {
+  describe('publishInTx', () => {
+    it('sends one pg_notify on the transaction context', async () => {
       const channel = createBroadcastChannel({ channel: 'test_channel', schema: PAYLOAD_SCHEMA });
-      const { db } = makeFakeDb();
+      const { db: tx, execute } = makeFakeDb();
+      await channel.publishInTx(tx, { namespace: 'tenant-config', tenantId: 't1' });
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows database failures (the transaction is aborted anyway)', async () => {
+      const channel = createBroadcastChannel({ channel: 'test_channel', schema: PAYLOAD_SCHEMA });
       const { db: tx } = makeFakeDb(async () => {
         throw new Error('current transaction is aborted');
       });
       await expect(
-        channel.publish(db, { namespace: 'tenant-config', tenantId: 't1' }, tx),
+        channel.publishInTx(tx, { namespace: 'tenant-config', tenantId: 't1' }),
       ).rejects.toThrow(/aborted/);
+    });
+
+    it('throws on a payload failing the schema without touching the tx', async () => {
+      const channel = createBroadcastChannel({ channel: 'test_channel', schema: PAYLOAD_SCHEMA });
+      const { db: tx, execute } = makeFakeDb();
+      await expect(
+        channel.publishInTx(tx, { namespace: 'tenant-config' } as unknown as Payload),
+      ).rejects.toThrow();
+      expect(execute).not.toHaveBeenCalled();
     });
   });
 

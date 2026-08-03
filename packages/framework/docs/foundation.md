@@ -595,7 +595,22 @@ app when you use those modules; every other subpath works without it.
 
 #### `@octabits-io/framework/drizzle/db`
 
-Database error handling and pagination helpers.
+Database error handling, pagination helpers, and the shared structural db
+seams: `DbOrTx` — the minimal "anything that can `execute` one SQL statement"
+view, satisfied by a Drizzle db instance AND by transaction contexts — plus
+the `Db*` capability atoms (`DbSelectSource`, `DbInsertTarget`,
+`DbUpdateTarget`, `DbDeleteTarget`, `DbRelationalQuery`,
+`DbTransactionRunner`), one per Drizzle builder entry point. Modules that
+only run SQL take `DbOrTx` directly (`drizzle/broadcast`); every other
+drizzle module's `*Database` seam is a composition of the atoms
+(`EventOutboxDatabase extends DbOrTx, DbInsertTarget, DbSelectSource,
+DbDeleteTarget`, …) — compose them for new seams instead of hand-rolling a
+shape. Deliberately structural — never swap them for drizzle-orm's nominal
+types, which break across duplicate drizzle-orm copies. The atoms are
+presence markers, not typed contracts: consumer-side typing flows through
+the factories' generics (`TTable extends PgTable`, `$inferSelect`), and
+framework adapters typecheck their builder chains by casting once,
+internally, to `db/internal.ts`'s `DrizzleView`.
 
 ```ts
 import {

@@ -22,6 +22,8 @@
  */
 import { eq } from 'drizzle-orm';
 import { type OctError, type Result, ok, err } from '../../result/index.ts';
+import type { DbSelectSource, DbInsertTarget, DbDeleteTarget } from '../db/index.ts';
+import type { DrizzleView } from '../db/internal.ts';
 
 /** New key row as pii hands it over — the scope column is stamped by the store. */
 export interface NewScopedKeyRow {
@@ -73,21 +75,11 @@ export interface KeyStoreScope {
 }
 
 /**
- * Minimal structural view of a Drizzle Postgres db — satisfied by an augmented
- * `AppDatabase` AND by transaction contexts. Kept structural so instances from
- * different drizzle copies interoperate.
+ * Minimal structural view of a Drizzle Postgres db — the `../db` capability
+ * atoms this module uses. Satisfied by an augmented `AppDatabase` AND by
+ * transaction contexts.
  */
-export interface ScopedKeyStoreDatabase {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  select(fields: Record<string, any>): {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    from(table: any): { where(w: unknown): { limit(n: number): Promise<any[]> } };
-  };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  insert(table: any): { values(v: Record<string, unknown>): Promise<unknown> };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  delete(table: any): { where(w: unknown): Promise<unknown> };
-}
+export interface ScopedKeyStoreDatabase extends DbSelectSource, DbInsertTarget, DbDeleteTarget {}
 
 /** A `ScopedKeyStore` that can be re-bound to a transaction db via `withDb`. */
 export interface DrizzleScopedKeyStore extends ScopedKeyStore {
@@ -141,12 +133,16 @@ function failure(message: string): ScopedKeyStoreFailureError {
  */
 export function createDrizzleScopedKeyStore(deps: CreateDrizzleScopedKeyStoreDeps): DrizzleScopedKeyStore {
   const { db, table, scope } = deps;
+  // Internal typed view (see ../db/internal.ts): the public seam stays
+  // structural; the builder chains below typecheck against drizzle's real
+  // declarations.
+  const view = db as unknown as DrizzleView;
   const scopePredicate = () => eq(table[scope.column], scope.value);
   const label = `${scope.column}=${scope.value}`;
 
   async function insert(row: NewScopedKeyRow): Promise<Result<void, ScopedKeyStoreError>> {
     try {
-      await db.insert(table).values({ [scope.column]: scope.value, ...row });
+      await view.insert(table).values({ [scope.column]: scope.value, ...row });
       return ok(undefined);
     } catch (error) {
       if (isUniqueViolation(error)) {
@@ -163,7 +159,7 @@ export function createDrizzleScopedKeyStore(deps: CreateDrizzleScopedKeyStoreDep
 
   async function find(): Promise<Result<ScopedKeyRow | null, ScopedKeyStoreError>> {
     try {
-      const rows = await db
+      const rows = await view
         .select({
           recipient: table.recipient,
           identityEncrypted: table.identityEncrypted,
@@ -183,7 +179,7 @@ export function createDrizzleScopedKeyStore(deps: CreateDrizzleScopedKeyStoreDep
 
   async function exists(): Promise<Result<boolean, ScopedKeyStoreError>> {
     try {
-      const rows = await db
+      const rows = await view
         .select({ id: table.id })
         .from(table)
         .where(scopePredicate())
@@ -198,7 +194,7 @@ export function createDrizzleScopedKeyStore(deps: CreateDrizzleScopedKeyStoreDep
 
   async function destroy(): Promise<Result<void, ScopedKeyStoreError>> {
     try {
-      await db.delete(table).where(scopePredicate());
+      await view.delete(table).where(scopePredicate());
       return ok(undefined);
     } catch (error) {
       return err(failure(

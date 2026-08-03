@@ -22,6 +22,8 @@
 import { bigserial, integer, text, timestamp } from 'drizzle-orm/pg-core';
 import { jsonbSafe } from '../scope/index.ts';
 import { type OctError, type Result, ok, err } from '../../result/index.ts';
+import type { DbInsertTarget } from '../db/index.ts';
+import type { DrizzleView } from '../db/internal.ts';
 
 // ---------------------------------------------------------------------------
 // Column-set (extension mechanism)
@@ -192,14 +194,11 @@ export interface DrizzleJobAuditStore {
 }
 
 /**
- * Minimal structural view of a Drizzle Postgres db — satisfied by an augmented
- * `AppDatabase` AND by transaction contexts. Kept structural so instances from
- * different drizzle copies interoperate.
+ * Minimal structural view of a Drizzle Postgres db — the `../db` capability
+ * atom this module uses. Satisfied by an augmented `AppDatabase` AND by
+ * transaction contexts.
  */
-export interface JobAuditStoreDatabase {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  insert(table: any): { values(v: Record<string, unknown>): Promise<unknown> };
-}
+export interface JobAuditStoreDatabase extends DbInsertTarget {}
 
 export interface CreateDrizzleJobAuditStoreDeps {
   db: JobAuditStoreDatabase;
@@ -245,6 +244,10 @@ export function createDrizzleJobAuditStore(
   deps: CreateDrizzleJobAuditStoreDeps,
 ): DrizzleJobAuditStore {
   const { db, table, scope } = deps;
+  // Internal typed view (see ../db/internal.ts): the public seam stays
+  // structural; the insert chain below typechecks against drizzle's real
+  // declarations.
+  const view = db as unknown as DrizzleView;
 
   async function record(
     auditRecord: JobAuditRecord,
@@ -257,7 +260,7 @@ export function createDrizzleJobAuditStore(
     }
 
     try {
-      await db.insert(table).values({
+      await view.insert(table).values({
         ...scopeStamp,
         jobId: auditRecord.jobId,
         queueName: auditRecord.queueName,

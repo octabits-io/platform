@@ -37,6 +37,8 @@
  */
 import { sql } from 'drizzle-orm';
 import { bigserial, jsonb, text, timestamp } from 'drizzle-orm/pg-core';
+import type { DbOrTx, DbInsertTarget, DbSelectSource, DbDeleteTarget } from '../db/index.ts';
+import type { DrizzleView } from '../db/internal.ts';
 import { jsonbSafe } from '../scope/index.ts';
 import {
   encodeEventPointer,
@@ -97,28 +99,11 @@ export interface EventOutboxScope {
 }
 
 /**
- * Minimal structural view of a Drizzle Postgres db — satisfied by a db
- * instance AND by transaction contexts. Kept structural so instances from
- * different drizzle copies interoperate.
+ * Minimal structural view of a Drizzle Postgres db — the `../db` capability
+ * atoms this module uses (satisfied by a db instance AND by transaction
+ * contexts).
  */
-export interface EventOutboxDatabase {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  insert(table: any): {
-    values(v: Record<string, unknown>): { returning(fields: Record<string, unknown>): Promise<unknown> };
-  };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  select(fields: Record<string, any>): {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    from(table: any): {
-      where(w: unknown): {
-        orderBy(o: unknown): { limit(n: number): Promise<Record<string, unknown>[]> };
-      };
-    };
-  };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  delete(table: any): { where(w: unknown): { returning(fields: Record<string, unknown>): Promise<unknown> } };
-  execute(query: unknown): Promise<unknown>;
-}
+export interface EventOutboxDatabase extends DbOrTx, DbInsertTarget, DbSelectSource, DbDeleteTarget {}
 
 export interface CreateDrizzleEventOutboxStoreDeps {
   db: EventOutboxDatabase;
@@ -152,8 +137,13 @@ export function createDrizzleEventOutboxStore(
     throw new Error(`Invalid notification channel name '${channel}' — must match ${CHANNEL_PATTERN}`);
   }
 
-  function conn(tx?: unknown): EventOutboxDatabase {
-    return (tx as EventOutboxDatabase | undefined) ?? db;
+  // Internal typed view (see ../db/internal.ts): the public seam stays
+  // structural; the builder chains below typecheck against drizzle's real
+  // declarations.
+  const view = db as unknown as DrizzleView;
+
+  function conn(tx?: unknown): DrizzleView {
+    return tx ? (tx as DrizzleView) : view;
   }
 
   function scopeValue(envelope: EventEnvelope): string {
@@ -215,7 +205,7 @@ export function createDrizzleEventOutboxStore(
     const where = scope
       ? sql`${table[scope.column]} = ${scope.value ?? scopeKey} and ${seqFilter}`
       : seqFilter;
-    const rows = await db
+    const rows = await view
       .select({
         id: table.id,
         eventId: table.eventId,
@@ -234,7 +224,7 @@ export function createDrizzleEventOutboxStore(
   }
 
   async function prune(before: Date): Promise<number> {
-    const rows = (await db
+    const rows = (await view
       .delete(table)
       .where(sql`${table.createdAt} < ${before.toISOString()}`)
       .returning({ id: table.id })) as Array<{ id: number }>;

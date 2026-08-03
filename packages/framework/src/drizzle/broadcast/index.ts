@@ -17,8 +17,13 @@
  * inheriting its deployment constraints: subscribe with a **direct**
  * (non-pooled, non-PgBouncer) connection string. The publish side is one
  * `pg_notify(...)` on the consumer's regular Drizzle connection — pooled is
- * fine; inside a transaction Postgres delivers at COMMIT, so an
- * invalidate-after-write can never announce a write that rolled back.
+ * fine. Two publish methods with distinct contracts:
+ *
+ * - {@link BroadcastChannel.publish} — best-effort hint on a regular
+ *   connection; database failures are logged, never thrown.
+ * - {@link BroadcastChannel.publishInTx} — inside a transaction; Postgres
+ *   delivers at COMMIT (an invalidate-after-write can never announce a
+ *   write that rolled back), and database failures throw.
  *
  * This subpath pulls in the `drizzle-orm` and (via the listener) `pg`
  * optional peers.
@@ -26,17 +31,12 @@
 import { sql } from 'drizzle-orm';
 import type { ZodType } from 'zod';
 import type { Logger } from '../../logger/index.ts';
+import type { DbOrTx } from '../db/index.ts';
 import { MAX_NOTIFY_PAYLOAD_BYTES } from '../../events/codec.ts';
 import { createPgNotifyListener } from '../../events/postgres.ts';
 import type { EventNotificationListener } from '../../events/types.ts';
 
-/**
- * Minimal structural view of a Drizzle Postgres db — satisfied by a db
- * instance AND by transaction contexts (mirrors `drizzle/event-outbox`).
- */
-export interface BroadcastDatabase {
-  execute(query: unknown): Promise<unknown>;
-}
+export type { DbOrTx } from '../db/index.ts';
 
 const CHANNEL_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -88,14 +88,26 @@ export interface BroadcastSubscription {
 
 export interface BroadcastChannel<T> {
   /**
-   * Send one message to every current subscriber. Schema/size violations
-   * throw (programming errors). Database failures: with a `tx`, the error
-   * rethrows — the transaction is aborted regardless and swallowing would
-   * only produce confusing downstream failures; without one, the error is
-   * logged and swallowed — a lost hint degrades to the consumer's TTL
-   * backstop, which must exist by contract.
+   * Best-effort: send one message on a regular (pooled OK) connection.
+   * Schema/size violations throw (publish-site programming errors);
+   * database failures are logged and swallowed — a lost hint degrades to
+   * the consumer's TTL backstop, which must exist by contract. Safe to
+   * `void`-discard.
+   *
+   * Do NOT call this with a transaction context — inside a transaction a
+   * failed statement aborts the whole tx, and swallowing the error here
+   * would surface as confusing downstream failures. Use
+   * {@link publishInTx} instead.
    */
-  publish(db: BroadcastDatabase, payload: T, tx?: BroadcastDatabase): Promise<void>;
+  publish(db: DbOrTx, payload: T): Promise<void>;
+  /**
+   * Publish as part of a transaction: Postgres delivers the notification
+   * at COMMIT and drops it on ROLLBACK, so the message can never announce
+   * a write that rolled back. Schema/size violations AND database
+   * failures throw — the transaction is aborted regardless, and the
+   * caller's rollback handling must see the error.
+   */
+  publishInTx(tx: DbOrTx, payload: T): Promise<void>;
   /**
    * Start listening. Resolves once the LISTEN is registered; throws on a
    * first-connect failure (boot-time misconfiguration must fail loudly —
@@ -110,8 +122,8 @@ export function createBroadcastChannel<T>(deps: CreateBroadcastChannelDeps<T>): 
     throw new Error(`Invalid broadcast channel name '${channel}' — must match ${CHANNEL_PATTERN}`);
   }
 
-  async function publish(db: BroadcastDatabase, payload: T, tx?: BroadcastDatabase): Promise<void> {
-    // Validation failures are publish-site programming errors — throw.
+  /** Validation failures are publish-site programming errors — throw. */
+  function encodePayload(payload: T): string {
     const parsed = schema.parse(payload);
     const encoded = JSON.stringify(parsed);
     const bytes = new TextEncoder().encode(encoded).byteLength;
@@ -122,16 +134,26 @@ export function createBroadcastChannel<T>(deps: CreateBroadcastChannelDeps<T>): 
           'must stay small (identifiers, not entities).',
       );
     }
+    return encoded;
+  }
 
+  async function publish(db: DbOrTx, payload: T): Promise<void> {
+    const encoded = encodePayload(payload);
     try {
-      await (tx ?? db).execute(sql`select pg_notify(${channel}, ${encoded})`);
+      await db.execute(sql`select pg_notify(${channel}, ${encoded})`);
     } catch (error) {
-      if (tx) throw error;
       logger?.warn('Broadcast publish failed; subscribers fall back to their TTL backstop', {
         channel,
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  async function publishInTx(tx: DbOrTx, payload: T): Promise<void> {
+    const encoded = encodePayload(payload);
+    // No catch: a failed statement has aborted the transaction — the error
+    // must reach the caller's rollback handling.
+    await tx.execute(sql`select pg_notify(${channel}, ${encoded})`);
   }
 
   async function subscribe(options: BroadcastSubscribeOptions<T>): Promise<BroadcastSubscription> {
@@ -171,5 +193,5 @@ export function createBroadcastChannel<T>(deps: CreateBroadcastChannelDeps<T>): 
     return { stop: () => listener.stop() };
   }
 
-  return { publish, subscribe };
+  return { publish, publishInTx, subscribe };
 }

@@ -1,3 +1,12 @@
+export type {
+  DbOrTx,
+  DbSelectSource,
+  DbInsertTarget,
+  DbUpdateTarget,
+  DbDeleteTarget,
+  DbRelationalQuery,
+  DbTransactionRunner,
+} from './types.ts';
 export type { PostgresErrorCode, OctDatabaseError } from './errors.ts';
 export {
   TransactionRollbackError,

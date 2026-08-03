@@ -254,10 +254,16 @@ const invalidations = createBroadcastChannel({
   logger,
 });
 
-// Publish side — any process, regular (pooled) connection. Inside a
-// transaction Postgres delivers at COMMIT, so an invalidate-after-write can
-// never announce a write that rolled back.
+// Best-effort hint — any process, regular (pooled) connection. Database
+// failures are logged, never thrown; safe to void-discard.
 await invalidations.publish(db, { namespace: 'config', scopeKey: tenantId });
+
+// Inside a transaction — Postgres delivers at COMMIT and drops on ROLLBACK,
+// so the message can never announce a write that rolled back. Failures throw.
+await db.transaction(async (tx) => {
+  await writeTheThing(tx);
+  await invalidations.publishInTx(tx, { namespace: 'config', scopeKey: tenantId });
+});
 
 // Subscribe side — one listener per process, DIRECT connection string (same
 // LISTEN constraints as the relay). onReconnect fires after a gap in which
@@ -269,11 +275,15 @@ const sub = await invalidations.subscribe({
 });
 ```
 
-Contract details: `publish` throws on schema/size violations (programming
-errors) and on database failure **when handed a `tx`** (the transaction is
-aborted regardless); outside a transaction a database failure is logged and
-swallowed — the hint is lost, the TTL backstop covers it. `subscribe` throws
-on a first-connect failure (boot-time misconfiguration fails loudly) and
+Contract details: both publish methods throw on schema/size violations
+(programming errors). On database failure they diverge — that split is why
+they're two named methods instead of one modal parameter: `publish` logs and
+swallows (the hint is lost, the TTL backstop covers it), `publishInTx`
+rethrows (a failed statement has aborted the transaction; the caller's
+rollback handling must see it). Never hand a transaction context to
+`publish` — its swallow semantics would mask the aborted transaction. Both
+take a `DbOrTx` (the shared `drizzle/db` seam). `subscribe` throws on a
+first-connect failure (boot-time misconfiguration fails loudly) and
 reconnects automatically afterwards; schema-invalid payloads are dropped
 silently, and a throwing `onMessage` is logged without taking the listener
 down.

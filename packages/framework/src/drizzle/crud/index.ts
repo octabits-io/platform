@@ -25,6 +25,13 @@ import { eq, and, sql, type SQL } from 'drizzle-orm';
 import type { PgTable } from 'drizzle-orm/pg-core';
 import type { Result, OctError } from '../../result/index.ts';
 import { withDbErrorHandling, normalizePaginationLimit, type OctDatabaseError } from '../db/index.ts';
+import type {
+  DbSelectSource,
+  DbInsertTarget,
+  DbUpdateTarget,
+  DbDeleteTarget,
+  DbRelationalQuery,
+} from '../db/index.ts';
 
 /**
  * Clock-injection seam — structurally identical to
@@ -36,22 +43,16 @@ export interface DateProvider {
 }
 
 /**
- * Minimal structural view of an (augmented) Drizzle database — satisfied by
- * any `AppDatabase<TSchema>` from `./factory` and by transaction contexts.
- * Kept structural so instances from different drizzle copies interoperate.
+ * Minimal structural view of an (augmented) Drizzle database — the `../db`
+ * capability atoms this service uses. Satisfied by any `AppDatabase<TSchema>`
+ * from `./factory` and by transaction contexts.
  */
-export interface CrudDatabase {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  select(fields: any): any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  insert(table: any): any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  update(table: any): any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  delete(table: any): any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  query: Record<string, any>;
-}
+export interface CrudDatabase
+  extends DbSelectSource,
+    DbInsertTarget,
+    DbUpdateTarget,
+    DbDeleteTarget,
+    DbRelationalQuery {}
 
 /** Generic not-found error for CRUD resources. */
 export interface ResourceNotFoundError extends OctError {

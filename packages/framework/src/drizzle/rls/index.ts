@@ -25,6 +25,7 @@ import type { Pool, PoolClient } from 'pg';
 import type { Logger as DrizzleLogger } from 'drizzle-orm';
 import { ServiceLifetime } from '../../ioc/index.ts';
 import { augmentDrizzle } from '../factory/drizzle.ts';
+import type { DbOrTx, DbTransactionRunner, DbRelationalQuery } from '../db/index.ts';
 
 /**
  * GUC key/value pairs applied via `set_config(name, value, true)` at the
@@ -34,17 +35,11 @@ export type SessionVars = Record<string, string>;
 
 /**
  * Minimal structural view of an (augmented) Drizzle instance for RLS
- * wrapping. Transactions are structurally identical to the db (the `./factory`
- * augmentation rewraps them), so `TDb` stands in for both.
+ * wrapping — the `../db` capability atoms this module uses. Transactions are
+ * structurally identical to the db (the `./factory` augmentation rewraps
+ * them), so `TDb` stands in for both.
  */
-export interface RlsDatabase {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  transaction<T>(fn: (tx: any) => Promise<T>): Promise<T>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  execute(...args: any[]): Promise<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  query: Record<string, any>;
-}
+export interface RlsDatabase extends DbOrTx, DbTransactionRunner, DbRelationalQuery {}
 
 /**
  * Methods that need auto-wrap: each call should run inside a per-call

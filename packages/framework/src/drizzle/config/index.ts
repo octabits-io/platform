@@ -43,6 +43,7 @@
  */
 import { and, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import { type OctError, type Result, ok, err } from '../../result/index.ts';
+import type { DbSelectSource, DbInsertTarget } from '../db/index.ts';
 
 // ---------------------------------------------------------------------------
 // Scope
@@ -66,17 +67,11 @@ export interface ConfigScope<TScopeKey extends string = string> {
 // ---------------------------------------------------------------------------
 
 /**
- * Minimal structural view of an (augmented) Drizzle database — only the
- * `select`/`insert` builders this service uses. Satisfied by any
- * `AppDatabase<TSchema>` from `../factory` and by transaction contexts. Kept
- * structural so instances from different drizzle copies interoperate.
+ * Minimal structural view of an (augmented) Drizzle database — the `../db`
+ * capability atoms this service uses. Satisfied by any `AppDatabase<TSchema>`
+ * from `../factory` and by transaction contexts.
  */
-export interface ConfigDatabase {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  select(fields: any): any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  insert(table: any): any;
-}
+export interface ConfigDatabase extends DbSelectSource, DbInsertTarget {}
 
 /**
  * Result of validating one `{ key, value }` entry. Structurally satisfied by

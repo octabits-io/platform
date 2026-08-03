@@ -55,6 +55,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createHash } from "node:crypto";
 import { extractPgError } from "../db/index.ts";
+import type { DbSelectSource, DbInsertTarget, DbDeleteTarget } from "../db/index.ts";
 import { jsonbSafe } from "../scope/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -174,19 +175,11 @@ export interface IdempotencyLogger {
 }
 
 /**
- * Minimal structural view of an (augmented) Drizzle database — only the
- * `select`/`insert`/`delete` builders this service uses. Satisfied by any
- * `AppDatabase<TSchema>` from `./factory` and by transaction contexts. Kept
- * structural so instances from different drizzle copies interoperate.
+ * Minimal structural view of an (augmented) Drizzle database — the `../db`
+ * capability atoms this service uses. Satisfied by any `AppDatabase<TSchema>`
+ * from `./factory` and by transaction contexts.
  */
-export interface IdempotencyDatabase {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  select(fields: any): any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  insert(table: any): any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  delete(table: any): any;
-}
+export interface IdempotencyDatabase extends DbSelectSource, DbInsertTarget, DbDeleteTarget {}
 
 // ---------------------------------------------------------------------------
 // Public surface types

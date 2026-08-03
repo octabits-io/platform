@@ -74,14 +74,14 @@ describe('broadcast channel over real Postgres', () => {
       // Rolled-back tx: the NOTIFY must never surface.
       await db
         .transaction(async (tx) => {
-          await channel.publish(db, { namespace: 'tenant-guard', tenantId: 'rolled-back' }, tx);
+          await channel.publishInTx(tx, { namespace: 'tenant-guard', tenantId: 'rolled-back' });
           throw new Error('force rollback');
         })
         .catch(() => {});
 
       // Committed tx: delivered exactly once, at commit.
       await db.transaction(async (tx) => {
-        await channel.publish(db, { namespace: 'tenant-guard', tenantId: 'committed' }, tx);
+        await channel.publishInTx(tx, { namespace: 'tenant-guard', tenantId: 'committed' });
       });
 
       await waitFor(() => received.length >= 1);

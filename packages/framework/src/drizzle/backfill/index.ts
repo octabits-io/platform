@@ -59,25 +59,18 @@
  */
 import { eq, sql } from "drizzle-orm";
 import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import type { DbOrTx, DbSelectSource, DbInsertTarget } from "../db/index.ts";
 
 // ---------------------------------------------------------------------------
 // Seams
 // ---------------------------------------------------------------------------
 
 /**
- * Minimal structural view of an (augmented) Drizzle Postgres database — only
- * the builders this module uses. Satisfied by any `AppDatabase<TSchema>` from
- * `../factory`. Kept structural so instances from a different `drizzle-orm`
- * copy interoperate.
+ * Minimal structural view of an (augmented) Drizzle Postgres database — the
+ * `../db` capability atoms this module uses. Satisfied by any
+ * `AppDatabase<TSchema>` from `../factory`.
  */
-export interface BackfillDatabase {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  execute(query: any): Promise<unknown>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  select(fields: any): any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  insert(table: any): any;
-}
+export interface BackfillDatabase extends DbOrTx, DbSelectSource, DbInsertTarget {}
 
 /**
  * Progress-output seam. Defaults to `console` — the runner is deploy/CLI
