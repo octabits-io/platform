@@ -28,6 +28,7 @@ export default defineConfig({
     "events/index": "src/events/index.ts",
     "events/postgres": "src/events/postgres.ts",
     "drizzle/event-outbox/index": "src/drizzle/event-outbox/index.ts",
+    "drizzle/broadcast/index": "src/drizzle/broadcast/index.ts",
     "elysia/events": "src/elysia/events.ts",
     "zitadel/index": "src/zitadel/index.ts",
     "elysia/index": "src/elysia/index.ts",

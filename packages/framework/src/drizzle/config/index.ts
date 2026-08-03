@@ -111,7 +111,9 @@ export interface ConfigCipher<E extends OctError = OctError> {
 /**
  * Optional cross-scope cache seam. Only cacheable keys are ever stored (the
  * engine gates reads; a cache built via {@link createScopedConfigCache} also
- * gates writes). `invalidate` clears every cacheable key for one scope.
+ * gates writes). `invalidate` clears everything stored for one scope —
+ * including entries for keys that have since left the cacheable set, so a
+ * schema change can never strand stale values.
  */
 export interface ScopedConfigCache<TConfigMap extends Record<string, unknown>> {
   /**
@@ -644,13 +646,17 @@ export interface ConfigLruCache {
   get(key: string): unknown;
   set(key: string, value: unknown): void;
   delete(key: string): boolean;
+  /** Delete every entry whose key starts with `prefix`; returns the count. */
+  deletePrefix(prefix: string): number;
 }
 
 /**
  * Build a {@link ScopedConfigCache} over an injected LRU cache. Only cacheable
- * keys are stored (transactional keys are never cached); `invalidate` clears
- * every cacheable key for a scope. Recommend an LRU with TTL-based staleness
- * (e.g. 60s) for config that changes only via operator actions.
+ * keys are stored (transactional keys are never cached); `invalidate` deletes
+ * every entry under the scope's key prefix — independent of the current
+ * cacheable set, so keys removed from the set can't strand stale entries.
+ * Recommend an LRU with TTL-based staleness (e.g. 60s) for config that
+ * changes only via operator actions.
  */
 export function createScopedConfigCache<TConfigMap extends Record<string, unknown>>({
   cache,
@@ -674,7 +680,7 @@ export function createScopedConfigCache<TConfigMap extends Record<string, unknow
       cache.set(cacheKey(scopeValue, key), value);
     },
     invalidate(scopeValue: string): void {
-      for (const key of cacheable) cache.delete(cacheKey(scopeValue, key));
+      cache.deletePrefix(`${encodeURIComponent(scopeValue)}:`);
     },
   };
 }

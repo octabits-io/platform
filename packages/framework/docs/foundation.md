@@ -143,7 +143,9 @@ normalizeQueryParamToArrayOrUndefined('single'); // ['single']
 ```
 
 Also exported: `createDateProvider` / `DateProvider` (clock-injection seam),
-`createLruCacheService` (bounded LRU cache), `withRetry` (backoff retries,
+`createLruCacheService` (bounded LRU cache with TTL; `deletePrefix(prefix)`
+clears every string-keyed entry under a namespace, e.g. one tenant's entries
+under a `${tenantId}:` prefix), `withRetry` (backoff retries,
 `RetryConfig` / `RetryOptions`), and `URL_FRIENDLY_REGEX`.
 
 BCP-47 locale toolkit (`Locale` / `LocaleMap<T>` — sparse tag→value maps):
@@ -851,7 +853,9 @@ split — no tenant vocabulary in the core.
 - `createScopedConfigCache` builds the optional cross-scope cache over a
   foundation `LruCache`, gated by `cacheableKeys` (transactional keys are never
   cached); `readConfig` also keeps a request-scoped cache, both invalidated on
-  write. Both tiers store `null` as a **memoized absent resolution** (no stored
+  write. Invalidation deletes by scope prefix (`LruCache.deletePrefix`), not by
+  enumerating the cacheable set — entries for keys that later leave the set
+  can't be stranded. Both tiers store `null` as a **memoized absent resolution** (no stored
   row and no non-null default — the key stays omitted from results, but the
   engine won't re-query it), while `undefined` remains the miss signal; a
   custom `ScopedConfigCache` or backing `LruCache` must preserve stored

@@ -150,6 +150,11 @@
       "import": "./dist/drizzle/event-outbox/index.js",
       "default": "./dist/drizzle/event-outbox/index.js"
     },
+    "./drizzle/broadcast": {
+      "types": "./dist/drizzle/broadcast/index.d.ts",
+      "import": "./dist/drizzle/broadcast/index.js",
+      "default": "./dist/drizzle/broadcast/index.js"
+    },
     "./elysia/events": {
       "types": "./dist/elysia/events.d.ts",
       "import": "./dist/elysia/events.js",

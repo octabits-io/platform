@@ -83,4 +83,46 @@ describe('createLruCacheService', () => {
     cache.clear();
     expect(cache.size()).toBe(0);
   });
+
+  describe('deletePrefix', () => {
+    it('deletes exactly the entries whose key starts with the prefix', () => {
+      const service = createLruCacheService({ dateProvider: createFakeDateProvider() });
+      const cache = service.createCache<string, number>({ maxSize: 10, ttlMs: 0 });
+      cache.set('tenant-a:x', 1);
+      cache.set('tenant-a:y', 2);
+      cache.set('tenant-b:x', 3);
+      cache.set('unrelated', 4);
+
+      expect(cache.deletePrefix('tenant-a:')).toBe(2);
+      expect(cache.get('tenant-a:x')).toBeUndefined();
+      expect(cache.get('tenant-a:y')).toBeUndefined();
+      expect(cache.get('tenant-b:x')).toBe(3);
+      expect(cache.get('unrelated')).toBe(4);
+    });
+
+    it('returns 0 when nothing matches', () => {
+      const service = createLruCacheService({ dateProvider: createFakeDateProvider() });
+      const cache = service.createCache<string, number>({ maxSize: 10, ttlMs: 0 });
+      cache.set('a', 1);
+      expect(cache.deletePrefix('zzz:')).toBe(0);
+      expect(cache.size()).toBe(1);
+    });
+
+    it('does not treat the prefix boundary as a separator (plain startsWith)', () => {
+      const service = createLruCacheService({ dateProvider: createFakeDateProvider() });
+      const cache = service.createCache<string, number>({ maxSize: 10, ttlMs: 0 });
+      // Callers own delimiter discipline: 'tenant-a' also matches 'tenant-ab'.
+      cache.set('tenant-ab:x', 1);
+      expect(cache.deletePrefix('tenant-a')).toBe(1);
+    });
+
+    it('ignores non-string keys', () => {
+      const service = createLruCacheService({ dateProvider: createFakeDateProvider() });
+      const cache = service.createCache<number, number>({ maxSize: 10, ttlMs: 0 });
+      cache.set(1, 1);
+      cache.set(2, 2);
+      expect(cache.deletePrefix('1')).toBe(0);
+      expect(cache.size()).toBe(2);
+    });
+  });
 });

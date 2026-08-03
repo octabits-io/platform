@@ -73,6 +73,27 @@ const cipher: ConfigCipher = {
   decrypt: async (b64) => ok(Buffer.from(b64, 'base64').toString('utf8')),
 };
 
+/** Map-backed `ConfigLruCache` fake (eviction/TTL are the real LRU's concern). */
+function makeFakeLru() {
+  const store = new Map<string, unknown>();
+  const lru: ConfigLruCache = {
+    get: (k) => store.get(k),
+    set: (k, v) => void store.set(k, v),
+    delete: (k) => store.delete(k),
+    deletePrefix: (prefix) => {
+      let deleted = 0;
+      for (const k of [...store.keys()]) {
+        if (k.startsWith(prefix)) {
+          store.delete(k);
+          deleted += 1;
+        }
+      }
+      return deleted;
+    },
+  };
+  return { store, lru };
+}
+
 /**
  * Mock db capturing inserted values / conflict spec and returning seeded rows
  * from the select builder. `rows` seeds what a read returns.
@@ -300,12 +321,7 @@ describe('readConfig invalid stored rows', () => {
   });
 
   it('caches the fallback default exactly like an absent row (both tiers)', async () => {
-    const store = new Map<string, unknown>();
-    const lru: ConfigLruCache = {
-      get: (k) => store.get(k),
-      set: (k, v) => void store.set(k, v),
-      delete: (k) => store.delete(k),
-    };
+    const { store, lru } = makeFakeLru();
     const cache = createScopedConfigCache<ConfigMap>({ cache: lru, cacheableKeys: ['page_size'] });
     const { service } = makeService(
       [{ key: 'page_size', value: 'legacy-string', encrypted: false }],
@@ -355,12 +371,7 @@ describe("readConfig onInvalidStoredValue: 'skip'", () => {
   });
 
   it('does not cache or write anything for a skipped invalid row (both tiers)', async () => {
-    const store = new Map<string, unknown>();
-    const lru: ConfigLruCache = {
-      get: (k) => store.get(k),
-      set: (k, v) => void store.set(k, v),
-      delete: (k) => store.delete(k),
-    };
+    const { store, lru } = makeFakeLru();
     const cache = createScopedConfigCache<ConfigMap>({ cache: lru, cacheableKeys: ['page_size'] });
     const { service } = makeService(
       [{ key: 'page_size', value: 'legacy-string', encrypted: false }],
@@ -428,18 +439,8 @@ describe('readAll', () => {
 // ---------------------------------------------------------------------------
 
 describe('cross-scope cache', () => {
-  function makeLru() {
-    const store = new Map<string, unknown>();
-    const lru: ConfigLruCache = {
-      get: (k) => store.get(k),
-      set: (k, v) => void store.set(k, v),
-      delete: (k) => store.delete(k),
-    };
-    return { store, lru };
-  }
-
   it('serves a cache hit without hitting the db, and only caches cacheable keys', async () => {
-    const { lru, store } = makeLru();
+    const { lru, store } = makeFakeLru();
     const cache = createScopedConfigCache<ConfigMap>({ cache: lru, cacheableKeys: ['tenant_name', 'page_size'] });
 
     // First service populates the cache from a db read.
@@ -466,7 +467,7 @@ describe('cross-scope cache', () => {
   });
 
   it('does not store non-cacheable keys', async () => {
-    const { lru, store } = makeLru();
+    const { lru, store } = makeFakeLru();
     const cache = createScopedConfigCache<ConfigMap>({ cache: lru, cacheableKeys: ['tenant_name'] });
     cache.set('t1', 'api_key', 'secret'); // api_key is NOT cacheable
     expect(store.size).toBe(0);
@@ -474,18 +475,34 @@ describe('cross-scope cache', () => {
     expect(store.get('t1:tenant_name')).toBe('Acme');
   });
 
-  it('invalidate clears every cacheable key for the scope', async () => {
-    const { lru, store } = makeLru();
+  it('invalidate clears everything stored for the scope', async () => {
+    const { lru, store } = makeFakeLru();
     const cache = createScopedConfigCache<ConfigMap>({ cache: lru, cacheableKeys: ['tenant_name', 'page_size'] });
     cache.set('t1', 'tenant_name', 'Acme');
     cache.set('t1', 'page_size', 50);
+    cache.set('t2', 'tenant_name', 'Other');
     cache.invalidate('t1');
+    expect(store.size).toBe(1); // only t2 survives
+    expect(cache.get('t2', 'tenant_name')).toBe('Other');
+  });
+
+  it('invalidate also clears entries for keys no longer in the cacheable set', async () => {
+    const { lru, store } = makeFakeLru();
+    // A previous deploy cached page_size…
+    const oldCache = createScopedConfigCache<ConfigMap>({ cache: lru, cacheableKeys: ['tenant_name', 'page_size'] });
+    oldCache.set('t1', 'tenant_name', 'Acme');
+    oldCache.set('t1', 'page_size', 50);
+    // …then page_size left the cacheable set. Invalidation is prefix-based,
+    // so the orphaned entry must still be cleared (regression: key-list
+    // enumeration stranded it).
+    const newCache = createScopedConfigCache<ConfigMap>({ cache: lru, cacheableKeys: ['tenant_name'] });
+    newCache.invalidate('t1');
     expect(store.size).toBe(0);
   });
 
   it("cache keys cannot collide across the scope/key boundary ('a'+'b:c' vs 'a:b'+'c')", () => {
     type CollisionMap = { 'b:c': string; c: string };
-    const { lru } = makeLru();
+    const { lru } = makeFakeLru();
     const cache = createScopedConfigCache<CollisionMap>({ cache: lru, cacheableKeys: ['b:c', 'c'] });
 
     cache.set('a', 'b:c', 'first');
@@ -513,8 +530,7 @@ describe('scope isolation', () => {
   });
 
   it('separate scopes do not share cached values', async () => {
-    const store = new Map<string, unknown>();
-    const lru: ConfigLruCache = { get: (k) => store.get(k), set: (k, v) => void store.set(k, v), delete: (k) => store.delete(k) };
+    const { lru } = makeFakeLru();
     const cache = createScopedConfigCache<ConfigMap>({ cache: lru, cacheableKeys: ['tenant_name'] });
     cache.set('t1', 'tenant_name', 'Acme');
     expect(cache.get('t1', 'tenant_name')).toBe('Acme');
@@ -587,8 +603,7 @@ describe('unscoped config store (no scope)', () => {
   });
 
   it('shares a cross-scope cache under a single ("") partition', async () => {
-    const store = new Map<string, unknown>();
-    const lru: ConfigLruCache = { get: (k) => store.get(k), set: (k, v) => void store.set(k, v), delete: (k) => store.delete(k) };
+    const { store, lru } = makeFakeLru();
     const cache = createScopedConfigCache<ConfigMap>({ cache: lru, cacheableKeys: ['tenant_name'] });
     const { db } = makeDb([{ key: 'tenant_name', value: 'Acme', encrypted: false }]);
     const service = createScopedConfigService<ConfigMap>({
@@ -628,16 +643,6 @@ describe('null-default keys are memoized as absent resolutions', () => {
       }),
     };
     return { db, selectCount: () => selects };
-  }
-
-  function makeLru() {
-    const store = new Map<string, unknown>();
-    const lru: ConfigLruCache = {
-      get: (k) => store.get(k),
-      set: (k, v) => void store.set(k, v),
-      delete: (k) => store.delete(k),
-    };
-    return { lru, store };
   }
 
   function makeNullableService(
@@ -690,7 +695,7 @@ describe('null-default keys are memoized as absent resolutions', () => {
   });
 
   it('caches the absent resolution cross-scope (shared cache, fresh service)', async () => {
-    const { lru, store } = makeLru();
+    const { lru, store } = makeFakeLru();
     const cache = createScopedConfigCache<NullableMap>({ cache: lru, cacheableKeys: ['theme', 'page_size'] });
 
     const a = makeCountingDb();
@@ -706,7 +711,7 @@ describe('null-default keys are memoized as absent resolutions', () => {
   });
 
   it('writeConfig invalidation clears the memoized absence (fresh read sees the new value)', async () => {
-    const { lru } = makeLru();
+    const { lru } = makeFakeLru();
     const cache = createScopedConfigCache<NullableMap>({ cache: lru, cacheableKeys: ['theme', 'page_size'] });
     const { db, selectCount } = makeCountingDb();
     const service = makeNullableService(db, cache);

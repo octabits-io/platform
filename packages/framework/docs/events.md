@@ -14,6 +14,7 @@ Four subpaths, split so no import drags in a vendor SDK it doesn't need:
 | `./events/postgres` | `pg` (optional peer) | `createPgNotifyListener` — the LISTEN side |
 | `./drizzle/event-outbox` | `drizzle-orm` (optional peer) | `eventOutboxColumns` + the outbox store |
 | `./elysia/events` | `elysia` (optional peer) | Thin `.use()` wrapper over the fetch handler |
+| `./drizzle/broadcast` | `drizzle-orm` + `pg` (optional peers) | `createBroadcastChannel` — NOTIFY-only coordination hints, outside the event taxonomy (see below) |
 
 The browser client (fetch-based SSE reader + Vue composable) is
 `@octabits-io/nuxt-ui-kit/events`.
@@ -233,6 +234,50 @@ client older than that should re-sync state, not replay history). If you need
 a user-facing "what happened" feed, that is a separate table with its own
 retention, written by the same emit.
 
+## Broadcast channels (`./drizzle/broadcast`)
+
+`createBroadcastChannel({ channel, schema })` is the deliberately-small
+sibling of the event pipeline: a fire-and-forget signal between processes
+sharing one database — cache-invalidation hints, "reload X" pokes. No
+envelope, no outbox, no audience filtering, no SSE: a broadcast message is a
+**hint, not a fact**, and delivery is at-most-once with no replay. Every
+consumer therefore needs an independent correctness backstop (typically a TTL
+on whatever the broadcast invalidates); the channel only shortens the
+staleness window.
+
+```ts
+import { createBroadcastChannel } from '@octabits-io/framework/drizzle/broadcast';
+
+const invalidations = createBroadcastChannel({
+  channel: 'app_cache_invalidation',
+  schema: z.object({ namespace: z.string(), scopeKey: z.string() }),
+  logger,
+});
+
+// Publish side — any process, regular (pooled) connection. Inside a
+// transaction Postgres delivers at COMMIT, so an invalidate-after-write can
+// never announce a write that rolled back.
+await invalidations.publish(db, { namespace: 'config', scopeKey: tenantId });
+
+// Subscribe side — one listener per process, DIRECT connection string (same
+// LISTEN constraints as the relay). onReconnect fires after a gap in which
+// messages may have been lost: flush whatever the channel invalidates.
+const sub = await invalidations.subscribe({
+  connectionString: directDatabaseUrl,
+  onMessage: ({ namespace, scopeKey }) => caches[namespace]?.invalidate(scopeKey),
+  onReconnect: () => Object.values(caches).forEach((c) => c.clear()),
+});
+```
+
+Contract details: `publish` throws on schema/size violations (programming
+errors) and on database failure **when handed a `tx`** (the transaction is
+aborted regardless); outside a transaction a database failure is logged and
+swallowed — the hint is lost, the TTL backstop covers it. `subscribe` throws
+on a first-connect failure (boot-time misconfiguration fails loudly) and
+reconnects automatically afterwards; schema-invalid payloads are dropped
+silently, and a throwing `onMessage` is logged without taking the listener
+down.
+
 ## Testing
 
 `src/events/integration.test.ts` (Testcontainers) covers the properties mocks
@@ -241,3 +286,5 @@ most likely to regress silently — assert it in your consumer too), LISTEN
 kill → reconnect → catch-up, and scope isolation. The demo apps exercise the
 full pipeline including the browser client (`apps/demo-server`
 `routes/events.ts`, `apps/demo-web` `/events`).
+`src/drizzle/broadcast/integration.test.ts` does the same for broadcast:
+delivery to a live LISTEN, at-COMMIT semantics, rollback drops the message.

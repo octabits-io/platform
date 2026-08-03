@@ -26,6 +26,13 @@ export interface LruCache<K, V> {
   set(key: K, value: V): void;
   /** Delete a value from the cache */
   delete(key: K): boolean;
+  /**
+   * Delete every entry whose key is a string starting with `prefix`.
+   * Returns the number of entries deleted. Enables namespace invalidation
+   * (e.g. everything for one tenant under a `${tenantId}:` prefix) without
+   * the caller enumerating a key list that can drift from what was stored.
+   */
+  deletePrefix(prefix: string): number;
   /** Clear all values from the cache */
   clear(): void;
   /** Get the current number of entries in the cache */
@@ -127,6 +134,17 @@ export function createLruCacheService({ dateProvider }: LruCacheServiceDeps) {
       return cache.delete(key);
     }
 
+    function deletePrefix(prefix: string): number {
+      let deleted = 0;
+      for (const key of cache.keys()) {
+        if (typeof key === 'string' && key.startsWith(prefix)) {
+          cache.delete(key);
+          deleted += 1;
+        }
+      }
+      return deleted;
+    }
+
     function clear(): void {
       cache.clear();
     }
@@ -151,6 +169,7 @@ export function createLruCacheService({ dateProvider }: LruCacheServiceDeps) {
       get,
       set,
       delete: deleteKey,
+      deletePrefix,
       clear,
       size,
       has,
