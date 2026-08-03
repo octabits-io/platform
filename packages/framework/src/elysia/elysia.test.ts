@@ -372,6 +372,48 @@ describe('createClientIpResolver (rightmost-untrusted)', () => {
   });
 });
 
+describe('createClientIpResolver (CIDR trusted proxies)', () => {
+  it('trusts a direct peer inside a CIDR range and walks past in-range hops', () => {
+    const resolve = createClientIpResolver(['10.42.0.0/16']);
+    // client → ingress (10.42.3.7) → app-proxy (10.42.9.1, direct peer)
+    expect(resolve('10.42.9.1', '203.0.113.7, 10.42.3.7')).toBe('203.0.113.7');
+  });
+
+  it('does not trust peers outside the CIDR', () => {
+    const resolve = createClientIpResolver(['10.42.0.0/16']);
+    expect(resolve('10.43.0.1', '203.0.113.7')).toBe('10.43.0.1');
+    // Boundary: last address inside vs first outside.
+    expect(resolve('10.42.255.255', '203.0.113.7')).toBe('203.0.113.7');
+  });
+
+  it('supports multiple ranges (private + CGNAT) and mixes with exact IPs', () => {
+    const resolve = createClientIpResolver(['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '100.64.0.0/10', '203.0.113.250']);
+    expect(resolve('100.64.12.34', '198.51.100.9, 192.168.1.1')).toBe('198.51.100.9');
+    expect(resolve('203.0.113.250', '198.51.100.9')).toBe('198.51.100.9');
+    expect(resolve('203.0.113.251', '198.51.100.9')).toBe('203.0.113.251');
+  });
+
+  it('matches IPv6 CIDRs, including v6-mapped direct peers against v4 ranges', () => {
+    const resolve = createClientIpResolver(['2001:db8::/32', '10.0.0.0/8']);
+    expect(resolve('2001:db8:1:2::3', '203.0.113.7')).toBe('203.0.113.7');
+    expect(resolve('2001:db9::1', '203.0.113.7')).toBe('2001:db9::1');
+    // Bun/Node report v4 peers as ::ffff:a.b.c.d — must match the v4 range.
+    expect(resolve('::ffff:10.1.2.3', '203.0.113.7')).toBe('203.0.113.7');
+  });
+
+  it('an IPv4 range never matches an IPv6 candidate (and vice versa)', () => {
+    const resolve = createClientIpResolver(['0.0.0.0/0']);
+    expect(resolve('2001:db8::1', '203.0.113.7')).toBe('2001:db8::1');
+    const resolve6 = createClientIpResolver(['::/0']);
+    expect(resolve6('10.0.0.1', '203.0.113.7')).toBe('10.0.0.1');
+  });
+
+  it('drops invalid CIDR entries instead of widening trust', () => {
+    const resolve = createClientIpResolver(['10.0.0.0/33', 'garbage/8', '10.0.0.0/-1', '10.0.0.0/8/24']);
+    expect(resolve('10.0.0.1', '203.0.113.7')).toBe('10.0.0.1');
+  });
+});
+
 describe('createErrorHandler', () => {
   const silentLogger: import('../logger/index.ts').Logger = {
     debug: () => {},

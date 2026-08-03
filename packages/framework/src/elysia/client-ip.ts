@@ -16,7 +16,12 @@
  * - `trustedProxies = ['*']` → trust all connections (network policy is the boundary;
  *   the leftmost valid entry is used)
  * - `trustedProxies = ['10.0.0.1', '10.0.0.2']` → trust specific proxy IPs
+ * - `trustedProxies = ['10.0.0.0/8', '2001:db8::/32']` → trust CIDR ranges (for
+ *   proxies with ephemeral addresses, e.g. Kubernetes ingress/sidecar pods)
  * - `trustedProxies = []` (default) → trust nothing, always use direct connection IP
+ *
+ * Invalid entries (unparseable IPs or CIDRs) are silently dropped, same as before
+ * CIDR support: an operator typo narrows trust rather than widening it.
  */
 import { isIP } from 'node:net';
 import { Elysia } from 'elysia';
@@ -38,6 +43,60 @@ export function normalizeIp(value: string): string | null {
 }
 
 /**
+ * Convert a normalized IP to its numeric value for CIDR prefix comparison.
+ * IPv4 → 32-bit, IPv6 → 128-bit (embedded-IPv4 tails like `64:ff9b::1.2.3.4`
+ * included). Hand-rolled instead of `net.BlockList` on purpose: BlockList is
+ * not reliably available across the runtimes this module targets (Bun).
+ */
+function ipToNumeric(ip: string): { value: bigint; bits: 32 | 128 } | null {
+  const version = isIP(ip);
+  if (version === 4) {
+    const octets = ip.split('.');
+    let value = 0n;
+    for (const octet of octets) value = (value << 8n) | BigInt(Number(octet));
+    return { value, bits: 32 };
+  }
+  if (version === 6) {
+    // Expand `::` to the zero groups it stands for; an embedded IPv4 tail
+    // counts as two 16-bit groups.
+    const halves = ip.split('::');
+    const parseSide = (side: string) => (side === '' ? [] : side.split(':'));
+    const countGroups = (side: string[]) =>
+      side.reduce((n, group) => n + (group.includes('.') ? 2 : 1), 0);
+    const left = parseSide(halves[0] ?? '');
+    const right = halves.length === 2 ? parseSide(halves[1] ?? '') : [];
+    const fill = halves.length === 2 ? 8 - countGroups(left) - countGroups(right) : 0;
+    if (fill < 0) return null;
+    const groups = [...left, ...Array.from({ length: fill }, () => '0'), ...right];
+
+    let value = 0n;
+    for (const group of groups) {
+      if (group.includes('.')) {
+        const v4 = ipToNumeric(group);
+        if (!v4) return null;
+        value = (value << 32n) | v4.value;
+      } else {
+        value = (value << 16n) | BigInt(Number.parseInt(group, 16));
+      }
+    }
+    return { value, bits: 128 };
+  }
+  return null;
+}
+
+/** Parse a `base/prefix` CIDR entry into a comparable form; null when invalid. */
+function parseCidr(entry: string): { value: bigint; bits: 32 | 128; prefix: number } | null {
+  const slash = entry.indexOf('/');
+  if (slash === -1) return null;
+  const base = normalizeIp(entry.slice(0, slash));
+  const prefix = Number(entry.slice(slash + 1));
+  if (base === null || !Number.isInteger(prefix) || prefix < 0) return null;
+  const numeric = ipToNumeric(base);
+  if (numeric === null || prefix > numeric.bits) return null;
+  return { ...numeric, prefix };
+}
+
+/**
  * Build the pure client-IP resolution function used by
  * {@link createClientIpPlugin}: `(directIp, xForwardedFor) => clientIp`.
  * Exposed for direct use/testing.
@@ -50,13 +109,26 @@ export function createClientIpResolver(trustedProxies: string[] = []) {
       .map((entry) => normalizeIp(entry))
       .filter((entry): entry is string => entry !== null),
   );
-  const isTrusted = (ip: string) => trustAll || trustedSet.has(ip);
+  const trustedCidrs = trustedProxies
+    .map((entry) => parseCidr(entry))
+    .filter((cidr): cidr is NonNullable<typeof cidr> => cidr !== null);
+  const inTrustedCidr = (ip: string): boolean => {
+    if (trustedCidrs.length === 0) return false;
+    const numeric = ipToNumeric(ip);
+    if (numeric === null) return false;
+    return trustedCidrs.some(
+      (cidr) =>
+        cidr.bits === numeric.bits &&
+        numeric.value >> BigInt(cidr.bits - cidr.prefix) === cidr.value >> BigInt(cidr.bits - cidr.prefix),
+    );
+  };
+  const isTrusted = (ip: string) => trustAll || trustedSet.has(ip) || inTrustedCidr(ip);
 
   return (directIp: string | undefined, forwardedFor: string | null | undefined): string => {
     const direct = directIp ? normalizeIp(directIp) : null;
     const fallback = direct ?? directIp ?? 'unknown';
 
-    const directTrusted = trustAll || (direct !== null && trustedSet.has(direct));
+    const directTrusted = direct !== null ? isTrusted(direct) : trustAll;
     if (!directTrusted) return fallback;
 
     const entries = (forwardedFor ?? '')
