@@ -1,5 +1,12 @@
 # @octabits-io/demo-server
 
+## 0.0.14
+
+### Patch Changes
+
+- Updated dependencies [[`3dbadbf`](https://github.com/octabits-io/platform/commit/3dbadbf3e6c8e188f3f9efdeb3b0b1a30380951b)]:
+  - @octabits-io/framework@0.12.0
+
 ## 0.0.13
 
 ### Patch Changes
