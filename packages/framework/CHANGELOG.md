@@ -1,5 +1,15 @@
 # @octabits-io/framework
 
+## 0.17.0
+
+### Minor Changes
+
+- [`020309b`](https://github.com/octabits-io/platform/commit/020309b3cfe4a1fd295306324868f3b1b9de0e9f) - drizzle/rls: fail-closed drift guard on the scoped-db proxy. Unclassified Drizzle members now throw on use instead of silently running without the scope's GUCs (where RLS policies would match zero rows) — functions throw on invocation, object-valued namespaces on access; absent properties still read as `undefined`. New exports `QUERY_NAMESPACE_METHODS` and `SCOPED_DB_PASSTHROUGH_PROPS` carry the classification, and a contract test enumerates the installed drizzle-orm's db surface so any added/renamed/removed entry point fails the unit suite at upgrade time instead of drifting silently.
+
+- [`ed52834`](https://github.com/octabits-io/platform/commit/ed52834b8029b783968d246d7ca3018e0a411c41) - New framework-agnostic `./server` module (+ `./server/testing`): the env-config helpers, `runServer`/`registerGracefulShutdown` (the `main()` tail; `runElysiaServer` stays as a deprecated alias), `buildSwaggerOptions`, the zod response schemas, and the request-test harness moved out of `./elysia` — none of them ever imported Elysia. `./elysia` and `./elysia/testing` re-export everything for full backwards compatibility.
+
+  Elysia-confinement hardening in `./elysia`: `buildSecurityHeaders` (pure options→header-map core of the security-headers plugin) and `resolveErrorResponse` (the framework-neutral error classifier behind `createErrorHandler`) are now exported; the boundary lint enforces per-file rules (`elysia-mcp` only in `mcp.ts`, `elysia-rate-limit` only in `rate-limit.ts`, and every `src/elysia` source file must actually import an elysia-tier vendor). New `docs/server.md`; `docs/elysia.md` now documents the confinement contract / porting story.
+
 ## 0.16.0
 
 ### Minor Changes
