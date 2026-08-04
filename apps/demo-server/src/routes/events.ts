@@ -21,7 +21,7 @@ import { Elysia } from 'elysia';
 import { z } from 'zod';
 import { createEventStreamHandler } from '@octabits-io/framework/events';
 import type { IoC } from '@octabits-io/framework/ioc';
-import { successResponses } from '@octabits-io/framework/elysia';
+import { successResponses } from '@octabits-io/framework/server';
 import type { DemoServices } from '../container.ts';
 import { DEMO_EVENT_SCOPE } from '../container.ts';
 

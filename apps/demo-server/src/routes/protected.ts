@@ -11,7 +11,8 @@
  */
 import { Elysia } from 'elysia';
 import { z } from 'zod';
-import { createBearerAuthPlugin, errorResponses } from '@octabits-io/framework/elysia';
+import { errorResponses } from '@octabits-io/framework/server';
+import { createBearerAuthPlugin } from '@octabits-io/framework/elysia';
 import type { DemoApiKeys } from '../api-keys.ts';
 
 const SCHEMA_WHOAMI = z.object({

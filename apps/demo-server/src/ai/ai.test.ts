@@ -9,7 +9,7 @@
  * captured. The only stubbed domain piece is `contactsService`.
  */
 import { describe, it, expect, beforeAll } from 'bun:test';
-import { testRequest } from '@octabits-io/framework/elysia/testing';
+import { testRequest } from '@octabits-io/framework/server/testing';
 import type { Logger } from '@octabits-io/framework/logger';
 import type { AppDatabase } from '@octabits-io/framework/drizzle/factory';
 import type { ObjectStorageService } from '@octabits-io/framework/storage';

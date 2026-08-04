@@ -1,5 +1,5 @@
 /**
- * Route tests via `@octabits-io/framework/elysia/testing` — `testRequest`
+ * Route tests via `@octabits-io/framework/server/testing` — `testRequest`
  * drives the composed app through `app.handle` with no port and no Postgres.
  *
  * The container is built with inert stand-ins for `db`/`storage`/`boss`: the
@@ -9,7 +9,7 @@
  * here.
  */
 import { describe, it, expect, beforeAll } from 'bun:test';
-import { testRequest, testAuthenticatedRequest } from '@octabits-io/framework/elysia/testing';
+import { testRequest, testAuthenticatedRequest } from '@octabits-io/framework/server/testing';
 import type { Logger } from '@octabits-io/framework/logger';
 import type { AppDatabase } from '@octabits-io/framework/drizzle/factory';
 import type { ObjectStorageService } from '@octabits-io/framework/storage';

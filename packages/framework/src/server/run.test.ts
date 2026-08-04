@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Logger } from '../logger/index.ts';
-import { runElysiaServer, type ListenableApp } from './run';
+import { runServer, type ListenableApp } from './run';
 
 const silentLogger: Logger = {
   debug: () => {}, info: () => {}, warn: () => {}, error: () => {},
@@ -13,11 +13,11 @@ function fakeApp() {
   return { app: { listen } satisfies ListenableApp, listen };
 }
 
-describe('runElysiaServer', () => {
+describe('runServer', () => {
   it('listens on the loaded port and returns the app', async () => {
     const { app, listen } = fakeApp();
 
-    const returned = await runElysiaServer({
+    const returned = await runServer({
       logger: silentLogger,
       load: async () => ({ app, port: 3001 }),
     });
@@ -31,7 +31,7 @@ describe('runElysiaServer', () => {
     const logger: Logger = { ...silentLogger, info, child: () => logger };
     const { app } = fakeApp();
 
-    await runElysiaServer({ logger: silentLogger, load: async () => ({ app, port: 3001, logger }) });
+    await runServer({ logger: silentLogger, load: async () => ({ app, port: 3001, logger }) });
 
     expect(info).toHaveBeenCalledWith('Server started', { url: 'http://localhost:3001' });
   });
@@ -41,7 +41,7 @@ describe('runElysiaServer', () => {
     const logger: Logger = { ...silentLogger, info, child: () => logger };
     const { app } = fakeApp();
 
-    await runElysiaServer({ logger, load: async () => ({ app, port: 3001 }) });
+    await runServer({ logger, load: async () => ({ app, port: 3001 }) });
 
     expect(info).toHaveBeenCalledWith('Server started', { url: 'http://localhost:3001' });
   });
@@ -52,7 +52,7 @@ describe('runElysiaServer', () => {
     const onStarted = vi.fn();
     const { app } = fakeApp();
 
-    await runElysiaServer({ logger: silentLogger, load: async () => ({ app, port: 3001, logger, onStarted }) });
+    await runServer({ logger: silentLogger, load: async () => ({ app, port: 3001, logger, onStarted }) });
 
     expect(onStarted).toHaveBeenCalledWith({ app, port: 3001, logger });
     expect(info).not.toHaveBeenCalled();
@@ -62,7 +62,7 @@ describe('runElysiaServer', () => {
     const order: string[] = [];
     const { app } = fakeApp();
 
-    await runElysiaServer({
+    await runServer({
       logger: silentLogger,
       load: async () => ({
         app,
@@ -82,7 +82,7 @@ describe('runElysiaServer', () => {
     const order: string[] = [];
     const app: ListenableApp = { listen: () => { order.push('listen'); } };
 
-    await runElysiaServer({
+    await runServer({
       logger: silentLogger,
       load: async () => ({ app, port: 3001, onStarted: () => { order.push('onStarted'); } }),
     });
@@ -96,7 +96,7 @@ describe('runElysiaServer', () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     const { app } = fakeApp();
 
-    await runElysiaServer({
+    await runServer({
       logger: silentLogger,
       load: async () => ({ app, port: 3001, stop }),
       shutdown: { signals: ['SIGUSR2'] },
@@ -114,7 +114,7 @@ describe('runElysiaServer', () => {
     const on = vi.spyOn(process, 'on');
     const { app } = fakeApp();
 
-    await runElysiaServer({ logger: silentLogger, load: async () => ({ app, port: 3001 }) });
+    await runServer({ logger: silentLogger, load: async () => ({ app, port: 3001 }) });
 
     expect(on.mock.calls.some(([s]) => s === 'SIGTERM' || s === 'SIGINT')).toBe(false);
     on.mockRestore();
@@ -126,7 +126,7 @@ describe('runElysiaServer', () => {
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     const listen = vi.fn();
 
-    await runElysiaServer({
+    await runServer({
       logger,
       load: async () => { throw new Error('vault unreachable'); },
     });
@@ -143,7 +143,7 @@ describe('runElysiaServer', () => {
     const logger: Logger = { ...silentLogger, error, child: () => logger };
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 
-    await runElysiaServer({ logger, load: async () => { throw 'string failure'; } });
+    await runServer({ logger, load: async () => { throw 'string failure'; } });
 
     expect(error.mock.calls[0]?.[1]).toBeInstanceOf(Error);
     expect(error.mock.calls[0]?.[1]).toMatchObject({ message: 'string failure' });
@@ -155,7 +155,7 @@ describe('runElysiaServer', () => {
     const logger: Logger = { ...silentLogger, error, child: () => logger };
     const exit = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
 
-    await expect(runElysiaServer({
+    await expect(runServer({
       logger,
       exitProcess: false,
       load: async () => { throw new Error('config invalid'); },

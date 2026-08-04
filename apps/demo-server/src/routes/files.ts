@@ -17,7 +17,8 @@
  */
 import { Elysia, t } from 'elysia';
 import { z } from 'zod';
-import { errorResponses, statusErrorWithSet, successResponses } from '@octabits-io/framework/elysia';
+import { errorResponses, successResponses } from '@octabits-io/framework/server';
+import { statusErrorWithSet } from '@octabits-io/framework/elysia';
 import { createWebResponse } from '@octabits-io/framework/storage/postgres';
 import type { IoC } from '@octabits-io/framework/ioc';
 import type { DemoServices } from '../container.ts';

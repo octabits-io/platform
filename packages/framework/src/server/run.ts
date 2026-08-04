@@ -194,9 +194,3 @@ export async function runServer<TApp extends ListenableApp>(
 
   return app;
 }
-
-/** @deprecated Renamed to {@link runServer} — nothing about it is Elysia-specific. */
-export const runElysiaServer = runServer;
-
-/** @deprecated Renamed to {@link RunServerOptions}. */
-export type RunElysiaServerOptions<TApp extends ListenableApp> = RunServerOptions<TApp>;

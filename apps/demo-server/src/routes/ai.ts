@@ -19,7 +19,8 @@
  */
 import { Elysia } from 'elysia';
 import { z } from 'zod';
-import { createErrorMapper, errorResponses, successResponses } from '@octabits-io/framework/elysia';
+import { errorResponses, successResponses } from '@octabits-io/framework/server';
+import { createErrorMapper } from '@octabits-io/framework/elysia';
 import { createFlowWorkflowRoutes } from '@octabits-io/framework/elysia/flow';
 import type { AiUsageAggregationService } from '@octabits-io/flow/ai';
 import type { DemoAiEngine } from '../ai/engine.ts';

@@ -2,7 +2,7 @@
  * App config: `process.env` → a validated, typed object.
  *
  * Showcases `@octabits-io/framework/config-schema` (reusable Zod fragments) and
- * `@octabits-io/framework/elysia`'s env accessors (`getEnv*`, `parseCsv`,
+ * `@octabits-io/framework/server`’s env accessors (`getEnv*`, `parseCsv`,
  * `isProduction`). The framework ships the fragments that every backend repeats
  * verbatim (database pool knobs, structured logging); app-specific sections
  * (PII keys, mail identity) stay here.
@@ -23,7 +23,7 @@ import {
   getEnvNumber,
   isProduction,
   parseCsv,
-} from '@octabits-io/framework/elysia';
+} from '@octabits-io/framework/server';
 import { MIN_BLIND_INDEX_KEY_LENGTH } from '@octabits-io/framework/pii';
 
 /**

@@ -8,7 +8,8 @@
  */
 import { Elysia } from 'elysia';
 import { z } from 'zod';
-import { errorResponses, statusErrorWithSet } from '@octabits-io/framework/elysia';
+import { errorResponses } from '@octabits-io/framework/server';
+import { statusErrorWithSet } from '@octabits-io/framework/elysia';
 import type { DemoScopePlugin } from '../request-scope.ts';
 import { hasPermission } from '../rbac.ts';
 

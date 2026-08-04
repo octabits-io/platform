@@ -1,5 +1,5 @@
 /**
- * Boot sequence, run through `runElysiaServer` (`…/elysia`): everything that
+ * Boot sequence, run through `runServer` (`…/server`): everything that
  * can fail lives inside `load()`, so a bad config, unreachable Postgres, or a
  * worker that won't start is logged once as a fatal bootstrap error and the
  * process exits 1 — never an unhandled rejection. Importing this module boots
@@ -14,7 +14,7 @@
  */
 import { Pool } from 'pg';
 import { createLoggerService } from '@octabits-io/framework/logger';
-import { runElysiaServer } from '@octabits-io/framework/elysia';
+import { runServer } from '@octabits-io/framework/server';
 import { createDrizzle } from '@octabits-io/framework/drizzle/factory';
 import { createBossManager } from '@octabits-io/framework/queue';
 import { createPostgresObjectStorageService } from '@octabits-io/framework/storage/postgres';
@@ -29,7 +29,7 @@ import { welcomeEmailQueue } from './queues/welcome-email.ts';
 import { createAiRuntime } from './ai/runtime.ts';
 import { createDemoApp } from './app.ts';
 
-await runElysiaServer({
+await runServer({
   load: async () => {
     const config = loadConfig();
 

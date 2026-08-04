@@ -10,7 +10,8 @@
  */
 import { Elysia } from 'elysia';
 import { z } from 'zod';
-import { errorResponses, statusErrorWithSet } from '@octabits-io/framework/elysia';
+import { errorResponses } from '@octabits-io/framework/server';
+import { statusErrorWithSet } from '@octabits-io/framework/elysia';
 import { slugify } from '@octabits-io/framework/utils';
 import type { IoC } from '@octabits-io/framework/ioc';
 import type { DemoServices } from '../container.ts';

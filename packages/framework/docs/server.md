@@ -26,8 +26,7 @@ handler satisfies it. Everything is also re-exported from
   once the container is up; it falls back to the bootstrap `logger`. Runtime- and
   framework-agnostic (the app only needs the structural `.listen(port)`) and
   **importing the module boots nothing**. `exitProcess: false` rethrows instead
-  of exiting, for tests and embedders. `runElysiaServer` is a deprecated alias
-  of the same function.
+  of exiting, for tests and embedders.
 - **`registerGracefulShutdown({ logger, stop, signals?, timeoutMs? })`** — wires
   SIGTERM/SIGINT to an async teardown bounded by `timeoutMs` (default 10s;
   force-exit 1 on hang, exit 1 on a rejected `stop`, exit 0 on success).
