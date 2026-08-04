@@ -1,5 +1,11 @@
 # @octabits-io/framework
 
+## 0.19.1
+
+### Patch Changes
+
+- [`c8c077b`](https://github.com/octabits-io/platform/commit/c8c077b13a0e35671294bb625cef7be47aa4e1b9) - Dedupe `createRequestScopeMiddleware` (Hono) across overlapping route mounts: when several modules sharing a mount prefix each carry the scope middleware, Hono copies every module's `use('*')` entry into the parent router, so one request could allocate a scope per overlapping module — each holding a pooled (RLS) DB connection for the rest of the request. The middleware now passes through when its context key is already populated: the first instance owns the scope, nested runs are no-ops. Middlewares with distinct `contextKey`s still stack.
+
 ## 0.19.0
 
 ### Minor Changes
