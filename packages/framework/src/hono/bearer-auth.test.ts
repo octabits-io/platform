@@ -10,7 +10,7 @@ import { ok, err } from '../result/index.ts';
 import type { OctError, Result } from '../result/index.ts';
 import { createBearerAuthMiddleware, type BearerAuthEnv } from './bearer-auth';
 import { createHonoApp } from './create-app';
-import type { BearerTokenValidator } from '../elysia/bearer-auth';
+import type { BearerTokenValidator } from '../server/bearer-auth';
 
 const silentLogger: Logger = {
   debug: () => {}, info: () => {}, warn: () => {}, error: () => {},

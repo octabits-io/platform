@@ -1,5 +1,5 @@
 /**
- * SPIKE (elysia-exit-option): Hono port of `../elysia/bearer-auth`.
+ * Hono port of the `./elysia` bearer-auth plugin (same contract, Hono idiom).
  *
  * The Elysia plugin's rejection seam is throw-based because a `resolve` hook
  * cannot short-circuit by returning. Hono middleware CAN return a `Response`,
@@ -17,13 +17,14 @@ import {
   ApiError,
   ForbiddenError,
   UnauthorizedError,
-} from '../elysia/errors';
-import type {
-  BearerAuthContext,
-  BearerAuthFailure,
-  BearerAuthStatus,
-  BearerTokenValidator,
-} from '../elysia/bearer-auth';
+} from '../server/errors';
+import {
+  BUILTIN_BEARER_STATUS_OVERRIDES,
+  type BearerAuthContext,
+  type BearerAuthFailure,
+  type BearerAuthStatus,
+  type BearerTokenValidator,
+} from '../server/bearer-auth';
 
 export type { BearerAuthContext, BearerAuthFailure, BearerAuthStatus, BearerTokenValidator };
 
@@ -50,11 +51,6 @@ export interface BearerAuthMiddlewareOptions<TToken, TKey extends string = 'vali
    */
   onUnauthorized?: (failure: BearerAuthFailure, ctx: BearerAuthContext) => unknown;
 }
-
-/** The auth provider is unreachable — a server fault, not a client error. */
-const BUILTIN_STATUS_OVERRIDES: Record<string, BearerAuthStatus> = {
-  jwks_unavailable: 503,
-};
 
 /** The Env contribution this middleware makes. */
 export type BearerAuthEnv<TToken, TKey extends string = 'validatedToken'> = {
@@ -86,7 +82,7 @@ export function createBearerAuthMiddleware<TToken, const TKey extends string = '
     onUnauthorized,
   } = options;
 
-  const overrides: Record<string, BearerAuthStatus> = { ...BUILTIN_STATUS_OVERRIDES, ...statusOverrides };
+  const overrides: Record<string, BearerAuthStatus> = { ...BUILTIN_BEARER_STATUS_OVERRIDES, ...statusOverrides };
 
   const reject = async (
     status: BearerAuthStatus,

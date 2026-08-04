@@ -1,9 +1,8 @@
 /**
- * SPIKE (elysia-exit-option): Hono wiring for the framework-neutral error
- * core (`resolveErrorResponse` from `../elysia/errors` — the function itself
- * has no Elysia dependency; a real port would move it to a neutral module).
+ * Hono wiring for the framework-neutral error core (`resolveErrorResponse`
+ * from `../server/errors`).
  *
- * Differences from the Elysia handler this replaces:
+ * Differences from the Elysia handler this parallels:
  *
  * - **Validation**: Elysia surfaces schema failures as `code: 'VALIDATION'`
  *   with an undocumented error shape. Hono's `@hono/zod-validator` responds
@@ -19,14 +18,21 @@
  *   through verbatim here. (`resolveErrorResponse`'s Response-passthrough
  *   branch also still works for any caller that hands us a `Response`.)
  */
-import type { Hono } from 'hono';
-import type { Env, ValidationTargets } from 'hono';
+import type { Context, Hono } from 'hono';
+import type { ValidationTargets } from 'hono';
 import { HTTPException } from 'hono/http-exception';
+import type { ClientErrorStatusCode, ServerErrorStatusCode } from 'hono/utils/http-status';
 import { zValidator } from '@hono/zod-validator';
 import type { ZodType } from 'zod';
 import type { Logger } from '../logger/index.ts';
 import { isProduction } from '../server/config';
-import { resolveErrorResponse, type ErrorHandlerOptions } from '../elysia/errors';
+import {
+  createErrorMapper,
+  resolveErrorResponse,
+  type ErrorHandlerOptions,
+  type ErrorStatusOverrides,
+  type KeyedError,
+} from '../server/errors';
 
 /**
  * Schema-validation failure carrying the structural `ValidationErrorLike`
@@ -67,11 +73,12 @@ export function octValidator<Target extends keyof ValidationTargets, S extends Z
  * (`ApiError` → status+body, DB-connection errors → 503, validation → 400
  * with fields, production redaction for 5xx).
  */
-export function registerErrorHandler<E extends Env>(
-  app: Hono<E>,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function registerErrorHandler<T extends Hono<any, any, any>>(
+  app: T,
   logger: Logger,
   options: ErrorHandlerOptions = {},
-): Hono<E> {
+): T {
   const production = options.production ?? isProduction();
 
   app.onError((error, c) => {
@@ -86,3 +93,35 @@ export function registerErrorHandler<E extends Env>(
 
   return app;
 }
+
+/**
+ * Build the keyed-error → JSON-response helper every route file needs:
+ * `if (!result.ok) return errorJson(c, result.error)`. Wraps the
+ * framework-neutral `createErrorMapper` (key conventions + production
+ * redaction), bound once to a domain's `statusOverrides`.
+ *
+ * **Returning** the response rather than throwing an `ApiError` is deliberate:
+ * the error shapes then stay in the route's inferred type, which is what makes
+ * them visible to `hc` on the client side. Throwing works too (the global
+ * error handler formats it identically) but erases the error body from the
+ * route type.
+ *
+ * The status is asserted as non-2xx — what the key conventions actually
+ * produce. `hc` narrows a route's response union on `res.status`/`res.ok`, and
+ * a status type that still admitted `200` would stop `if (res.ok)` from
+ * isolating the success body. (A consumer mapping a key to a 2xx via
+ * `statusOverrides` would mislabel the type — but that is not an error
+ * response.)
+ */
+export function createErrorJson(overrides?: ErrorStatusOverrides) {
+  const { statusErrorWithSet } = createErrorMapper(overrides);
+
+  return function errorJson(c: Context, error: KeyedError) {
+    const set: { status?: number | string } = {};
+    const body = statusErrorWithSet(set, error);
+    return c.json(body, set.status as ClientErrorStatusCode | ServerErrorStatusCode);
+  };
+}
+
+/** The unbound helper — the framework's key conventions with no domain overrides. */
+export const errorJson = createErrorJson();

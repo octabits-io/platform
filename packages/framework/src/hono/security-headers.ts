@@ -1,5 +1,5 @@
 /**
- * SPIKE (elysia-exit-option): Hono port of `../elysia/security-headers`.
+ * Hono port of the `./elysia` security-headers plugin (same contract, Hono idiom).
  *
  * The header map comes from the framework-neutral `buildSecurityHeaders`
  * unchanged; only the application mechanism differs. Elysia stages headers in
@@ -11,7 +11,7 @@
  * Mount it first (outermost).
  */
 import type { MiddlewareHandler } from 'hono';
-import { buildSecurityHeaders, type SecurityHeadersOptions } from '../elysia/security-headers';
+import { buildSecurityHeaders, type SecurityHeadersOptions } from '../server/security-headers';
 
 export type { SecurityHeadersOptions };
 

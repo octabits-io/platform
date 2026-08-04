@@ -11,7 +11,7 @@ import { IoC, ServiceLifetime } from '../ioc/index.ts';
 import type { Logger } from '../logger/index.ts';
 import { createRequestScopeMiddleware, type RequestScopeEnv } from './request-scope';
 import { createHonoApp } from './create-app';
-import { ForbiddenError } from '../elysia/errors';
+import { ForbiddenError } from '../server/errors';
 
 const silentLogger: Logger = {
   debug: () => {}, info: () => {}, warn: () => {}, error: () => {},

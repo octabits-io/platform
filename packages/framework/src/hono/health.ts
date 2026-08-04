@@ -1,5 +1,5 @@
 /**
- * SPIKE (elysia-exit-option): Hono port of `../elysia/health`.
+ * Hono port of the `./elysia` health plugin (same contract, Hono idiom).
  *
  * Same trio (`/` alias, `/live`, `/ready`) and the same bodies. Two
  * simplifications over the Elysia version:
@@ -10,14 +10,14 @@
  *   plain try/catch in the handler. (Also sidesteps the Hono gotcha that a
  *   sub-app's `onError` must be registered before `route()` copies handlers.)
  *
- * The zod response schemas are shared from the Elysia module — they document
- * the contract; Hono does not validate responses (see spike findings on
- * swagger/OpenAPI, which is a separate `@hono/zod-openapi` opt-in).
+ * The zod response schemas come from `../server/responses` — they document
+ * the contract; Hono does not validate responses (OpenAPI/swagger is a
+ * separate opt-in layer).
  */
 import { Hono } from 'hono';
 import type { Logger } from '../logger/index.ts';
 
-export { SCHEMA_HEALTH_LIVE_RESPONSE, SCHEMA_HEALTH_READY_RESPONSE } from '../elysia/health';
+export { SCHEMA_HEALTH_LIVE_RESPONSE, SCHEMA_HEALTH_READY_RESPONSE } from '../server/responses';
 
 export interface CreateHealthAppOptions {
   /**
@@ -38,8 +38,12 @@ export interface CreateHealthAppOptions {
  * - `GET /`      - Backward compatible alias to `/live`
  * - `GET /live`  - Liveness probe (is the process alive?)
  * - `GET /ready` - Readiness probe (can it serve requests? runs `checkReady`)
+ *
+ * The return type is inferred, not annotated as `Hono` — see `./create-app`'s
+ * note: `Hono` is `BlankSchema`, and annotating it erases these three routes
+ * from any `hc` client built off the composed app.
  */
-export function createHealthApp(options: CreateHealthAppOptions): Hono {
+export function createHealthApp(options: CreateHealthAppOptions) {
   const { checkReady, logger, readyErrorMessage = 'Database unavailable' } = options;
 
   return new Hono()

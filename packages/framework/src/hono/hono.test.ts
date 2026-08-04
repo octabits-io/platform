@@ -18,7 +18,7 @@ import { testRequest } from '../server/testing';
 import { createEventHub } from '../events/hub.ts';
 import { createEventStreamHandler } from '../events/sse.ts';
 import type { EventEnvelope } from '../events/types.ts';
-import { ApiError, NotFoundError, statusErrorWithSet } from '../elysia/errors';
+import { ApiError, NotFoundError, statusErrorWithSet } from '../server/errors';
 import { registerErrorHandler, octValidator, RequestValidationError } from './errors';
 import { createSecurityHeadersMiddleware } from './security-headers';
 import { createHealthApp } from './health';

@@ -1,5 +1,5 @@
 /**
- * SPIKE (elysia-exit-option): Hono port of `../elysia/request-scope`.
+ * Hono port of the `./elysia` request-scope plugin (same contract, Hono idiom).
  *
  * Per-request IoC scope as ONE wrapping middleware — the shape the exit-option
  * doc predicts should replace Elysia's three-hook triangle
@@ -21,18 +21,21 @@
  * types `c.get('scope')` for consumers whose app declares a matching `Env`
  * (`new Hono<{ Variables: … }>()`). Unlike Elysia's `resolve` inference, the
  * compiler does not prove the middleware is actually mounted on the routes
- * that read the scope — see the spike findings.
+ * that read the scope — build route modules through `createRouteModule`
+ * (`./create-app`) to close that hole by construction.
  *
- * Reuses the structural contracts from the Elysia module unchanged.
+ * The structural contracts live in `../server/request-scope`, shared with the
+ * `./elysia` plugin.
  */
-import type { Context, Env, MiddlewareHandler } from 'hono';
-import type { DisposeOptions } from '../ioc/index.ts';
+import type { Context, MiddlewareHandler } from 'hono';
 import type { Logger } from '../logger/index.ts';
-import type {
-  CreateScopeResult,
-  RequestScope,
-  RequestScopeContext,
-} from '../elysia/request-scope';
+import {
+  disposeScopeQuietly,
+  unwrapCreateScopeResult,
+  type CreateScopeResult,
+  type RequestScope,
+  type RequestScopeContext,
+} from '../server/request-scope';
 
 export type { CreateScopeResult, RequestScope, RequestScopeContext };
 
@@ -64,22 +67,6 @@ export interface RequestScopeMiddlewareOptions<
   guard?: (scope: TScope, ctx: RequestScopeContext) => void | Promise<void>;
   /** Dispose failures are logged here instead of thrown. Omit to drop them silently. */
   logger?: Logger;
-}
-
-async function disposeQuietly(
-  scope: RequestScope | undefined,
-  opts: DisposeOptions,
-  logger?: Logger,
-): Promise<void> {
-  if (!scope) return;
-  try {
-    await scope.dispose(opts);
-  } catch (error) {
-    logger?.error(
-      `Request-scope dispose failed (commit: ${opts.commit})`,
-      error instanceof Error ? error : new Error(String(error)),
-    );
-  }
 }
 
 /** The Env contribution this middleware makes: the scope variable plus any extras. */
@@ -116,17 +103,13 @@ export function createRequestScopeMiddleware<
   return async (c, next) => {
     const ctx = requestScopeContext(c);
     const result = await createScope(ctx);
-    // A wrapper carries the scope under `scope` and has no dispose of its
-    // own; anything with a dispose IS the scope (same rule as the Elysia plugin).
-    const wrapped = typeof (result as { dispose?: unknown }).dispose !== 'function';
-    const scope = wrapped ? (result as { scope: TScope }).scope : (result as TScope);
-    const extras = wrapped ? (result as { extras: TExtras }).extras : undefined;
+    const { scope, extras } = unwrapCreateScopeResult(result);
 
     if (guard) {
       try {
         await guard(scope, ctx);
       } catch (error) {
-        await disposeQuietly(scope, { commit: false }, logger);
+        await disposeScopeQuietly(scope, { commit: false }, logger);
         throw error;
       }
     }
@@ -142,11 +125,11 @@ export function createRequestScopeMiddleware<
       disposed = true;
       // A downstream error was converted to a response by `app.onError` at the
       // innermost compose frame — `next()` resolved, but `c.error` carries it.
-      await disposeQuietly(scope, { commit: c.error === undefined }, logger);
+      await disposeScopeQuietly(scope, { commit: c.error === undefined }, logger);
     } finally {
       // Only reachable when `next()` itself threw (a non-`Error` value that
       // Hono rethrows past `onError`) — never a second dispose after success.
-      if (!disposed) await disposeQuietly(scope, { commit: false }, logger);
+      if (!disposed) await disposeScopeQuietly(scope, { commit: false }, logger);
     }
   };
 }
