@@ -16,6 +16,12 @@ export * from './config';
 export * from './responses';
 export * from './swagger';
 export * from './run';
+export * from './errors';
+export * from './request-scope';
+export * from './bearer-auth';
+export * from './security-headers';
+export * from './client-ip';
+export * from './rate-limit';
 
 // NOTE: the request-test harness lives at the `./server/testing` subpath, not
 // re-exported here: test helpers should not be reachable from production route

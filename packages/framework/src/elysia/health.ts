@@ -10,19 +10,10 @@
  * message }` for the 503.
  */
 import { Elysia } from 'elysia';
-import { z } from 'zod';
 import type { Logger } from '../logger/index.ts';
+import { SCHEMA_HEALTH_LIVE_RESPONSE, SCHEMA_HEALTH_READY_RESPONSE } from '../server/responses';
 
-/** Liveness response — `{ status: 'ok' }`. */
-export const SCHEMA_HEALTH_LIVE_RESPONSE = z.object({
-  status: z.literal('ok').describe('Liveness status'),
-});
-
-/** Readiness response — `{ status: 'ok', db: 'connected' }`. */
-export const SCHEMA_HEALTH_READY_RESPONSE = z.object({
-  status: z.literal('ok').describe('Readiness status'),
-  db: z.literal('connected').describe('Database connection status'),
-});
+export { SCHEMA_HEALTH_LIVE_RESPONSE, SCHEMA_HEALTH_READY_RESPONSE };
 
 export interface CreateHealthRoutesOptions {
   /**

@@ -7,6 +7,17 @@
  */
 import { z } from 'zod';
 
+/** Liveness response — `{ status: 'ok' }`. */
+export const SCHEMA_HEALTH_LIVE_RESPONSE = z.object({
+  status: z.literal('ok').describe('Liveness status'),
+});
+
+/** Readiness response — `{ status: 'ok', db: 'connected' }`. */
+export const SCHEMA_HEALTH_READY_RESPONSE = z.object({
+  status: z.literal('ok').describe('Readiness status'),
+  db: z.literal('connected').describe('Database connection status'),
+});
+
 /** Validation error with field details. */
 export const SCHEMA_VALIDATION_ERROR = z.object({
   key: z.literal('validation_error'),

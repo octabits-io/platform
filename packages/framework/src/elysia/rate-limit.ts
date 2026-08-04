@@ -8,6 +8,10 @@
  * callers — either an internal-secret request header (compared timing-safely)
  * **or** a client IP inside one of a set of trusted CIDR ranges.
  *
+ * The skip matcher and the timing-safe comparison are framework-neutral cores
+ * in `../server/rate-limit` (shared with the `./hono` limiter);
+ * `createCidrMatcher` is re-exported here for backwards compatibility.
+ *
  * The domain seam (which secret, which header, which ranges, the limit and
  * window) is fully parameterized — nothing here is coupled to a specific product
  * or environment.
@@ -26,11 +30,11 @@
  * single shared `'unknown'` bucket — the limiter then throttles all traffic
  * collectively. A warning is logged once when this is detected.
  */
-import { timingSafeEqual } from 'node:crypto';
-import { isIP } from 'node:net';
 import { rateLimit, type Options } from 'elysia-rate-limit';
 import type { Logger } from '../logger/index.ts';
-import { normalizeIp } from './client-ip';
+import { createCidrMatcher, timingSafeStringEqual } from '../server/rate-limit';
+
+export { createCidrMatcher };
 
 export interface RateLimitOptions {
   /** Maximum number of requests allowed per key within the window. */
@@ -87,65 +91,6 @@ const DEFAULT_WINDOW_MS = 60_000;
 const DEFAULT_INTERNAL_SECRET_HEADER = 'x-api-secret';
 const DEFAULT_ERROR_KEY = 'rate_limit_exceeded';
 const DEFAULT_ERROR_MESSAGE = 'Too many requests, please try again later';
-
-function ipv4ToInt(ip: string): number | null {
-  if (isIP(ip) !== 4) return null;
-  const parts = ip.split('.').map(Number);
-  return (((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>> 0);
-}
-
-interface Ipv4Range {
-  base: number;
-  mask: number;
-}
-
-/**
- * Build an IP matcher from `skipCidrs` entries: IPv4 CIDR (`a.b.c.d/nn`) and
- * bare IPv4/IPv6 addresses (exact match). Throws on invalid entries.
- * Exposed for direct use/testing.
- */
-export function createCidrMatcher(entries: string[]): (ip: string) => boolean {
-  const ranges: Ipv4Range[] = [];
-  const exact = new Set<string>();
-
-  for (const entry of entries) {
-    const trimmed = entry.trim();
-    const slash = trimmed.indexOf('/');
-    if (slash >= 0) {
-      const base = normalizeIp(trimmed.slice(0, slash));
-      const bits = Number(trimmed.slice(slash + 1));
-      const baseInt = base === null ? null : ipv4ToInt(base);
-      if (baseInt === null || !Number.isInteger(bits) || bits < 0 || bits > 32) {
-        throw new Error(`Invalid skipCidrs entry "${entry}" — expected IPv4 CIDR (a.b.c.d/nn) or a bare IP address`);
-      }
-      const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
-      ranges.push({ base: (baseInt & mask) >>> 0, mask });
-      continue;
-    }
-    const normalized = normalizeIp(trimmed);
-    if (normalized === null) {
-      throw new Error(`Invalid skipCidrs entry "${entry}" — expected IPv4 CIDR (a.b.c.d/nn) or a bare IP address`);
-    }
-    exact.add(normalized);
-  }
-
-  return (ip: string): boolean => {
-    const normalized = normalizeIp(ip);
-    if (normalized === null) return false;
-    if (exact.has(normalized)) return true;
-    const asInt = ipv4ToInt(normalized);
-    if (asInt === null) return false;
-    return ranges.some((range) => ((asInt & range.mask) >>> 0) === range.base);
-  };
-}
-
-/** Constant-time string comparison (length mismatch short-circuits). */
-function timingSafeStringEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
-}
 
 export function createRateLimit(options: RateLimitOptions) {
   const {

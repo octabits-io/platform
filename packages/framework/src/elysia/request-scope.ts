@@ -24,35 +24,21 @@
  * an errored request runs `onError` first and `onAfterResponse` after the
  * error response is sent.
  *
- * This module stays decoupled from the IoC class: the scope only has to
- * satisfy the structural {@link RequestScope} contract, so wrapped/augmented
- * containers (e.g. a scope carrying extra request context) type through
- * `ctx.scope` unchanged.
+ * The structural contracts (`RequestScope`, `RequestScopeContext`,
+ * `CreateScopeResult`) live in `../server/request-scope` — shared with the
+ * `./hono` middleware — and are re-exported here for backwards compatibility.
  */
 import { Elysia } from 'elysia';
-import type { DisposeOptions } from '../ioc/index.ts';
 import type { Logger } from '../logger/index.ts';
+import {
+  disposeScopeQuietly,
+  unwrapCreateScopeResult,
+  type CreateScopeResult,
+  type RequestScope,
+  type RequestScopeContext,
+} from '../server/request-scope';
 
-/** Structural contract the per-request scope must satisfy. */
-export interface RequestScope {
-  dispose(opts?: DisposeOptions): Promise<void>;
-}
-
-/**
- * The request context handed to `createScope` / `guard`. Structural subset of
- * Elysia's handler context — plugins mounted before routes see `params` only
- * as raw strings, hence the loose record type.
- */
-export interface RequestScopeContext {
-  request: Request;
-  path: string;
-  params: Record<string, string | undefined>;
-}
-
-/** `createScope` may return the scope alone, or the scope plus extra context values. */
-export type CreateScopeResult<TScope extends RequestScope, TExtras extends Record<string, unknown>> =
-  | TScope
-  | { scope: TScope; extras: TExtras };
+export type { CreateScopeResult, RequestScope, RequestScopeContext };
 
 export interface RequestScopePluginOptions<
   TScope extends RequestScope,
@@ -94,22 +80,6 @@ export interface RequestScopePluginOptions<
   name?: string;
 }
 
-async function disposeQuietly(
-  scope: RequestScope | undefined,
-  opts: DisposeOptions,
-  logger?: Logger,
-): Promise<void> {
-  if (!scope) return;
-  try {
-    await scope.dispose(opts);
-  } catch (error) {
-    logger?.error(
-      `Request-scope dispose failed (commit: ${opts.commit})`,
-      error instanceof Error ? error : new Error(String(error)),
-    );
-  }
-}
-
 /**
  * Build the request-scope plugin. Mount it before the routes that need
  * `ctx.scope`:
@@ -140,27 +110,23 @@ export function createRequestScopePlugin<
   return new Elysia({ name })
     .resolve({ as: 'scoped' }, async (ctx) => {
       const result = await createScope(ctx as unknown as RequestScopeContext);
-      // A wrapper carries the scope under `scope` and has no dispose of its
-      // own; anything with a dispose IS the scope.
-      const wrapped = typeof (result as { dispose?: unknown }).dispose !== 'function';
-      const scope = wrapped ? (result as { scope: TScope }).scope : (result as TScope);
-      const extras = wrapped ? (result as { extras: TExtras }).extras : undefined;
+      const { scope, extras } = unwrapCreateScopeResult(result);
       if (guard) {
         try {
           await guard(scope, ctx as unknown as RequestScopeContext);
         } catch (error) {
-          await disposeQuietly(scope, { commit: false }, logger);
+          await disposeScopeQuietly(scope, { commit: false }, logger);
           throw error;
         }
       }
       return { ...(extras as TExtras), [contextKey]: scope } as TExtras & Record<TKey, TScope>;
     })
     .onAfterResponse({ as: 'scoped' }, async (ctx) => {
-      await disposeQuietly(scopeOf(ctx), { commit: true }, logger);
+      await disposeScopeQuietly(scopeOf(ctx), { commit: true }, logger);
     })
     .onError({ as: 'scoped' }, async (ctx) => {
       // Runs before the error response is sent; `onAfterResponse` still fires
       // afterwards — that second dispose is a no-op on an idempotent scope.
-      await disposeQuietly(scopeOf(ctx), { commit: false }, logger);
+      await disposeScopeQuietly(scopeOf(ctx), { commit: false }, logger);
     });
 }

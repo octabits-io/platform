@@ -4,10 +4,10 @@
  *
  * Reads the `Authorization` header, hands it to the injected `authService`,
  * and either exposes the validated token on the route context or throws the
- * matching `ApiError`. The service seam is **structural** — anything with a
- * `validateAuthorizationHeader(header)` returning a `Result` fits, including
- * `…/auth`'s `createBearerAuthService` and `createJwtValidationService`. This
- * module therefore has no dependency on the auth module.
+ * matching `ApiError`. The structural contracts (`BearerTokenValidator`,
+ * `BearerAuthContext`, `BearerAuthFailure`, `BearerAuthStatus`) live in
+ * `../server/bearer-auth` — shared with the `./hono` middleware — and are
+ * re-exported here for backwards compatibility.
  *
  * Status selection is key-driven and follows the same override-first shape as
  * `./errors`: `jwks_unavailable → 503` is the only built-in rule (the auth
@@ -15,41 +15,17 @@
  * every other failure key is a 401 unless `statusOverrides` says otherwise.
  */
 import { Elysia } from 'elysia';
-import type { OctError, Result } from '../result/index.ts';
+import type { OctError } from '../result/index.ts';
+import {
+  BUILTIN_BEARER_STATUS_OVERRIDES,
+  type BearerAuthContext,
+  type BearerAuthFailure,
+  type BearerAuthStatus,
+  type BearerTokenValidator,
+} from '../server/bearer-auth';
 import { ApiError, ForbiddenError, UnauthorizedError } from './errors';
 
-/** The statuses this plugin can produce. */
-export type BearerAuthStatus = 401 | 403 | 503;
-
-/**
- * Structural contract for the injected validation service — satisfied by
- * `…/auth`'s `createBearerAuthService` and `createJwtValidationService`.
- */
-export interface BearerTokenValidator<TToken> {
-  validateAuthorizationHeader(header: string | undefined): Promise<Result<TToken, OctError>>;
-}
-
-/**
- * The request context handed to `authorize` / `onUnauthorized`. Structural
- * subset of Elysia's handler context — the plugin runs before routes, so
- * `params` are raw strings.
- */
-export interface BearerAuthContext {
-  request: Request;
-  path: string;
-  params: Record<string, string | undefined>;
-}
-
-/** Why the request was rejected, and with which status. */
-export interface BearerAuthFailure {
-  status: BearerAuthStatus;
-  /**
-   * The originating error. For a validation failure this is the service's own
-   * error verbatim (e.g. `{ key: 'jwks_unavailable' }`); for an `authorize`
-   * rejection it is the synthetic `{ key: 'forbidden' }`.
-   */
-  error: OctError;
-}
+export type { BearerAuthContext, BearerAuthFailure, BearerAuthStatus, BearerTokenValidator };
 
 export interface BearerAuthPluginOptions<TToken, TKey extends string = 'validatedToken'> {
   /** The validation service. Its token type flows through to `ctx[contextKey]`. */
@@ -88,11 +64,6 @@ export interface BearerAuthPluginOptions<TToken, TKey extends string = 'validate
   name?: string;
 }
 
-/** The auth provider is unreachable — a server fault, not a client error. */
-const BUILTIN_STATUS_OVERRIDES: Record<string, BearerAuthStatus> = {
-  jwks_unavailable: 503,
-};
-
 /**
  * Build the bearer-auth plugin. Mount it on the sub-tree whose routes require
  * a valid token; the token type flows into `ctx.validatedToken`:
@@ -128,7 +99,7 @@ export function createBearerAuthPlugin<TToken, TKey extends string = 'validatedT
     name = 'bearer-auth',
   } = options;
 
-  const overrides: Record<string, BearerAuthStatus> = { ...BUILTIN_STATUS_OVERRIDES, ...statusOverrides };
+  const overrides: Record<string, BearerAuthStatus> = { ...BUILTIN_BEARER_STATUS_OVERRIDES, ...statusOverrides };
 
   const reject = async (
     status: BearerAuthStatus,
