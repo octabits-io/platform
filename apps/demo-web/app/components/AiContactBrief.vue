@@ -3,7 +3,7 @@
  * The contact-brief workflow UI — the kit's `./ai` engine wired end to end.
  *
  * Every kit AI primitive appears once, with its transport injected from the
- * Eden client:
+ * `hc` client:
  *   - `useAiWorkflowGuard` — mount-time rehydration (`checkFn` = latest run
  *     for this entity) + duplicate-safe `trigger` + terminal callbacks.
  *   - `useActiveAiWorkflowProbe` — disables the trigger while a run is in
@@ -24,6 +24,7 @@ import {
   type AiWorkflowData,
 } from '@octabits-io/nuxt-ui-kit/ai'
 import { useApi } from '~/composables/useApi'
+import { call } from '~/composables/useApiCall'
 import { useApiError } from '~/composables/useApiError'
 import { useAiProgressStore } from '~/stores/aiProgress'
 import { CONTACT_BRIEF, type ContactBriefOutput } from '~/lib/aiWorkflows'
@@ -49,9 +50,9 @@ const entityRef = computed(() => `contact:${props.contact.id}`)
  * `ContactBriefOutput`.
  */
 async function fetchLatest(): Promise<AiWorkflowData<ContactBriefOutput> | null> {
-  const { data, error } = await api.ai.workflows.get({
-    query: { entityRef: entityRef.value, limit: 1 },
-  })
+  const { data, error } = await call(api.ai.workflows.$get({
+    query: { entityRef: entityRef.value, limit: '1' },
+  }))
   if (error) return null
   return (data.items[0] ?? null) as AiWorkflowData<ContactBriefOutput> | null
 }
@@ -70,7 +71,7 @@ const guard = useAiWorkflowGuard<ContactBriefOutput>({
 const probe = useActiveAiWorkflowProbe({
   entityRef,
   fetchHasActive: async (ref) => {
-    const { data, error } = await api.ai.workflows.active.get({ query: { entityRef: ref } })
+    const { data, error } = await call(api.ai.workflows.active.$get({ query: { entityRef: ref } }))
     return error ? null : data.active
   },
 })
@@ -80,10 +81,9 @@ const { cardState, dismissFailure } = useAiCardState(progress, entityRef, probe.
 async function start() {
   reviewDismissed.value = false
   await guard.trigger(async () => {
-    const { data, error } = await api.ai.workflows.post({
-      type: 'contact-brief',
-      contactId: props.contact.id,
-    })
+    const { data, error } = await call(api.ai.workflows.$post({
+      json: { type: 'contact-brief', contactId: props.contact.id },
+    }))
     // Throwing is the guard's abort signal (it returns false); surface first.
     if (error) { toastError(error); throw new Error(String(error.status)) }
     progress.track(data.workflowId, CONTACT_BRIEF.type, entityRef.value)
@@ -95,7 +95,7 @@ async function cancelRun() {
   const id = guard.workflow.value?.id
   if (!id) return
   await guard.cancel(async () => {
-    const { error } = await api.ai.workflows({ id }).cancel.post()
+    const { error } = await call(api.ai.workflows[':id'].cancel.$post({ param: { id: String(id) } }))
     if (error) toastError(error)
   })
   void probe.refresh()
@@ -124,10 +124,12 @@ async function applyBrief() {
   if (!output || !id) return
   applying.value = true
   try {
-    const { error } = await api.notes.post({
-      title: t('ai.brief.appliedTitle', { name: props.contact.name }),
-      body: `${output.summarize.summary}\n\n---\n\n${output.followup.draft}`,
-    })
+    const { error } = await call(api.notes.$post({
+      json: {
+        title: t('ai.brief.appliedTitle', { name: props.contact.name }),
+        body: `${output.summarize.summary}\n\n---\n\n${output.followup.draft}`,
+      },
+    }))
     if (error) { toastError(error); return }
     progress.markApplied(id)
     reviewDismissed.value = true

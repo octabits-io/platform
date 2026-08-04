@@ -12,6 +12,7 @@ import { defineStore } from 'pinia'
 import { createAiProgressCore } from '@octabits-io/nuxt-ui-kit/ai'
 import type { AiWorkflowStatusSnapshot } from '@octabits-io/nuxt-ui-kit/ai'
 import { useApi } from '~/composables/useApi'
+import { call } from '~/composables/useApiCall'
 
 /** Dialog-request channel shape (generic seam; this demo does not use it). */
 export interface AiDialogRequest {
@@ -24,7 +25,7 @@ export const useAiProgressStore = defineStore('ai-progress', () => {
 
   return createAiProgressCore<AiDialogRequest>({
     fetchWorkflowStatus: async (workflowId: number): Promise<AiWorkflowStatusSnapshot | null> => {
-      const { data, error } = await api.ai.workflows({ id: workflowId }).status.get()
+      const { data, error } = await call(api.ai.workflows[':id'].status.$get({ param: { id: String(workflowId) } }))
       // `null` means "unknown this cycle" — the core keeps the last state and
       // retries on the next tick instead of flapping.
       if (error) return null

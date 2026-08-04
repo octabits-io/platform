@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import * as z from 'zod'
 import { useDirtyTracking } from '@octabits-io/nuxt-ui-kit'
 import { useApi } from '~/composables/useApi'
+import { call } from '~/composables/useApiCall'
 import { useApiError } from '~/composables/useApiError'
 import { useDemoRole, type DemoRole } from '~/composables/useDemoRole'
 
@@ -24,7 +25,7 @@ const schema = z.object({
 })
 
 const { data: loaded } = await useAsyncData('settings', async () => {
-  const { data, error } = await api.settings.get()
+  const { data, error } = await call(api.settings.$get())
   if (error) { toastError(error); return null }
   return data
 })
@@ -36,7 +37,7 @@ async function save() {
   try {
     // `getDirtyFields()` yields exactly the changed keys — a minimal PATCH-style
     // payload, which the server's `.partial()` body schema accepts as-is.
-    const { data, error } = await api.settings.put(getDirtyFields())
+    const { data, error } = await call(api.settings.$put({ json: getDirtyFields() }))
     if (error) {
       // With the viewer role this is the server's 403 (`forbidden`), which the
       // kit's messenger resolves against `errors.forbidden` in the locale file.

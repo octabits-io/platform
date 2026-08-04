@@ -14,6 +14,12 @@ A small **contact desk** admin SPA that exercises
 
 That second job paid for itself immediately — see [Findings](#findings).
 
+**Stack note (2026-08-04):** the API client moved from Eden Treaty to Hono's
+`hc`, following `apps/demo-server`'s Elysia→Hono migration. The kit's
+`createTreatyClientFactory` is unchanged and still shipped for Eden-based consumers — it
+simply has no consumer here any more. What the swap cost, call site by call
+site, is [Finding #10](#10-eden--hc-what-the-swap-actually-costs-2026-08-04).
+
 Private workspace app. Never published.
 
 ## Run it
@@ -61,7 +67,7 @@ it leans on the kit's dev/E2E escape hatch:
 - `app/lib/bypass.ts` calls **`seedAuthBypassSession`**, which writes an
   oidc-client-ts-shaped session into `localStorage` under the exact key a
   `UserManager` reads (`oidc.user:<issuer>:<clientId>`). The session's
-  access token *is* the bypass secret, so the Eden client sends it as a bearer.
+  access token *is* the bypass secret, so the `hc` client sends it as a bearer.
 - The refusal is **build-time, not runtime**: `isProductionBuild` must be
   `import.meta.env.PROD`, so a leaked env var cannot switch the bypass on in
   production output. `nuxt build` therefore stays safe — the seed
@@ -84,10 +90,10 @@ end-session endpoint that does not exist here. And the full OIDC redirect flow
 | --- | --- | --- |
 | `/` | Nothing — the guard's policy hook redirects to `/dashboard` (or `/login`). | `createAuthGuard.afterAuthenticated` |
 | `/login` | Public route. "Sign in" re-seeds the bypass session and honours `?redirect=`. | `seedAuthBypassSession` |
-| `/dashboard` | Readiness probe, live pg-boss queue counts, settings summary, session chip. | Eden client, session store |
+| `/dashboard` | Readiness probe, live pg-boss queue counts, settings summary, session chip. | `hc` client, session store |
 | `/contacts` | Server-paginated table; create + edit modals; blind-index email search; per-row welcome-email and delete. | `usePagination`, `useConfirm`, `useDirtyTracking`, `ConfirmDialog.vue` |
 | `/notes` | List/detail: filter rail + note editor. Creation-date filter (single day or range) is client-side over the loaded list. | `SubSidebar.vue`, `DateInput.vue`, `DateRangeInput.vue`, `PeriodDisplay.vue`, `useDirtyTracking` |
-| `/files` | Upload (multipart through Eden), list with size/content-type, download links. | Eden client, `resolveApiBaseUrl` |
+| `/files` | Upload (multipart through `hc`'s `form` input), list with size/content-type, download links. | `hc` client, `resolveApiBaseUrl` |
 | `/settings` | Dirty-tracked settings form + the demo-role switch. Pick **viewer** and save to watch the server's 403 surface through the kit's error messenger. | `useDirtyTracking`, `createApiErrorMessenger` |
 
 The flow worth following is the demo server's own: set **Welcome email subject**
@@ -106,7 +112,8 @@ app/plugins/05.auth-bypass.client.ts  seeds the fake session before anything rea
 app/plugins/10.oidc.client.ts     attachSessionLifecycleHandlers + createLoginRedirector
 app/stores/auth.ts       createAuthSessionCore wrapped in the app's own Pinia store
 app/middleware/auth.global.ts     createAuthGuard → navigateTo
-app/composables/useApi.ts         createTreatyClientFactory + createAccessTokenProvider + resolveApiBaseUrl
+app/composables/useApi.ts         hcWithType + createAccessTokenProvider + resolveApiBaseUrl
+app/composables/useApiCall.ts     call() — hc Response -> the { data, error } envelope
 app/composables/useApiError.ts    createApiErrorMessenger bound to vue-i18n
 app/composables/useDateFormat.ts  createDateFormatter bound to vue-i18n
 app/components/App*.ts   one-line re-exports registering the kit's SFCs
@@ -127,7 +134,7 @@ routing/lazy-loading/SEO machinery would be weight without a job. `createI18n` +
 | `createAuthGuard` | `app/middleware/auth.global.ts` (incl. the `afterAuthenticated` policy hook) | ✅ |
 | `attachSessionLifecycleHandlers` | `app/plugins/10.oidc.client.ts` | ⚠️ wired for real, but with no IdP the events never fire |
 | `createLoginRedirector` | `app/plugins/10.oidc.client.ts` | ⚠️ same |
-| `createTreatyClientFactory` | `app/composables/useApi.ts` | ✅ |
+| `createTreatyClientFactory` | — | ❌ **since 2026-08-04**: this app moved to Hono's `hc` with the server. The kit export is unchanged and still shipped for Eden-based consumers; it simply has no consumer here. Its two jobs map onto `hc` options directly — see [Findings #4](#4-the-kits-createtreatyclientfactory-monopolises-treatys-headers-obsolete-here). |
 | `createAccessTokenProvider` | `app/composables/useApi.ts` | ✅ |
 | `resolveApiBaseUrl` | `app/composables/useApi.ts` (also for `<a href>` downloads) | ✅ |
 | `createApiErrorMessenger` | `app/composables/useApiError.ts`; 403 path on `/settings` | ✅ |
@@ -187,9 +194,11 @@ Only `SubSidebar` was affected: the similar inline assignments in
 `DateRangeInput.vue` are on plain `<div>`/`<span>` elements, whose native
 handler types accept any return.
 
-### 2. Eden `data` does not narrow on 201/202-only routes (server-side, not fixed)
+### 2. Eden `data` does not narrow on 201/202-only routes (historical)
 
 > **Fixed 2026-07-14:** the framework now ships `successResponses(status, schema)`, the demo-server routes adopted it, and the `'in' data` guards this finding forced are gone from this app.
+>
+> **Moot since 2026-08-04:** the whole failure mode was Elysia+Eden-specific — it came from Elysia *inferring* a 200 entry out of the handler's return union. Hono declares no such phantom status, so `POST /api/files` and `POST /api/contacts/:id/welcome` narrow on their own. `successResponses` stays in the route declarations because the OpenAPI document is better for it, but it is documentation now, not a workaround. Kept below because the reasoning is the clearest record of what Eden's `data`/`error` split actually did.
 
 
 On the demo server, routes whose only declared success code is `201`/`202` —
@@ -223,7 +232,7 @@ bug — but the ergonomic payload only lands for half the API conventions out
 there. A `mapQueryParams` seam (or documenting the refs as the real interface)
 would help.
 
-### 4. The kit's `createTreatyClientFactory` monopolises Treaty's `headers`
+### 4. The kit's `createTreatyClientFactory` monopolises Treaty's `headers` (obsolete here)
 
 `treatyConfig` is typed `Omit<Treaty.Config, 'headers' | 'parseDate'>` because
 the factory uses `headers` for bearer injection. An app needing an extra dynamic
@@ -231,6 +240,13 @@ header (here `x-demo-role`) must reach for `onRequest`, whose result Eden merges
 over the factory's headers. That works and is what `useApi.ts` does, but it is
 non-obvious. An `extraHeaders?: () => MaybePromise<Record<string, string>>`
 option would be the natural seam.
+
+> **Resolved by the move to `hc` (2026-08-04), not by a kit change.** `hc` takes
+> a single async `headers` thunk, so bearer *and* `x-demo-role` are produced by
+> the same function and the `onRequest` detour is gone — the seam this finding
+> asked for turns out to be `hc`'s default. The kit factory is untouched and
+> still shipped for Eden-based consumers; for an app staying on Eden, the `extraHeaders` option
+> above is still the right addition.
 
 ### 5. `useConfirm`'s singleton survives the package boundary (verified, no action)
 
@@ -259,10 +275,12 @@ empty shell.** It cannot distinguish a working app from a blank page.
 different origin (`:3100`) than the API (`:3101`), so the browser preflighted
 and the server — which had never wired `cors` — refused. `curl` sails through
 unaffected because it does not enforce the same-origin policy. Fixed in
-`apps/demo-server`: `cors()` now mounts through `createElysiaApp`'s `plugins`
-seam (which the framework documents for exactly this), with `x-demo-role` in
-`allowedHeaders` and `etag`/`content-disposition` in `exposeHeaders`. Origins
-come from `CORS_ORIGINS` (default `http://localhost:3100`).
+`apps/demo-server`: `cors()` (now Hono's own `hono/cors`, in `createHonoApp`'s
+`middleware` array) with `x-demo-role` in `allowHeaders` and
+`etag`/`content-disposition` in `exposeHeaders`. Origins come from
+`CORS_ORIGINS` (default `http://localhost:3100`). The moral repeated itself
+during the Hono migration on the server's own Swagger page — a wrong CSP host
+is another thing only a browser will tell you.
 
 **(b) `UDashboardPanel`'s named slots are default-slot *fallback*.** The
 component renders:
@@ -353,7 +371,7 @@ because it hits **any** source-shipped SFC that injects provider context —
 | `pnpm --filter @octabits-io/demo-server typecheck` | ✅ exit 0 (after the CORS wiring in #7a) |
 | Kit SFCs compile through the app's Vite | ✅ all 5 imported SFCs return compiled output |
 | Kit SFCs are in the typecheck program | ✅ probed each with a deliberate error; all 5 caught |
-| API contract via Eden (create/list/blind-index search/welcome + idempotent replay/multipart upload/RBAC 403) | ✅ exercised against the running server |
+| API contract via `hc` (create/list/blind-index search/welcome + idempotent replay/multipart upload/RBAC 403) | ✅ re-exercised in-browser against the running server after the Hono migration |
 | **In-browser render, all 5 pages** | ✅ Playwright: dashboard/contacts/notes/files/settings all render real API data (after #7) |
 | **`useConfirm` → RBAC 403 → error messenger** | ✅ dialog opens, `viewer` delete returns 403, toast reads "Your demo role is not allowed to do that…" from `errors.forbidden` |
 | **`useDirtyTracking`** | ✅ settings Save renders `[disabled]` until a field changes |
@@ -361,14 +379,71 @@ because it hits **any** source-shipped SFC that injects provider context —
 | **`DateRangeInput` + `PeriodDisplay`** | ✅ picking 7/1–7/31/2026 renders "7/1/2026 – 7/31/2026 · 31 days" and filters correctly (0 of 1 outside the range) — after #8 and #9 |
 | **Browser console** | ✅ 0 errors, 0 warnings across all pages and the filter interaction |
 
-Eden's multipart support was verified rather than assumed: a `File` in the body
-switches it to `FormData`, which matches the server's `t.Object({ file: t.File() })`
-— so `/files` uses the typed Eden call rather than a hand-rolled `fetch`.
+Multipart was re-verified rather than assumed after the migration: `hc`'s
+`form` input serialises a `File` to `FormData`, which matches the server's
+`octApiValidator('form', z.object({ file: z.file() }))` — so `/files` still uses
+the typed call rather than a hand-rolled `fetch`. (Both ends dropped a schema
+language in the process: the server route was this repo's last TypeBox use.)
 
 **Still not verified:** a real OIDC login (no IdP — see *Auth* above). The
 `./ai` surface — previously the other honest gap — is now covered end to end:
 trigger → parallel steps → review card → apply-creates-note, verified headless
 in-browser with zero console errors.
+
+### 10. Eden → `hc`: what the swap actually costs (2026-08-04)
+
+The whole client migration, for the record — the reference for anyone
+weighing the same swap.
+
+**Call-site shape.** 23 call sites, all mechanical, none restructured. Eden's
+`{ data, error }` envelope has no `hc` equivalent (`hc` resolves to a typed
+`Response`), so [`useApiCall.ts`](./app/composables/useApiCall.ts) puts it back
+in ~20 lines and every site kept its `if (error) { toastError(error); return }`
+shape. Without it each site would have grown three lines and an easy-to-forget
+`await res.json()`. The mapping:
+
+| Eden | `hc` |
+| --- | --- |
+| `api.contacts.get({ query })` | `call(api.contacts.$get({ query }))` |
+| `api.contacts.post({ ...body })` | `call(api.contacts.$post({ json: body }))` |
+| `api.contacts({ id }).put(body)` | `call(api.contacts[':id'].$put({ param: { id }, json: body }))` |
+| `api.contacts({ id }).welcome.post()` | `call(api.contacts[':id'].welcome.$post({ param: { id } }))` |
+| `api.files.post({ file })` | `call(api.files.$post({ form: { file } }))` |
+| `{ data, error }`, `data` narrowed by `if (error)` | identical, via `call()` |
+| `error` is `{ status, value }` | identical — `call()` keeps that shape on purpose |
+
+Two real differences behind the table: **path params move into an explicit
+`param` object** keyed by the literal route pattern (`[':id']`, not `({ id })`),
+and **query values are strings** — `hc` serialises them verbatim, so a page
+passes `{ pageSize: String(n) }` and the route's `z.coerce.number()` converts.
+
+**What got simpler.** `parseDate: false` has no counterpart to set — `hc`
+returns exactly what `res.json()` produced, so dates stay strings by
+construction. Bearer + `x-demo-role` collapse into one async `headers` thunk
+(see Finding #4). And Eden's 201/202 narrowing bug (Finding #2) does not exist.
+
+**What to watch, and the trap worth the whole section.** `hc`'s client type is
+derived by walking the app's route schema, and it is *deep*. Three separate
+ways to lose or break it turned up here, all silent at runtime:
+
+- A framework factory annotating its return as `Hono` erases every route from
+  the client type. The app still serves; `hc<App>` just has no properties.
+- Deriving a route's response type from a zod schema built over an unresolved
+  generic (`…/hono/flow`'s workflow view did) carries the whole unevaluated
+  conditional into every route's output. **TypeScript 7 absorbs it; TypeScript
+  6 — which this app pins, because `vue-tsc` needs it — blows its call stack**
+  on `hc<App>`, and on the bare `App` type. `nuxt typecheck` died with
+  `RangeError: Maximum call stack size exceeded` and no file name.
+- Filtering a response union on `{ ok: true }` silently yields `never`: a
+  handler returning `c.json(value)` with no explicit status gets the wide
+  `ContentfulStatusCode`, so `ok` widens to `boolean`. `call()` therefore
+  filters *by exclusion* (`R extends { ok: false } ? never : …`).
+
+All three were fixed in `@octabits-io/framework` with tests pinning them, so a
+consumer starting today does not meet them — but they are the shape of the
+failure to expect when composing a large Hono app, and the reason
+[`@octabits-io/demo-server/client`](../demo-server/src/client.ts) instantiates
+`hc<App>` **once** (Hono's documented mitigation) instead of at each import.
 
 ### AI wiring gotcha: `@` in vue-i18n messages
 

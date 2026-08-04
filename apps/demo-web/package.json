@@ -3,7 +3,7 @@
   "version": "0.0.15",
   "private": true,
   "type": "module",
-  "description": "Contact-desk demo SPA — living documentation for @octabits-io/nuxt-ui-kit and the first in-repo consumer that typechecks the kit's .vue SFCs",
+  "description": "Contact-desk demo SPA \u2014 living documentation for @octabits-io/nuxt-ui-kit and the first in-repo consumer that typechecks the kit's .vue SFCs",
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt build",
@@ -12,13 +12,12 @@
     "typecheck": "nuxt typecheck"
   },
   "dependencies": {
-    "@elysiajs/eden": "^1.4.9",
     "@internationalized/date": "^3.12.3",
     "@nuxt/ui": "^4.10.0",
     "@octabits-io/nuxt-ui-kit": "workspace:*",
     "@pinia/nuxt": "^1.0.1",
     "date-fns": "^4.4.0",
-    "elysia": "^1.4.29",
+    "hono": "^4.13.0",
     "nuxt": "^4.5.1",
     "oidc-client-ts": "^3.5.0",
     "pinia": "^4.0.2",

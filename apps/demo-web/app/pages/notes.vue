@@ -5,6 +5,7 @@ import * as z from 'zod'
 import { useConfirm, useDirtyTracking } from '@octabits-io/nuxt-ui-kit'
 import type { Period } from '@octabits-io/nuxt-ui-kit/dates'
 import { useApi } from '~/composables/useApi'
+import { call } from '~/composables/useApiCall'
 import { useApiError } from '~/composables/useApiError'
 import { useDateFormat } from '~/composables/useDateFormat'
 
@@ -31,7 +32,7 @@ const loading = ref(false)
 async function load() {
   loading.value = true
   try {
-    const { data, error } = await api.notes.get({ query: { page: 1, pageSize: 100 } })
+    const { data, error } = await call(api.notes.$get({ query: { page: '1', pageSize: '100' } }))
     if (error) { toastError(error); return }
     notes.value = data.items
   } finally {
@@ -141,12 +142,12 @@ async function save() {
   saving.value = true
   try {
     if (creatingNew.value) {
-      const { error } = await api.notes.post({ ...editorState })
+      const { error } = await call(api.notes.$post({ json: { ...editorState } }))
       if (error) { toastError(error); return }
       toast.add({ title: t('notes.create.success'), color: 'success' })
       creatingNew.value = false
     } else if (selectedId.value) {
-      const { error } = await api.notes({ id: selectedId.value }).put({ ...editorState })
+      const { error } = await call(api.notes[':id'].$put({ param: { id: selectedId.value }, json: { ...editorState } }))
       if (error) { toastError(error); return }
       toast.add({ title: t('notes.edit.success'), color: 'success' })
     } else {
@@ -167,7 +168,7 @@ async function remove(note: Note) {
   })
   if (!ok) return
 
-  const { error } = await api.notes({ id: note.id }).delete()
+  const { error } = await call(api.notes[':id'].$delete({ param: { id: note.id } }))
   if (error) { toastError(error); return }
   toast.add({ title: t('notes.delete.success'), color: 'success' })
   clearSelection()

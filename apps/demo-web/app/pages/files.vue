@@ -3,6 +3,7 @@ import { computed, h, ref, resolveComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { TableColumn } from '@nuxt/ui'
 import { useApi, useApiBase } from '~/composables/useApi'
+import { call } from '~/composables/useApiCall'
 import { useApiError } from '~/composables/useApiError'
 
 const { t } = useI18n()
@@ -28,7 +29,7 @@ const selected = ref<File | null>(null)
 async function load() {
   loading.value = true
   try {
-    const { data, error } = await api.files.get()
+    const { data, error } = await call(api.files.$get())
     if (error) { toastError(error); return }
     files.value = data.items
   } finally {
@@ -46,7 +47,7 @@ async function upload() {
     // Eden handles multipart natively: a `File` anywhere in the body switches
     // it to FormData, which lines up with the server's `t.Object({ file: t.File() })`.
     // No manual FormData, and the field name is still type-checked.
-    const { data, error } = await api.files.post({ file })
+    const { data, error } = await call(api.files.$post({ form: { file } }))
     if (error) { toastError(error); return }
     toast.add({ title: t('files.uploaded', { name: data.name }), color: 'success' })
     selected.value = null

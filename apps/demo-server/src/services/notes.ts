@@ -6,7 +6,7 @@
  *   - `tableName` must match a key in `db.query.*`, so the table has to be part
  *     of the schema object handed to `createDrizzle`.
  *   - `resourceName` drives the not-found error key (`note_not_found` → 404 via
- *     the elysia error module's key conventions — no status mapping needed).
+ *     the framework's key conventions — no status mapping needed).
  *   - `dateProvider` stamps `updatedAt` on update.
  *
  * `createScopedCrudService` is its partitioned sibling (every query ANDed with a

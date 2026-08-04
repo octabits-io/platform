@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { useApi, useApiBase } from '~/composables/useApi'
+import { call } from '~/composables/useApiCall'
 import { useDemoRole } from '~/composables/useDemoRole'
 import { useAuthStore } from '~/stores/auth'
 
@@ -23,12 +24,12 @@ const { data: health } = await useAsyncData('health', async () => {
 })
 
 const { data: queue } = await useAsyncData('queue-stats', async () => {
-  const { data } = await api.queue.stats.get()
+  const { data } = await call(api.queue.stats.$get())
   return data
 })
 
 const { data: settings } = await useAsyncData('dashboard-settings', async () => {
-  const { data } = await api.settings.get()
+  const { data } = await call(api.settings.$get())
   return data
 })
 </script>

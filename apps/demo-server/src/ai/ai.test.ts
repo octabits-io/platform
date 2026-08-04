@@ -2,7 +2,7 @@
  * The AI workflow end to end, fully in memory — no Postgres, no pg-boss, no
  * network, no API key.
  *
- * Drives the real `/api/ai` routes through `app.handle`: trigger → drain the
+ * Drives the real `/api/ai` routes through the shared test harness: trigger → drain the
  * in-process queue (the stand-in for the pg-boss step worker) → poll status →
  * assert the kit-shaped `AiWorkflowData`, the parallel step layout, the mock
  * model's scripted outputs, and the token/cost rollup the instrumented model
@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, beforeAll } from 'bun:test';
 import { testRequest } from '@octabits-io/framework/server/testing';
+import { testableHonoApp } from '@octabits-io/framework/hono';
 import type { Logger } from '@octabits-io/framework/logger';
 import type { AppDatabase } from '@octabits-io/framework/drizzle/factory';
 import type { ObjectStorageService } from '@octabits-io/framework/storage';
@@ -17,7 +18,7 @@ import type { BossManager } from '@octabits-io/framework/queue';
 import { ok, err } from '@octabits-io/framework/result';
 import { loadConfig } from '../config.ts';
 import { buildContainer } from '../container.ts';
-import { createDemoApp, type App } from '../app.ts';
+import { createDemoApp } from '../app.ts';
 import type { Schema } from '../db/schema.ts';
 import type { ContactsService } from '../services/contacts.ts';
 import { createInMemoryAiRuntime, type InMemoryAiRuntime } from './testing.ts';
@@ -37,7 +38,7 @@ const contactsStub = {
       : err({ key: 'contact_not_found' as const, message: `Contact ${id} not found` }),
 } as unknown as ContactsService;
 
-let app: App;
+let app: ReturnType<typeof testableHonoApp>;
 let ai: InMemoryAiRuntime;
 
 interface WorkflowData {
@@ -61,7 +62,7 @@ beforeAll(async () => {
     boss: {} as BossManager,
   });
   ai = createInMemoryAiRuntime({ host: { contactsService: contactsStub, logger: silentLogger }, logger: silentLogger });
-  app = createDemoApp({ container, config, ai, checkReady: async () => {} });
+  app = testableHonoApp(createDemoApp({ container, config, ai, checkReady: async () => {} }));
 });
 
 describe('AI workflow routes (fully in-memory)', () => {

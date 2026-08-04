@@ -2,13 +2,17 @@
  * AI workflow routes — what remains app-side after both extraction layers.
  *
  * The generic read/control routes (list, active-probe, get, snapshot, cancel,
- * resume) come from `createFlowWorkflowRoutes` (`…/elysia/flow`), which serves
+ * resume) come from `createFlowWorkflowRoutes` (`…/hono/flow`), which serves
  * flow's public wire view — the schemas, the record→API projection, and the
- * step-status fold that used to be ~100 hand-written lines in this file now
- * live upstream (flow owns the shapes, the framework owns the serving
- * conventions). The kit's `AiWorkflowData` contract is that view plus
- * `appliedAt`, added through the `extendWorkflow` seam so the declared schema
- * and the served value cannot drift.
+ * step-status fold that used to be ~100 hand-written lines in this file live
+ * upstream (flow owns the shapes, the framework owns the serving conventions).
+ * The kit's `AiWorkflowData` contract is that view plus `appliedAt`, added
+ * through the `extendWorkflow` seam so the declared schema and the served
+ * value cannot drift.
+ *
+ * The Hono factory drops the Elysia version's `prefix`/`tags` options: it
+ * returns a plain sub-app the caller mounts with `app.route('/workflows', …)`,
+ * so *where* it lives is the caller's call, not an option.
  *
  * What stays here is genuinely this app's:
  * - the trigger route — `contactId` body vocabulary, the `contact:<id>`
@@ -17,17 +21,18 @@
  * - `/usage` — the quota/usage read over `@octabits-io/flow/ai`'s aggregation
  *   service (an AI-layer concern, not a core engine projection).
  */
-import { Elysia } from 'elysia';
+import { Hono } from 'hono';
 import { z } from 'zod';
 import { errorResponses, successResponses } from '@octabits-io/framework/server';
-import { createErrorMapper } from '@octabits-io/framework/elysia';
-import { createFlowWorkflowRoutes } from '@octabits-io/framework/elysia/flow';
+import { describeApiRoute, octApiValidator } from '@octabits-io/framework/hono/openapi';
+import { createFlowWorkflowRoutes } from '@octabits-io/framework/hono/flow';
 import type { AiUsageAggregationService } from '@octabits-io/flow/ai';
+import { createErrorJson } from '../http.ts';
 import type { DemoAiEngine } from '../ai/engine.ts';
 import { aiWorkflowsByType, CONTACT_BRIEF_TYPE } from '../ai/workflows.ts';
 
 const AI_ERROR_OVERRIDES = { ai_quota_exceeded: 429 };
-const { statusErrorWithSet } = createErrorMapper(AI_ERROR_OVERRIDES);
+const errorJson = createErrorJson(AI_ERROR_OVERRIDES);
 
 const isoDate = (d: Date): string => d.toISOString().split('T')[0]!;
 
@@ -41,6 +46,8 @@ const SCHEMA_USAGE_ROW = z.object({
   estimatedCostMicros: z.number().int(),
 });
 
+const TAGS = ['AI'];
+
 export interface AiRoutesDeps {
   engine: DemoAiEngine;
   usage: AiUsageAggregationService;
@@ -48,39 +55,73 @@ export interface AiRoutesDeps {
 }
 
 export function createAiRoutes({ engine, usage, partitionKey }: AiRoutesDeps) {
-  return new Elysia({ prefix: '/ai', tags: ['AI'] })
+  return new Hono()
     .post(
       '/workflows',
-      async ({ body, set }) => {
+      describeApiRoute({
+        summary: 'Start an AI workflow for a contact',
+        tags: TAGS,
+        responses: {
+          ...successResponses(202, z.object({ workflowId: z.number().int(), totalSteps: z.number().int() })),
+          ...errorResponses(400, 404, 429, 500),
+        },
+      }),
+      octApiValidator('json', z.object({ type: z.literal(CONTACT_BRIEF_TYPE), contactId: z.uuid() })),
+      async (c) => {
+        const body = c.req.valid('json');
         const workflow = aiWorkflowsByType[body.type];
         if (!workflow) {
-          return statusErrorWithSet(set, { key: 'workflow_type_not_found', message: `Unknown workflow type '${body.type}'` });
+          return errorJson(c, {
+            key: 'workflow_type_not_found',
+            message: `Unknown workflow type '${body.type}'`,
+          });
         }
         const started = await workflow.start(
           engine,
           { contactId: body.contactId },
           { entityRef: `contact:${body.contactId}` },
         );
-        if (!started.ok) return statusErrorWithSet(set, started.error);
-        set.status = 202;
-        return { workflowId: started.value.workflowId, totalSteps: started.value.totalSteps };
-      },
-      {
-        body: z.object({
-          type: z.literal(CONTACT_BRIEF_TYPE),
-          contactId: z.uuid(),
-        }),
-        response: {
-          ...successResponses(202, z.object({ workflowId: z.number().int(), totalSteps: z.number().int() })),
-          ...errorResponses(400, 404, 429, 500),
-        },
-        detail: { summary: 'Start an AI workflow for a contact' },
+        if (!started.ok) return errorJson(c, started.error);
+        return c.json({ workflowId: started.value.workflowId, totalSteps: started.value.totalSteps }, 202);
       },
     )
-    .use(
+    .get(
+      '/usage',
+      describeApiRoute({
+        summary: 'AI usage rollup (last 30 days) and current quota usage',
+        tags: TAGS,
+        responses: {
+          200: z.object({
+            byDate: z.array(SCHEMA_USAGE_ROW),
+            current: z.object({
+              today: z.object({ workflowCount: z.number().int() }),
+              thisMonth: z.object({ workflowCount: z.number().int() }),
+              running: z.object({ count: z.number().int() }),
+            }),
+          }),
+          ...errorResponses(429, 500),
+        },
+      }),
+      async (c) => {
+        const end = new Date();
+        const start = new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000);
+        const range = { partitionKey, startDate: isoDate(start), endDate: isoDate(end) };
+        const [byDate, current] = await Promise.all([
+          usage.getUsageSummary(range),
+          usage.getCurrentQuotaUsage({ partitionKey }),
+        ]);
+        if (!byDate.ok) return errorJson(c, byDate.error);
+        if (!current.ok) return errorJson(c, current.error);
+        return c.json({ byDate: byDate.value, current: current.value });
+      },
+    )
+    // Mounted last so `/workflows` (POST, above) is declared before the
+    // factory's `/workflows/:id` family — Hono's router resolves either order,
+    // but reading order should match route specificity.
+    .route(
+      '/workflows',
       createFlowWorkflowRoutes({
         engine,
-        tags: ['AI'],
         errorOverrides: AI_ERROR_OVERRIDES,
         extendWorkflow: {
           // `appliedAt` is the kit's vocabulary, not flow's — no apply flow on
@@ -92,34 +133,5 @@ export function createAiRoutes({ engine, usage, partitionKey }: AiRoutesDeps) {
           }),
         },
       }),
-    )
-    .get(
-      '/usage',
-      async ({ set }) => {
-        const end = new Date();
-        const start = new Date(end.getTime() - 29 * 24 * 60 * 60 * 1000);
-        const range = { partitionKey, startDate: isoDate(start), endDate: isoDate(end) };
-        const [byDate, current] = await Promise.all([
-          usage.getUsageSummary(range),
-          usage.getCurrentQuotaUsage({ partitionKey }),
-        ]);
-        if (!byDate.ok) return statusErrorWithSet(set, byDate.error);
-        if (!current.ok) return statusErrorWithSet(set, current.error);
-        return { byDate: byDate.value, current: current.value };
-      },
-      {
-        response: {
-          200: z.object({
-            byDate: z.array(SCHEMA_USAGE_ROW),
-            current: z.object({
-              today: z.object({ workflowCount: z.number().int() }),
-              thisMonth: z.object({ workflowCount: z.number().int() }),
-              running: z.object({ count: z.number().int() }),
-            }),
-          }),
-          ...errorResponses(429, 500),
-        },
-        detail: { summary: 'AI usage rollup (last 30 days) and current quota usage' },
-      },
     );
 }

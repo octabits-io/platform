@@ -28,6 +28,7 @@ import { buildContainer, createSystemScopeFactory } from './container.ts';
 import { welcomeEmailQueue } from './queues/welcome-email.ts';
 import { createAiRuntime } from './ai/runtime.ts';
 import { createDemoApp } from './app.ts';
+import { createBunServer } from './bun-server.ts';
 
 await runServer({
   load: async () => {
@@ -111,14 +112,20 @@ await runServer({
       },
     });
 
+    // A Hono app is a handler, not a server — `createBunServer` is the local
+    // adapter that gives `runServer` the `.listen(port)` it drives. Everything
+    // else in this tail (fatal-bootstrap logging, signal wiring, the teardown
+    // watchdog) survived the Elysia→Hono swap untouched.
+    const server = createBunServer(app, { maxRequestBodySize: 10 * 1024 * 1024 });
+
     return {
-      app,
+      app: server,
       port: config.port,
       logger,
       onStarted: ({ port }) =>
         logger.info('demo-server listening', { port, url: config.publicBaseUrl }),
       stop: async () => {
-        await app.stop();
+        await server.stop();
         await eventRelay.stop();
         await ai.stop();
         await dlq.stop();

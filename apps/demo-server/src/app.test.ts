@@ -1,6 +1,11 @@
 /**
  * Route tests via `@octabits-io/framework/server/testing` — `testRequest`
- * drives the composed app through `app.handle` with no port and no Postgres.
+ * drives the composed app with no port and no Postgres.
+ *
+ * The harness is framework-agnostic (`{ handle(Request): Promise<Response> }`),
+ * and `testableHonoApp` is the one-liner that bridges a Hono app's `fetch` into
+ * it: **the assertions below are byte-for-byte the ones that ran against the
+ * Elysia build.** That is the migration's cheapest and strongest signal.
  *
  * The container is built with inert stand-ins for `db`/`storage`/`boss`: the
  * routes under test either never resolve them (health, tools, protected) or
@@ -10,13 +15,14 @@
  */
 import { describe, it, expect, beforeAll } from 'bun:test';
 import { testRequest, testAuthenticatedRequest } from '@octabits-io/framework/server/testing';
+import { testableHonoApp } from '@octabits-io/framework/hono';
 import type { Logger } from '@octabits-io/framework/logger';
 import type { AppDatabase } from '@octabits-io/framework/drizzle/factory';
 import type { ObjectStorageService } from '@octabits-io/framework/storage';
 import type { BossManager } from '@octabits-io/framework/queue';
 import { loadConfig } from './config.ts';
 import { buildContainer } from './container.ts';
-import { createDemoApp, type App } from './app.ts';
+import { createDemoApp } from './app.ts';
 import { createDemoApiKeys } from './api-keys.ts';
 import { createInMemoryAiRuntime } from './ai/testing.ts';
 import type { ContactsService } from './services/contacts.ts';
@@ -27,7 +33,7 @@ const silentLogger: Logger = {
   child: () => silentLogger,
 };
 
-let app: App;
+let app: ReturnType<typeof testableHonoApp>;
 let bearer: string;
 
 beforeAll(async () => {
@@ -47,7 +53,7 @@ beforeAll(async () => {
     host: { contactsService: {} as ContactsService, logger: silentLogger },
     logger: silentLogger,
   });
-  app = createDemoApp({ container, config, apiKeys, ai, checkReady: async () => {} });
+  app = testableHonoApp(createDemoApp({ container, config, apiKeys, ai, checkReady: async () => {} }));
 });
 
 describe('demo-server routes (no Postgres)', () => {

@@ -1,10 +1,12 @@
 /**
- * Per-request IoC scope (`…/elysia`'s `createRequestScopePlugin` + `…/ioc`).
+ * Per-request IoC scope (`…/hono`'s `createRequestScopeMiddleware` + `…/ioc`).
  *
- * Every request gets a scoped child container as `ctx.scope`. The plugin owns
- * the lifecycle triangle (dispose on success with `commit: true`, on handler
- * error and guard rejection with `commit: false`), so nothing here — or in any
- * route — worries about leaks or double-dispose.
+ * Every request gets a scoped child container as `c.get('scope')`. The
+ * middleware owns the whole lifecycle in ONE wrapping hook — Elysia needed a
+ * `resolve`/`onAfterResponse`/`onError` triangle for the same guarantee — so
+ * nothing here, or in any route, worries about leaks or double-dispose:
+ * `commit: true` on success, `commit: false` on a handler error or a guard
+ * rejection.
  *
  * What this app seeds per request (see `createDemoRequestScope`):
  *  - `role` — the `x-demo-role` header, stand-in for a validated JWT claim.
@@ -15,16 +17,32 @@
  *    requests the cache never goes stale.
  *
  * The `guard` rejects unknown roles before any handler runs — thrown after the
- * scope exists, which is precisely the case the plugin disposes for you.
+ * scope exists, which is precisely the case the middleware disposes for you.
+ *
+ * `DemoScopeEnv` is the Hono `Env` contribution. Route files never declare it
+ * by hand: they go through `createRouteModule`, which only hands out a builder
+ * app once the matching middleware has been supplied — Hono types `c.get()`
+ * off a DECLARED `Env` and cannot otherwise prove the middleware is mounted.
  */
-import { createRequestScopePlugin, BadRequestError } from '@octabits-io/framework/elysia';
+import { createRequestScopeMiddleware, type RequestScopeEnv } from '@octabits-io/framework/hono';
+import { BadRequestError } from '@octabits-io/framework/server';
 import type { IoC } from '@octabits-io/framework/ioc';
 import type { Logger } from '@octabits-io/framework/logger';
-import { createDemoRequestScope, type DemoServices } from './container.ts';
+import {
+  createDemoRequestScope,
+  type DemoRequestServices,
+  type DemoServices,
+} from './container.ts';
 import { DEMO_ROLES } from './rbac.ts';
 
-export function createDemoScopePlugin(container: IoC<DemoServices>, logger: Logger) {
-  return createRequestScopePlugin({
+/** The per-request scope handed to route handlers. */
+export type DemoScope = IoC<DemoRequestServices & DemoServices>;
+
+/** The Env contribution — `c.get('scope')` typed as the demo's request scope. */
+export type DemoScopeEnv = RequestScopeEnv<DemoScope>;
+
+export function createDemoScopeMiddleware(container: IoC<DemoServices>, logger: Logger) {
+  return createRequestScopeMiddleware<DemoScope>({
     createScope: ({ request }) => createDemoRequestScope(container, request),
     guard: (scope) => {
       const role = scope.resolve('role');
@@ -39,5 +57,5 @@ export function createDemoScopePlugin(container: IoC<DemoServices>, logger: Logg
   });
 }
 
-/** Route factories take this to get `ctx.scope` typed in their handlers. */
-export type DemoScopePlugin = ReturnType<typeof createDemoScopePlugin>;
+/** Route factories take this to get `c.get('scope')` typed in their handlers. */
+export type DemoScopeMiddleware = ReturnType<typeof createDemoScopeMiddleware>;

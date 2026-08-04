@@ -13,6 +13,15 @@ service. It has two jobs:
 Private workspace app. Not published, no build step — Bun runs the TypeScript
 sources directly.
 
+**Stack note (2026-08-04):** this app runs on **Hono**
+(`@octabits-io/framework/hono`), ported from Elysia as the end-to-end proof of
+the `./hono` glue module. Nothing outside the glue moved:
+every service, container registration, queue, schema and — tellingly — every
+test *assertion* is byte-for-byte what it was. The diff is route declarations,
+the app skeleton, and `main.ts`'s listen call. The Hono-specific traps found on
+the way are collected under
+[Notes for framework readers](#hono-specific-new-with-the-2026-08-04-migration).
+
 ## Run it
 
 ```bash
@@ -63,7 +72,8 @@ Tables are created at startup with idempotent `CREATE TABLE IF NOT EXISTS` DDL
 | GET | `/api/captcha/challenge` | Captcha contract (no-op provider) |
 | POST | `/api/captcha/verify` | Redeem a solution → verified token |
 | GET | `/api/protected/whoami` | **Bearer API-key auth** (`createBearerAuthPlugin` + `…/auth`) — the boot log prints a `demo_…` key once |
-| GET | `/swagger` | OpenAPI UI (`buildSwaggerOptions` + caller-built `@elysiajs/swagger`; `ENABLE_SWAGGER=false` to disable) |
+| GET | `/openapi.json` | OpenAPI 3.1 spec (`mountOpenApi` + `buildSwaggerOptions`; `ENABLE_SWAGGER=false` to disable both) |
+| GET | `/swagger` | Browsable UI (`@hono/swagger-ui`, an app-level choice — the framework takes no UI dep) |
 
 ### The one flow worth following
 
@@ -93,9 +103,10 @@ claim; the header keeps the 403 path one curl away.
 ### CORS
 
 `apps/demo-web` is served from `http://localhost:3100` — a different origin than
-this API — so it needs CORS. `cors()` mounts through `createElysiaApp`'s
-`plugins` seam (the framework takes plugins as ready-built instances so it need
-not depend on `@elysiajs/*`), with `x-demo-role` in `allowedHeaders` and
+this API — so it needs CORS. `cors()` comes from Hono's own `hono/cors` and
+goes into `createHonoApp`'s `middleware` array — on Hono there is no plugins
+seam to design around, because middleware is just middleware — with
+`x-demo-role` in `allowHeaders` and
 `etag`/`content-disposition` in `exposeHeaders` so the blob 304s stay readable
 cross-origin. Allowed origins come from `CORS_ORIGINS` (CSV, default
 `http://localhost:3100`).
@@ -123,12 +134,14 @@ saw nothing but preflight failures. A browser is the only client that tests CORS
 | `./drizzle/crud` | [`services/notes.ts`](./src/services/notes.ts) — `createBaseCrudService` drives the whole entity | ✅ |
 | `./drizzle/config` | [`services/settings.ts`](./src/services/settings.ts) — unscoped `createScopedConfigService` | ✅ |
 | `./drizzle/idempotency` | `POST /api/contacts/:id/welcome` — `begin()` / `commit()` | ✅ |
-| `./elysia` | [`app.ts`](./src/app.ts) — `createElysiaApp`, `createHealthRoutes`, `registerGracefulShutdown`, `statusErrorWithSet`, `errorResponses`, env helpers; [`request-scope.ts`](./src/request-scope.ts) — `createRequestScopePlugin`: contacts + settings resolve via `ctx.scope` (request-seeded `role`, per-request `settingsService` cache), the `guard` rejects unknown roles with `invalid_demo_role` → 400; `successResponses` on every non-200-success route (the Eden narrowing fix); `runElysiaServer` owns [`main.ts`](./src/main.ts)'s tail; `createBearerAuthPlugin` guards `/api/protected`; `buildSwaggerOptions` + `assertNotInProduction` in [`config.ts`](./src/config.ts); [`app.test.ts`](./src/app.test.ts) runs on `…/elysia/testing`'s `testRequest` | ✅ |
-| `./elysia/flow` | [`routes/ai.ts`](./src/routes/ai.ts) — `createFlowWorkflowRoutes` serves the generic workflow read/control routes (list/active/get/snapshot/cancel/resume) over flow's public wire view; `appliedAt` rides the `extendWorkflow` seam, `ai_quota_exceeded → 429` via `errorOverrides`. Only the domain trigger route and `/usage` are hand-written. | ✅ |
+| `./server` | [`app.ts`](./src/app.ts) — `buildSwaggerOptions`; [`main.ts`](./src/main.ts) — `runServer` + graceful shutdown (both survived the framework swap **untouched**: the run tail only ever needed a structural `.listen(port)`); [`config.ts`](./src/config.ts) — `getEnv*`, `parseCsv`, `assertNotInProduction`; `errorResponses`/`successResponses` on every route; [`http.ts`](./src/http.ts) — `createErrorMapper` behind this app's `errorJson`; [`app.test.ts`](./src/app.test.ts) runs on `…/server/testing`'s `testRequest` | ✅ |
+| `./hono` | [`app.ts`](./src/app.ts) — `createHonoApp`, `createHealthApp`, `createSecurityHeadersMiddleware` (twice: hardened for the API, relaxed for `/swagger` only), `createClientIpMiddleware` + `createRateLimitMiddleware`; [`request-scope.ts`](./src/request-scope.ts) — `createRequestScopeMiddleware`: contacts + settings resolve via `c.get('scope')` (request-seeded `role`, per-request `settingsService` cache), the `guard` rejects unknown roles with `invalid_demo_role` → 400; `createRouteModule` wraps every module that reads a context variable, so a declared `Env` cannot outrun its middleware; `createBearerAuthMiddleware` guards `/api/protected`; `testableHonoApp` bridges the app into the shared test harness | ✅ |
+| `./hono/openapi` | Every route in [`routes/`](./src/routes) — `describeApiRoute({ summary, tags, responses })` takes the existing `successResponses`/`errorResponses` zod maps verbatim, and `octApiValidator(target, schema)` replaces Elysia's `body`/`query`/`params` options while serving validation, `c.req.valid()` typing, the spec's request parameters and the standard `validation_error` body from one declaration; [`app.ts`](./src/app.ts) serves the spec via `mountOpenApi` | ✅ |
+| `./hono/flow` | [`routes/ai.ts`](./src/routes/ai.ts) — `createFlowWorkflowRoutes` serves the generic workflow read/control routes (list/active/get/snapshot/cancel/resume) over flow's public wire view, mounted with `app.route('/workflows', …)` (the Hono factory has no `prefix` option — where you mount it is the prefix); `appliedAt` rides the `extendWorkflow` seam, `ai_quota_exceeded → 429` via `errorOverrides`. Only the domain trigger route and `/usage` are hand-written. | ✅ |
 | `./queue` | [`queues/welcome-email.ts`](./src/queues/welcome-email.ts) — `defineQueue` + `BossManager`; dead letters persist to `job_audit_log` via `…/drizzle/job-audit-store` | ✅ |
 | `./storage` + `./storage/postgres` | [`routes/files.ts`](./src/routes/files.ts) — provider + `createWebResponse` + `objectStorageDdl` | ✅ |
 | `./mail` | [`services/mail.ts`](./src/services/mail.ts) — `createBaseMailService` + logger transport | ✅ |
-| `./events` + `./events/postgres` + `./drizzle/event-outbox` | [`routes/events.ts`](./src/routes/events.ts) — two-lane event fan-out end to end: `eventPublisher.emit(…, tx)` writes the outbox row + NOTIFY at COMMIT (durable) or inline payload (ephemeral); the publisher is typed — [`container.ts`](./src/container.ts) declares the event vocabulary once as Zod schemas (`DEMO_EVENT_SCHEMAS`), derives `DemoEventMap` from it, and passes both to `createEventPublisher<DemoEventMap>({ …, payloadSchemas })` so type/payload mismatches fail at compile time and unregistered types throw at runtime; [`main.ts`](./src/main.ts) runs the dedicated LISTEN connection + relay; `GET /api/events/stream` serves SSE via `.mount()` (plain fetch handler — no Elysia type budget, no Eden types; the browser side is `@octabits-io/nuxt-ui-kit/events`). Try it: open `/events` in demo-web, or `curl -N localhost:3101/api/events/stream` and `POST /api/events/demo` with `{"lane":"durable"}` — reconnect with `Last-Event-ID: 0` to watch the outbox replay. | ✅ |
+| `./events` + `./events/postgres` + `./drizzle/event-outbox` | [`routes/events.ts`](./src/routes/events.ts) — two-lane event fan-out end to end: `eventPublisher.emit(…, tx)` writes the outbox row + NOTIFY at COMMIT (durable) or inline payload (ephemeral); the publisher is typed — [`container.ts`](./src/container.ts) declares the event vocabulary once as Zod schemas (`DEMO_EVENT_SCHEMAS`), derives `DemoEventMap` from it, and passes both to `createEventPublisher<DemoEventMap>({ …, payloadSchemas })` so type/payload mismatches fail at compile time and unregistered types throw at runtime; [`main.ts`](./src/main.ts) runs the dedicated LISTEN connection + relay; `GET /api/events/stream` serves SSE via `app.mount()` (plain fetch handler — no route-type budget, no client types; the browser side is `@octabits-io/nuxt-ui-kit/events`). On Hono this is load-bearing rather than merely tidy: `createRequestScopeMiddleware` disposes its scope *before* the `Response` is returned, so anything long-lived has to live outside it — which `.mount()` gives for free. Try it: open `/events` in demo-web, or `curl -N localhost:3101/api/events/stream` and `POST /api/events/demo` with `{"lane":"durable"}` — reconnect with `Last-Event-ID: 0` to watch the outbox replay. | ✅ |
 
 Honestly not covered here:
 
@@ -152,15 +165,15 @@ Honestly not covered here:
 | `./mail/smtp`, `./mail/mailjet`, `./mail/brevo` | Each pulls a vendor SDK and needs credentials. The logger transport proves the same `MailTransport` contract; these are the drop-in swap. SMTP has a Mailpit integration test in the framework. |
 | `./mail` inbound/reply-address | `parseBrevoInbound`, `buildReplyAddress`, `screenInboundAttachment` need a real inbound webhook. |
 | `./captcha/altcha` | The no-op provider covers the contract; ALTCHA adds `altcha-lib` and a proof-of-work widget. |
-| `./elysia/mcp` | Skipped — see below. |
+| `./hono/mcp` | Skipped — see below. |
 | `./ioc`'s `withScope`/`forEachScope` | The queue module already owns the worker's scope lifecycle here; a fan-out sweep over one scope would be filler. |
 | `./drizzle/rls`'s `createGucScopeFactory` | The ioc↔rls bridge needs RLS policies + a partitioned schema; this app is single-scope by design (same reason as `./drizzle/rls` above). |
-| `./elysia`'s `createErrorMapper` | ~~No domain key→status overrides~~ — now covered: [`routes/ai.ts`](./src/routes/ai.ts) pre-binds `ai_quota_exceeded → 429`. |
+| `./server`'s `createErrorMapper` | ~~No domain key→status overrides~~ — now covered: [`http.ts`](./src/http.ts)'s `createErrorJson` binds it, and [`routes/ai.ts`](./src/routes/ai.ts) pre-binds `ai_quota_exceeded → 429`. |
 | `./signing`'s `constantTimeEquals` | No inbound webhook to verify. |
 | `./drizzle/crud`'s `createScopedCrudService` | The scoped sibling of the factory used here. Needs a scope column; this app is single-scope. |
 
-`./elysia/mcp` was left out deliberately: it needs two more optional peers
-(`elysia-mcp`, `@modelcontextprotocol/sdk`) and its value is an MCP client
+`./hono/mcp` was left out deliberately: it needs two more optional peers
+(`@hono/mcp`, `@modelcontextprotocol/sdk`) and its value is an MCP client
 session, which no curl in this README can verify. Mounting it untested would be
 worse documentation than omitting it.
 
@@ -174,7 +187,7 @@ the engine derives that from their dependencies.
 
 | Export | Used in | Covered |
 | --- | --- | --- |
-| `.` (core) — `createWorkflowEngine`, `defineStep` types via `defineAiStep`, registry, `createInMemoryWorkflowStore`; the public wire view (`toPublicWorkflow`, `PUBLIC_WORKFLOW_SCHEMA`) is consumed indirectly through `…/elysia/flow`'s route factory | [`ai/engine.ts`](./src/ai/engine.ts), [`ai/testing.ts`](./src/ai/testing.ts), [`routes/ai.ts`](./src/routes/ai.ts) | ✅ |
+| `.` (core) — `createWorkflowEngine`, `defineStep` types via `defineAiStep`, registry, `createInMemoryWorkflowStore`; the public wire view (`toPublicWorkflow`, `PUBLIC_WORKFLOW_SCHEMA`) is consumed indirectly through `…/hono/flow`'s route factory | [`ai/engine.ts`](./src/ai/engine.ts), [`ai/testing.ts`](./src/ai/testing.ts), [`routes/ai.ts`](./src/routes/ai.ts) | ✅ |
 | `./ai` — `defineAiStep`, `buildAiWorkflow`, `createAiWorkflowHooks`, `createCostEstimator`, `createAiQuotaService`, `createAiUsageAggregationService` | [`ai/workflows.ts`](./src/ai/workflows.ts), [`ai/engine.ts`](./src/ai/engine.ts), [`ai/runtime.ts`](./src/ai/runtime.ts); the consumer-SQL `AiUsageStore`/`AiUsageRecorder` seams live in [`ai/usage.ts`](./src/ai/usage.ts) over the `ai_*` tables | ✅ |
 | `./store-pg` — `createPgWorkflowStore`, `flowStoreDdl` | [`ai/runtime.ts`](./src/ai/runtime.ts); DDL applied in [`db/ddl.ts`](./src/db/ddl.ts) next to `objectStorageDdl()` | ✅ |
 | `./dispatcher-pgboss` — dispatcher + step/DLQ workers | [`ai/runtime.ts`](./src/ai/runtime.ts) — on the **same** pg-boss instance `BossManager` owns (`boss.getBoss()`) | ✅ |
@@ -214,19 +227,65 @@ Things that cost time here and are worth knowing before you copy this code:
   resolves it per send rather than capturing one instance.
 - **The Postgres blob provider reads content-type out of `metadata`** — pass
   `metadata: { 'content-type': … }`; there is no dedicated parameter.
-- **Mount the client-IP plugin before the rate limiter**, or every request keys
-  into one shared `'unknown'` bucket. `createElysiaApp`'s `clientIp` option
-  guarantees the order — that is the reason to use it.
-- **Avoid `204` + `return undefined` in routes that must also run under node.**
-  Elysia hands node's `Response` constructor an empty-string body, which it
-  rejects for 204 (bun does not) — so a node-driven `app.handle` 500s where
-  `bun dev` works. The tests here run on `bun test` now, so they no longer
-  trip this, but the AI cancel route keeps `200 {cancelled}` as a worked
-  example for node-serving consumers; `DELETE /api/notes/:id` keeps the 204
-  because only bun serves it.
+- **Mount the client-IP middleware before the rate limiter**, or every request
+  keys into one shared `'unknown'` bucket. On Hono this is *yours* to get right:
+  `createHonoApp` has no `clientIp` option, because the `middleware` array IS
+  the pipeline. The limiter logs a one-time warning when `c.get('clientIp')` is
+  missing — treat that line in the log as a wiring bug, not a notice.
 - **A flow step handler throws to fail; everything else here returns `Result`.**
   The engine owns retry/DLQ policy, so `ai/workflows.ts`'s handlers convert a
   failed `Result` into a throw at the boundary.
 - **`defineAiStep` needs explicit generics on dependent steps** — inference
   can't recover `THost` from `dependencies` (the `THost = unknown` default wins),
   so `summarize`/`followup` pass `<Input, Output, AiHost, { fetch: typeof fetch }>`.
+
+### Hono-specific (new with the 2026-08-04 migration)
+
+- **A Hono app is a handler, not a server.** It has no `.listen()`; the runtime
+  owns listening. [`bun-server.ts`](./src/bun-server.ts) is the ten-line
+  `Bun.serve` adapter that satisfies `…/server`'s structural `ListenableApp`,
+  and it stays app-local on purpose — a framework version would have to pick a
+  runtime, which is exactly the decision a consumer owns. Set
+  `maxRequestBodySize` there explicitly: it was `createElysiaApp`'s option
+  before, and Bun's 128 MB default is two orders of magnitude looser.
+- **`hono-openapi` silently omits any route without `describeApiRoute`.**
+  `@elysiajs/swagger` put every route in the document whether you described it
+  or not; this stack documents only what you describe. The visible consequence
+  here: `/health/*` and the six `…/hono/flow` workflow routes serve correctly
+  but do **not** appear in `/openapi.json`, because those routes are built
+  inside framework factories that don't describe themselves. Count the
+  operations in `/swagger` against the route table before believing the spec is
+  complete.
+- **The security-headers middleware always wins, so relax by *choosing*, not
+  overriding.** It sets its map on `c.res` *after* `next()`, which is what gets
+  the headers onto error responses and 404s — and also means nothing downstream
+  can override a header for one route. Serving a Swagger page under
+  `default-src 'none'` therefore needs two pre-built instances behind a path
+  test at the top of the pipeline (see `createSecurityHeaders` in
+  [`app.ts`](./src/app.ts)), which keeps the API hardened byte-for-byte.
+- **A CSP violation is invisible to `curl`** — same moral as the CORS section
+  above. The docs CSP here was written against `unpkg` and the page stayed
+  blank until a browser said `@hono/swagger-ui` actually loads swagger-ui-dist
+  from `cdn.jsdelivr.net`.
+- **`return c.body(null, 204)`, not `return undefined`.** A Hono handler must
+  return a `Response`. (The upside: the old Elysia note about node rejecting an
+  empty-string 204 body is simply gone — `DELETE /api/notes/:id` and
+  `DELETE /api/contacts/:id` both answer 204 on any runtime now.)
+- **Path params and query values arrive as strings, always.** `z.coerce.number()`
+  in the validator is what converts them, and the *client* side inherits it:
+  `hc` types a query value as `string`, so a page passes
+  `{ pageSize: String(n) }`. Declaring `z.number()` without `coerce` typechecks
+  and rejects every real request.
+- **`createRouteModule` is not ceremony.** Hono types `c.get('scope')` off the
+  `Env` you *declare*, and never checks that the middleware supplying it is
+  mounted — a module can typecheck perfectly and read `undefined` at runtime.
+  The factory only hands out the builder app once you have handed over matching
+  middleware, which is the whole point of using it for contacts/settings/protected.
+- **Chain, don't sequence.** Hono accumulates route types through the return
+  value of the chain, so `new Hono().route(a).route(b)` types both while
+  `const app = new Hono(); app.route(a); app.route(b);` serves identically and
+  types as *nothing*. The same trap catches helper functions that compose apps
+  — see the migration notes in the framework's `hono/create-app.ts`.
+- **Multipart is zod now.** `z.file()` plus `octApiValidator('form', …)`
+  replaced the `t.Object({ file: t.File() })` that was this repo's only TypeBox
+  use. One schema language throughout.

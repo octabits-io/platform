@@ -14,13 +14,20 @@
  * a conditional request, and `contentDisposition: 'attachment'` is set because
  * these blobs are untrusted uploads: serving user-supplied SVG/HTML inline from
  * the API's own origin is a stored-XSS vector.
+ *
+ * **The multipart upload is where the last TypeBox use in this repo went.** On
+ * Elysia the body had to be `t.Object({ file: t.File() })` — zod could not
+ * express the runtime `File` the body parser produced, so one route imported a
+ * second schema language. Zod v4's `z.file()` plus the `'form'` validator
+ * target covers it, and the app is now single-schema-language throughout.
  */
-import { Elysia, t } from 'elysia';
+import { Hono } from 'hono';
 import { z } from 'zod';
 import { errorResponses, successResponses } from '@octabits-io/framework/server';
-import { statusErrorWithSet } from '@octabits-io/framework/elysia';
+import { describeApiRoute, octApiValidator } from '@octabits-io/framework/hono/openapi';
 import { createWebResponse } from '@octabits-io/framework/storage/postgres';
 import type { IoC } from '@octabits-io/framework/ioc';
+import { errorJson } from '../http.ts';
 import type { DemoServices } from '../container.ts';
 
 const SCHEMA_FILE = z.object({
@@ -30,63 +37,65 @@ const SCHEMA_FILE = z.object({
   contentType: z.string(),
 });
 
+const TAGS = ['Files'];
+
 export function createFileRoutes(container: IoC<DemoServices>) {
   const storage = () => container.resolve('storage');
 
-  return new Elysia({ prefix: '/files', tags: ['Files'] })
+  return new Hono()
     .post(
       '/',
-      async ({ body, set }) => {
+      describeApiRoute({
+        summary: 'Upload a file (multipart/form-data)',
+        tags: TAGS,
+        responses: { ...successResponses(201, SCHEMA_FILE), ...errorResponses(400, 429, 500) },
+      }),
+      octApiValidator('form', z.object({ file: z.file() })),
+      async (c) => {
+        const { file } = c.req.valid('form');
         const id = crypto.randomUUID();
-        const bytes = new Uint8Array(await body.file.arrayBuffer());
-        const contentType = body.file.type || 'application/octet-stream';
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const contentType = file.type || 'application/octet-stream';
 
         const uploaded = await storage().uploadObject({
           key: id,
           body: bytes,
-          metadata: { 'content-type': contentType, name: body.file.name },
+          metadata: { 'content-type': contentType, name: file.name },
         });
-        if (!uploaded.ok) return statusErrorWithSet(set, uploaded.error);
+        if (!uploaded.ok) return errorJson(c, uploaded.error);
 
-        set.status = 201;
-        return { id, name: body.file.name, size: bytes.byteLength, contentType };
-      },
-      {
-        // Multipart needs Elysia's own `t.File()` — a zod schema cannot express
-        // the runtime File the body parser produces.
-        body: t.Object({ file: t.File() }),
-        response: { ...successResponses(201, SCHEMA_FILE), ...errorResponses(400, 429, 500) },
-        detail: { summary: 'Upload a file (multipart/form-data)' },
+        return c.json({ id, name: file.name, size: bytes.byteLength, contentType }, 201);
       },
     )
     .get(
       '/',
-      async ({ set }) => {
+      describeApiRoute({
+        summary: 'List uploaded files',
+        tags: TAGS,
+        responses: { 200: z.object({ items: z.array(SCHEMA_FILE) }), ...errorResponses(429, 500) },
+      }),
+      async (c) => {
         const result = await storage().listObjects({ includeHead: true });
-        if (!result.ok) return statusErrorWithSet(set, result.error);
-        return {
+        if (!result.ok) return errorJson(c, result.error);
+        return c.json({
           items: result.value.objects.map((object) => ({
             id: object.key,
             name: object.metadata['name'] ?? object.key,
             size: object.size,
             contentType: object.contentType,
           })),
-        };
-      },
-      {
-        response: { 200: z.object({ items: z.array(SCHEMA_FILE) }), ...errorResponses(429, 500) },
-        detail: { summary: 'List uploaded files' },
+        });
       },
     )
     .get(
       '/:id',
-      ({ params, request }) =>
-        createWebResponse(storage(), { key: params.id }, request.headers, {
+      describeApiRoute({ summary: 'Download a file (ETag + 304 honored)', tags: TAGS }),
+      octApiValidator('param', z.object({ id: z.string().min(1) })),
+      // `createWebResponse` is framework-agnostic (Request headers in, Response
+      // out) and needed no porting at all — the same call as the Elysia version.
+      (c) =>
+        createWebResponse(storage(), { key: c.req.valid('param').id }, c.req.raw.headers, {
           contentDisposition: 'attachment',
         }),
-      {
-        params: z.object({ id: z.string().min(1) }),
-        detail: { summary: 'Download a file (ETag + 304 honored)' },
-      },
     );
 }

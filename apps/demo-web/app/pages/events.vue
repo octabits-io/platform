@@ -20,6 +20,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useEventStream, type StreamedEvent } from '@octabits-io/nuxt-ui-kit/events'
 import { useApi, useApiBase } from '~/composables/useApi'
+import { call } from '~/composables/useApiCall'
 import { useApiError } from '~/composables/useApiError'
 import { useDateFormat } from '~/composables/useDateFormat'
 
@@ -56,7 +57,7 @@ const emitting = ref(false)
 async function emitDemo(lane: 'durable' | 'ephemeral') {
   emitting.value = true
   try {
-    const { error } = await api.events.demo.post({ lane, message: t('events.demoMessage') })
+    const { error } = await call(api.events.demo.$post({ json: { lane, message: t('events.demoMessage') } }))
     if (error) toastError(error)
   } finally {
     emitting.value = false

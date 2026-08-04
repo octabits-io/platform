@@ -6,22 +6,30 @@
  * - `POST /api/events/demo` — emit a demo event on either lane. The durable
  *   emit runs inside a real transaction (the documented pattern: state change
  *   + outbox row commit together; NOTIFY fires at COMMIT).
- * - `GET /api/events/stream` — the SSE endpoint, registered with `.mount()`
- *   (see {@link createEventStreamMount}): the handler is a plain fetch
- *   handler on purpose, spending no Elysia type budget and emitting no Eden
- *   types — browsers consume it with the kit's fetch-based SSE reader
+ * - `GET /api/events/stream` — the SSE endpoint, registered with `app.mount()`
+ *   (see {@link createEventStreamMount}): the handler is a plain fetch handler
+ *   on purpose, spending no route-type budget and emitting no client types —
+ *   browsers consume it with the kit's fetch-based SSE reader
  *   (`@octabits-io/nuxt-ui-kit/events`), not an API client.
+ *
+ *   Fetch-first matters more on Hono than it did on Elysia: the request-scope
+ *   middleware disposes its scope *before* the `Response` is returned, so a
+ *   long-lived stream must live outside that middleware — which `.mount()`
+ *   gives for free. (`…/hono/events`' `createEventStreamApp` is the
+ *   `app.route()`-shaped alternative; the mount stays here because it is the
+ *   pattern worth documenting.)
  *
  * Auth on the stream is the injected `resolveSubscriber` seam. The demo binds
  * a deliberately trivial resolution (subscriber id from `?user=`, everything
  * permitted); a real consumer binds its bearer validation here and returns
  * `null` to 401.
  */
-import { Elysia } from 'elysia';
+import { Hono } from 'hono';
 import { z } from 'zod';
 import { createEventStreamHandler } from '@octabits-io/framework/events';
 import type { IoC } from '@octabits-io/framework/ioc';
 import { successResponses } from '@octabits-io/framework/server';
+import { describeApiRoute, octApiValidator } from '@octabits-io/framework/hono/openapi';
 import type { DemoServices } from '../container.ts';
 import { DEMO_EVENT_SCOPE } from '../container.ts';
 
@@ -37,7 +45,7 @@ const SCHEMA_EMITTED = z.object({
   type: z.string(),
 });
 
-/** The SSE fetch handler for `.mount()` — see the module doc. */
+/** The SSE fetch handler for `app.mount()` — see the module doc. */
 export function createEventStreamMount(container: IoC<DemoServices>) {
   const { handler } = createEventStreamHandler({
     hub: container.resolve('eventHub'),
@@ -53,9 +61,16 @@ export function createEventStreamMount(container: IoC<DemoServices>) {
 }
 
 export function createEventRoutes(container: IoC<DemoServices>) {
-  return new Elysia({ prefix: '/events', tags: ['Events'] }).post(
+  return new Hono().post(
     '/demo',
-    async ({ body }) => {
+    describeApiRoute({
+      summary: 'Emit a demo event on the chosen lane',
+      tags: ['Events'],
+      responses: successResponses(200, SCHEMA_EMITTED),
+    }),
+    octApiValidator('json', SCHEMA_EMIT),
+    async (c) => {
+      const body = c.req.valid('json');
       const publisher = container.resolve('eventPublisher');
       const envelope =
         body.lane === 'durable'
@@ -66,12 +81,7 @@ export function createEventRoutes(container: IoC<DemoServices>) {
               .resolve('db')
               .transaction((tx) => publisher.emit(demoEvent('durable', body.message), tx))
           : await publisher.emit(demoEvent('ephemeral', body.message));
-      return { id: envelope.id, seq: envelope.seq, lane: envelope.lane, type: envelope.type };
-    },
-    {
-      body: SCHEMA_EMIT,
-      response: successResponses(200, SCHEMA_EMITTED),
-      detail: { summary: 'Emit a demo event on the chosen lane' },
+      return c.json({ id: envelope.id, seq: envelope.seq, lane: envelope.lane, type: envelope.type });
     },
   );
 }

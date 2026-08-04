@@ -5,6 +5,7 @@ import * as z from 'zod'
 import type { TableColumn } from '@nuxt/ui'
 import { useConfirm, useDirtyTracking, usePagination } from '@octabits-io/nuxt-ui-kit'
 import { useApi } from '~/composables/useApi'
+import { call } from '~/composables/useApiCall'
 import { useApiError } from '~/composables/useApiError'
 import { useDateFormat } from '~/composables/useDateFormat'
 import { useAiProgressStore } from '~/stores/aiProgress'
@@ -51,9 +52,11 @@ async function load() {
   if (searchActive.value) return
   loading.value = true
   try {
-    const { data, error } = await api.contacts.get({
-      query: { page: page.value, pageSize: itemsPerPage.value },
-    })
+    const { data, error } = await call(api.contacts.$get({
+      // `hc` serialises query values verbatim, so numbers go over as strings —
+      // the route's `z.coerce.number()` is what turns them back.
+      query: { page: String(page.value), pageSize: String(itemsPerPage.value) },
+    }))
     if (error) { toastError(error); return }
     rows.value = data.items
     setTotal(data.total)
@@ -67,7 +70,7 @@ async function runSearch() {
   if (!email) { await clearSearch(); return }
   loading.value = true
   try {
-    const { data, error } = await api.contacts.search.get({ query: { email } })
+    const { data, error } = await call(api.contacts.search.$get({ query: { email } }))
     if (error) { toastError(error); return }
     searchActive.value = true
     rows.value = data.items
@@ -108,7 +111,7 @@ function openCreate() {
 async function submitCreate() {
   creating.value = true
   try {
-    const { error } = await api.contacts.post({ ...createState })
+    const { error } = await call(api.contacts.$post({ json: { ...createState } }))
     if (error) { toastError(error); return }
     toast.add({ title: t('contacts.create.success'), color: 'success' })
     createOpen.value = false
@@ -143,7 +146,7 @@ async function submitEdit() {
   if (!editId.value) return
   editing.value = true
   try {
-    const { error } = await api.contacts({ id: editId.value }).put({ ...editState })
+    const { error } = await call(api.contacts[':id'].$put({ param: { id: editId.value }, json: { ...editState } }))
     if (error) { toastError(error); return }
     toast.add({ title: t('contacts.edit.success'), color: 'success' })
     resetInitial()
@@ -175,7 +178,7 @@ function openAiBrief(contact: Contact) {
 // --- Row actions ----------------------------------------------------------
 
 async function sendWelcome(contact: Contact) {
-  const { data, error } = await api.contacts({ id: contact.id }).welcome.post()
+  const { data, error } = await call(api.contacts[':id'].welcome.$post({ param: { id: contact.id } }))
   if (error) { toastError(error); return }
   toast.add({
     title: t('contacts.welcome.success', { id: data.jobId }),
@@ -194,7 +197,7 @@ async function removeContact(contact: Contact) {
   })
   if (!ok) return
 
-  const { error } = await api.contacts({ id: contact.id }).delete()
+  const { error } = await call(api.contacts[':id'].$delete({ param: { id: contact.id } }))
   // With the viewer role this is the server's 403 (`forbidden`), which the kit's
   // messenger maps to `errors.forbidden` from the locale file.
   if (error) { toastError(error); return }
