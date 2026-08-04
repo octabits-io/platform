@@ -1,8 +1,8 @@
 /**
  * Typed `process.env` accessors plus the CSV / CORS parse patterns every API
- * config file repeats. Pure — no Elysia dependency; co-located here because these
- * feed the middleware in this package (trusted proxies → client-ip, CIDRs →
- * rate-limit, origins → CORS).
+ * config file repeats. Pure — no framework dependency; the outputs feed the
+ * `./elysia` middleware (trusted proxies → client-ip, CIDRs → rate-limit,
+ * origins → CORS) but nothing here is tied to it.
  */
 
 /** Required env var — returns `defaultValue` if unset, throws if neither is present. */

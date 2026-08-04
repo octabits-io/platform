@@ -11,7 +11,7 @@
  * and (in production) HSTS. Zero domain coupling.
  */
 import { Elysia } from 'elysia';
-import { isProduction } from './config';
+import { isProduction } from '../server/config';
 
 export interface SecurityHeadersOptions {
   /** `Content-Security-Policy` value. Defaults to a restrictive JSON-API policy. */
@@ -35,7 +35,11 @@ const DEFAULT_HSTS = 'max-age=31536000; includeSubDomains';
 const DEFAULT_PERMISSIONS_POLICY =
   'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()';
 
-export function createSecurityHeadersPlugin(options: SecurityHeadersOptions = {}) {
+/**
+ * Resolve the options into the concrete header map — the pure core of the
+ * plugin, usable from any framework (set each entry on the response).
+ */
+export function buildSecurityHeaders(options: SecurityHeadersOptions = {}): Record<string, string> {
   const csp = options.csp ?? DEFAULT_CSP;
   const hsts = options.hsts ?? DEFAULT_HSTS;
   const production = options.production ?? isProduction();
@@ -43,36 +47,38 @@ export function createSecurityHeadersPlugin(options: SecurityHeadersOptions = {}
   const coop = options.crossOriginOpenerPolicy ?? 'same-origin';
   const corp = options.crossOriginResourcePolicy ?? 'same-origin';
 
+  const headers: Record<string, string> = {
+    // Prevent clickjacking.
+    'X-Frame-Options': 'DENY',
+    // Prevent MIME-type sniffing.
+    'X-Content-Type-Options': 'nosniff',
+    // Control referrer information.
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    // Explicitly disable the legacy XSS auditor (it enabled XS-Leaks; '0' is
+    // the modern recommendation).
+    'X-XSS-Protection': '0',
+    // Content Security Policy.
+    'Content-Security-Policy': csp,
+  };
+  // Lock down powerful browser features.
+  if (permissionsPolicy) headers['Permissions-Policy'] = permissionsPolicy;
+  // Process isolation / cross-origin embedding.
+  if (coop) headers['Cross-Origin-Opener-Policy'] = coop;
+  if (corp) headers['Cross-Origin-Resource-Policy'] = corp;
+  // Enforce HTTPS in production.
+  if (production && hsts) headers['Strict-Transport-Security'] = hsts;
+
+  return headers;
+}
+
+export function createSecurityHeadersPlugin(options: SecurityHeadersOptions = {}) {
+  const headers = buildSecurityHeaders(options);
+
   // `onRequest` runs before routing and before any handler/error path, and the
   // staged `set.headers` are applied to success AND error responses alike
   // (thrown errors, validation failures, and route-miss 404s included) —
   // unlike `onAfterHandle`, which never fires on error paths.
   return new Elysia({ name: 'security-headers' }).onRequest(({ set }) => {
-    // Prevent clickjacking.
-    set.headers['X-Frame-Options'] = 'DENY';
-    // Prevent MIME-type sniffing.
-    set.headers['X-Content-Type-Options'] = 'nosniff';
-    // Control referrer information.
-    set.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin';
-    // Explicitly disable the legacy XSS auditor (it enabled XS-Leaks; '0' is
-    // the modern recommendation).
-    set.headers['X-XSS-Protection'] = '0';
-    // Lock down powerful browser features.
-    if (permissionsPolicy) {
-      set.headers['Permissions-Policy'] = permissionsPolicy;
-    }
-    // Process isolation / cross-origin embedding.
-    if (coop) {
-      set.headers['Cross-Origin-Opener-Policy'] = coop;
-    }
-    if (corp) {
-      set.headers['Cross-Origin-Resource-Policy'] = corp;
-    }
-    // Content Security Policy.
-    set.headers['Content-Security-Policy'] = csp;
-    // Enforce HTTPS in production.
-    if (production && hsts) {
-      set.headers['Strict-Transport-Security'] = hsts;
-    }
+    Object.assign(set.headers, headers);
   });
 }

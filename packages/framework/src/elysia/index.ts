@@ -10,15 +10,17 @@
 export * from './security-headers';
 export * from './client-ip';
 export * from './rate-limit';
-export * from './responses';
 export * from './errors';
-export * from './config';
 export * from './create-app';
 export * from './health';
 export * from './request-scope';
 export * from './bearer-auth';
-export * from './swagger';
-export * from './run';
+
+// Backwards-compatible re-export: env config, response schemas, the swagger
+// options builder, and the run/shutdown tail moved to the framework-agnostic
+// `./server` module (they never imported Elysia). New code should import them
+// from `@octabits-io/framework/server`.
+export * from '../server/index';
 
 // NOTE: the MCP harness lives at the `./mcp` subpath (not re-exported here) so
 // the root export stays free of the optional `elysia-mcp` /

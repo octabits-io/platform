@@ -160,6 +160,16 @@
       "import": "./dist/elysia/events.js",
       "default": "./dist/elysia/events.js"
     },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js",
+      "default": "./dist/server/index.js"
+    },
+    "./server/testing": {
+      "types": "./dist/server/testing.d.ts",
+      "import": "./dist/server/testing.js",
+      "default": "./dist/server/testing.js"
+    },
     "./elysia": {
       "types": "./dist/elysia/index.d.ts",
       "import": "./dist/elysia/index.js",

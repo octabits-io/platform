@@ -30,6 +30,8 @@ export default defineConfig({
     "drizzle/event-outbox/index": "src/drizzle/event-outbox/index.ts",
     "drizzle/broadcast/index": "src/drizzle/broadcast/index.ts",
     "elysia/events": "src/elysia/events.ts",
+    "server/index": "src/server/index.ts",
+    "server/testing": "src/server/testing.ts",
     "zitadel/index": "src/zitadel/index.ts",
     "elysia/index": "src/elysia/index.ts",
     "elysia/mcp": "src/elysia/mcp.ts",

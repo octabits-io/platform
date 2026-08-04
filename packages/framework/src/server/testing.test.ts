@@ -1,22 +1,41 @@
 import { describe, it, expect } from 'vitest';
-import { Elysia } from 'elysia';
-import { testRequest, testAuthenticatedRequest, decodeResponseBody } from './testing';
+import { testRequest, testAuthenticatedRequest, decodeResponseBody, type TestableApp } from './testing';
 
-const app = new Elysia()
-  .get('/json', () => ({ items: [1, 2] }))
-  .get('/text', ({ set }) => { set.headers['content-type'] = 'text/plain'; return 'plain body'; })
-  .get('/pdf', ({ set }) => {
-    set.headers['content-type'] = 'application/pdf';
-    return new Uint8Array([0x25, 0x50, 0x44, 0x46]); // %PDF
-  })
-  .get('/no-content', () => new Response(null, { status: 204 }))
-  .get('/redirect', () => new Response(null, { status: 302, headers: { location: '/json' } }))
-  .get('/echo-query', ({ query }) => ({ query }))
-  .get('/echo-headers', ({ request }) => ({
-    contentType: request.headers.get('content-type'),
-    authorization: request.headers.get('authorization'),
-  }))
-  .post('/echo-body', ({ body }) => ({ received: body }));
+// A plain structural app — the helpers only require `handle(Request)`, so the
+// fixture needs no HTTP framework (and doubles as proof of that contract).
+const json = (body: unknown) =>
+  new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+
+const app: TestableApp = {
+  async handle(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    switch (url.pathname) {
+      case '/json':
+        return json({ items: [1, 2] });
+      case '/text':
+        return new Response('plain body', { headers: { 'content-type': 'text/plain' } });
+      case '/pdf':
+        return new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]), {
+          headers: { 'content-type': 'application/pdf' }, // %PDF
+        });
+      case '/no-content':
+        return new Response(null, { status: 204 });
+      case '/redirect':
+        return new Response(null, { status: 302, headers: { location: '/json' } });
+      case '/echo-query':
+        return json({ query: Object.fromEntries(url.searchParams) });
+      case '/echo-headers':
+        return json({
+          contentType: request.headers.get('content-type'),
+          authorization: request.headers.get('authorization'),
+        });
+      case '/echo-body':
+        return json({ received: await request.json() });
+      default:
+        return new Response(null, { status: 404 });
+    }
+  },
+};
 
 describe('testRequest', () => {
   it('returns status, decoded JSON data, and headers', async () => {

@@ -37,7 +37,8 @@ There is no root export — every module lives behind a subpath.
 | `./ical` | iCal ingestion: fetcher + RRULE-expanding parser + day-blocking layer | [foundation](./docs/foundation.md) |
 | `./events` `./events/postgres` `./drizzle/event-outbox` `./elysia/events` | Two-lane event fan-out: transactional outbox + `pg_notify` (durable, replayable) and inline notifications (ephemeral); LISTEN client, relay, in-process hub, SSE endpoint as a plain fetch handler | [events](./docs/events.md) |
 | `./drizzle/broadcast` | Fire-and-forget broadcast channel over `pg_notify` for cross-process coordination hints (cache invalidation etc.) — at-most-once, Zod-validated, outside the event taxonomy | [events](./docs/events.md) |
-| `./elysia` `./elysia/mcp` `./elysia/testing` | Elysia middleware & app skeleton (request-scope + bearer-auth plugins, error mapping, rate limit, server runner); MCP server harness; test-request helpers | [elysia](./docs/elysia.md) |
+| `./server` `./server/testing` | Framework-agnostic server toolkit: env config, `runServer` + graceful shutdown, swagger options builder, response schemas; structural test-request helpers | [server](./docs/server.md) |
+| `./elysia` `./elysia/mcp` | Elysia middleware & app skeleton (request-scope + bearer-auth plugins, error mapping, rate limit); MCP server harness | [elysia](./docs/elysia.md) |
 | `./queue` | pg-boss queue base: lifecycle facade + declarative queue/worker/DLQ trio (Drizzle DLQ-audit store behind `./drizzle/job-audit-store`) | [queue](./docs/queue.md) |
 | `./storage` `./storage/s3` `./storage/postgres` | Namespaced blob storage contract + providers | [storage](./docs/storage.md) |
 | `./mail` `./mail/smtp` `./mail/mailjet` `./mail/brevo` | Mail transport contract + transactional dispatch layer + providers | [mail](./docs/mail.md) |

@@ -10,7 +10,7 @@
 import { Elysia } from 'elysia';
 import type { OctError } from '../result/index.ts';
 import type { Logger } from '../logger/index.ts';
-import { isProduction } from './config';
+import { isProduction } from '../server/config';
 
 /**
  * A domain error carrying a stable `key` and a `message`.
@@ -250,8 +250,8 @@ export function isDbConnectionError(error: unknown): boolean {
   return false;
 }
 
-/** Elysia validation-error shape (for extracting field errors). */
-interface ElysiaValidationError extends Error {
+/** Framework validation-error shape (structural — matches Elysia's). */
+interface ValidationErrorLike extends Error {
   all?: Array<{ path?: string; message?: string }>;
   property?: string;
 }
@@ -261,78 +261,113 @@ export interface ErrorHandlerOptions {
   production?: boolean;
 }
 
+/** What {@link resolveErrorResponse} decided: a full Response to pass through verbatim, or a status + body to emit. */
+export type ResolvedErrorResponse =
+  | { kind: 'response'; response: Response }
+  | { kind: 'body'; status: number; body: ErrorResponseBody };
+
+export interface ResolveErrorResponseOptions {
+  /**
+   * The framework's error-code discriminator, when it has one. `'VALIDATION'`
+   * (schema failure, structural `{ all?, property? }` field shape) and
+   * `'NOT_FOUND'` (route miss) are recognized; anything else is ignored.
+   * (Elysia's `code` union includes numbers — those fall through to the
+   * generic classification.)
+   */
+  code?: string | number;
+  /** Redact 5xx messages. Callers usually pass a boot-time `isProduction()`. */
+  production: boolean;
+  /** 5xx and unexpected errors are logged here — redaction makes the client response useless for diagnosis, so this is the only record. */
+  logger: Logger;
+}
+
+/**
+ * The framework-neutral core of the global error handler: classify a thrown
+ * value into `{ status, body }` (or a verbatim `Response` pass-through), with
+ * production redaction and 5xx logging. `createErrorHandler` wires this into
+ * Elysia's `onError`; a different HTTP framework would wire the same function
+ * into its own error hook.
+ */
+export function resolveErrorResponse(error: unknown, options: ResolveErrorResponseOptions): ResolvedErrorResponse {
+  const { code, production, logger } = options;
+
+  // A thrown Response is an explicit, fully-formed answer — the only way to
+  // short-circuit from a `resolve` hook, which cannot do so by returning
+  // (see createBearerAuthPlugin's onUnauthorized). Pass it through verbatim
+  // instead of reporting it as an unhandled error (which would 500 it).
+  if (error instanceof Response) return { kind: 'response', response: error };
+
+  // Schema-validation errors.
+  if (code === 'VALIDATION') {
+    const validationError = error as ValidationErrorLike;
+    const fields: Array<{ path: string; message: string }> = [];
+
+    if (validationError.all) {
+      for (const err of validationError.all) {
+        fields.push({
+          path: err.path?.replace(/^\//, '') || 'unknown',
+          message: err.message || 'Invalid value',
+        });
+      }
+    } else if (validationError.property) {
+      fields.push({
+        path: validationError.property.replace(/^\//, ''),
+        message: (error as Error).message,
+      });
+    }
+
+    return { kind: 'body', status: 400, body: { key: 'validation_error', message: 'Validation failed', fields } };
+  }
+
+  if (code === 'NOT_FOUND') {
+    return { kind: 'body', status: 404, body: { key: 'not_found', message: 'Route not found' } };
+  }
+
+  if (error instanceof ApiError) {
+    // 5xx messages may carry internals (e.g. an unknown-key OctError mapped
+    // via mapResultError) — redact in production, keep the stable key. The
+    // redaction makes the client response useless for diagnosis, so the
+    // full error must be logged here or it is lost entirely.
+    if (error.statusCode >= 500) {
+      logger.error(`Domain error mapped to ${error.statusCode} (key: ${error.key})`, error);
+    }
+    const message = error.statusCode >= 500 && production ? 'Internal error' : error.message;
+    return { kind: 'body', status: error.statusCode, body: { key: error.key, message } };
+  }
+
+  // Database connection errors → 503 Service Unavailable.
+  if (isDbConnectionError(error)) {
+    logger.error('Database connection error', error instanceof Error ? error : new Error(String(error)));
+    return { kind: 'body', status: 503, body: { key: 'service_unavailable', message: 'Service temporarily unavailable' } };
+  }
+
+  logger.error('Unhandled error', error instanceof Error ? error : new Error(String(error)));
+
+  return {
+    kind: 'body',
+    status: 500,
+    body: {
+      key: 'internal_server_error',
+      message: production ? 'Internal Server Error' : (error instanceof Error ? error.message : 'Internal Server Error'),
+    },
+  };
+}
+
 /**
  * Global Elysia error-handling plugin. Maps framework validation/not-found errors,
  * `ApiError` instances, and DB-connection failures (→ 503) to the standard
  * `{ key, message[, fields] }` body. In production, unexpected error messages are
- * not exposed to clients.
+ * not exposed to clients. The classification itself lives in the framework-neutral
+ * {@link resolveErrorResponse}; this plugin only adapts it to Elysia's `onError`.
  */
 export const createErrorHandler = (logger: Logger, options: ErrorHandlerOptions = {}) => {
   const production = options.production ?? isProduction();
 
   return new Elysia({ name: 'error-handler' })
     .onError({ as: 'global' }, ({ error, code, set }) => {
-      // A thrown Response is an explicit, fully-formed answer — the only way to
-      // short-circuit from a `resolve` hook, which cannot do so by returning
-      // (see createBearerAuthPlugin's onUnauthorized). Pass it through verbatim
-      // instead of reporting it as an unhandled error (which would 500 it).
-      if (error instanceof Response) return error;
-
-      // Elysia validation errors.
-      if (code === 'VALIDATION') {
-        set.status = 400;
-
-        const validationError = error as ElysiaValidationError;
-        const fields: Array<{ path: string; message: string }> = [];
-
-        if (validationError.all) {
-          for (const err of validationError.all) {
-            fields.push({
-              path: err.path?.replace(/^\//, '') || 'unknown',
-              message: err.message || 'Invalid value',
-            });
-          }
-        } else if (validationError.property) {
-          fields.push({
-            path: validationError.property.replace(/^\//, ''),
-            message: (error as Error).message,
-          });
-        }
-
-        return { key: 'validation_error' as const, message: 'Validation failed', fields };
-      }
-
-      if (code === 'NOT_FOUND') {
-        set.status = 404;
-        return { key: 'not_found' as const, message: 'Route not found' };
-      }
-
-      if (error instanceof ApiError) {
-        set.status = error.statusCode;
-        // 5xx messages may carry internals (e.g. an unknown-key OctError mapped
-        // via mapResultError) — redact in production, keep the stable key. The
-        // redaction makes the client response useless for diagnosis, so the
-        // full error must be logged here or it is lost entirely.
-        if (error.statusCode >= 500) {
-          logger.error(`Domain error mapped to ${error.statusCode} (key: ${error.key})`, error);
-        }
-        const message = error.statusCode >= 500 && production ? 'Internal error' : error.message;
-        return { key: error.key, message };
-      }
-
-      // Database connection errors → 503 Service Unavailable.
-      if (isDbConnectionError(error)) {
-        logger.error('Database connection error', error instanceof Error ? error : new Error(String(error)));
-        set.status = 503;
-        return { key: 'service_unavailable', message: 'Service temporarily unavailable' };
-      }
-
-      logger.error('Unhandled error', error instanceof Error ? error : new Error(String(error)));
-
-      set.status = 500;
-      return {
-        key: 'internal_server_error',
-        message: production ? 'Internal Server Error' : (error instanceof Error ? error.message : 'Internal Server Error'),
-      };
+      const resolved = resolveErrorResponse(error, { code, production, logger });
+      if (resolved.kind === 'response') return resolved.response;
+      set.status = resolved.status;
+      return resolved.body;
     });
 };

@@ -69,7 +69,7 @@ import {
   type WorkflowWithSteps,
 } from '@octabits-io/flow';
 import { createErrorMapper, type ErrorStatusOverrides, type KeyedError } from './errors.ts';
-import { errorResponses } from './responses.ts';
+import { errorResponses } from '../server/responses.ts';
 
 /** Structural result — matches flow's `Result` without naming it. */
 type FlowResult<T> = { ok: true; value: T } | { ok: false; error: { key: string; message: string } };

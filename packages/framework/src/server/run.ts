@@ -8,12 +8,61 @@
  * the fatal-error path uniform — anything `load()` throws is logged with the
  * bootstrap logger and exits 1, instead of surfacing as an unhandled rejection.
  *
- * Runtime-agnostic (Bun/Node): the app is only required to have `.listen(port)`,
- * so nothing here imports Elysia. **Importing this module boots nothing** — the
- * server starts only when `runElysiaServer` is called.
+ * Runtime-agnostic (Bun/Node) and framework-agnostic: the app is only required
+ * to have `.listen(port)`, so nothing here imports Elysia. **Importing this
+ * module boots nothing** — the server starts only when `runServer` is called.
  */
 import type { Logger } from '../logger/index.ts';
-import { registerGracefulShutdown, type GracefulShutdownOptions } from './create-app';
+
+export interface GracefulShutdownOptions {
+  /** Logger for the shutdown notice. */
+  logger: Logger;
+  /** Async teardown (stop queues, drain pools, …). Runs before `process.exit(0)`. */
+  stop: (signal: string) => Promise<void>;
+  /** Signals to handle. Default: SIGTERM + SIGINT. */
+  signals?: NodeJS.Signals[];
+  /** Max time `stop` may take before the process force-exits with code 1. Default 10s. */
+  timeoutMs?: number;
+}
+
+/**
+ * Wire SIGTERM/SIGINT to a graceful teardown: log, run `stop`, exit 0.
+ * Replaces the identical `shutdown` tail duplicated in every `main()`.
+ *
+ * `stop` is bounded by `timeoutMs` (default 10s) — if it hangs, the timeout
+ * logs and force-exits with code 1 so the process cannot wedge on teardown.
+ * A rejected `stop` is logged and exits with code 1 (never silently swallowed).
+ */
+export function registerGracefulShutdown({
+  logger,
+  stop,
+  signals = ['SIGTERM', 'SIGINT'],
+  timeoutMs = 10_000,
+}: GracefulShutdownOptions): void {
+  const shutdown = async (signal: string) => {
+    logger.info(`${signal} received, shutting down gracefully...`);
+    const forceExitTimer = setTimeout(() => {
+      logger.error(`Graceful shutdown timed out after ${timeoutMs}ms, forcing exit`);
+      process.exit(1);
+    }, timeoutMs);
+    // Don't let the watchdog itself keep the process alive.
+    forceExitTimer.unref?.();
+    try {
+      await stop(signal);
+      clearTimeout(forceExitTimer);
+      process.exit(0);
+    } catch (error) {
+      clearTimeout(forceExitTimer);
+      logger.error('Graceful shutdown failed', error instanceof Error ? error : new Error(String(error)));
+      process.exit(1);
+    }
+  };
+  for (const signal of signals) {
+    // `shutdown` handles its own rejections (see catch above), so `void` here
+    // cannot swallow errors.
+    process.on(signal, () => void shutdown(signal));
+  }
+}
 
 /** Structural contract for the app — satisfied by an Elysia instance. */
 export interface ListenableApp {
@@ -44,7 +93,7 @@ export interface LoadedServer<TApp extends ListenableApp> {
   onStarted?: (info: { app: TApp; port: number | string; logger: Logger }) => void | Promise<void>;
 }
 
-export interface RunElysiaServerOptions<TApp extends ListenableApp> {
+export interface RunServerOptions<TApp extends ListenableApp> {
   /**
    * Bootstrap everything and return the app. Anything thrown here is a fatal
    * startup error: logged via `logger`, then `process.exit(1)`.
@@ -82,7 +131,7 @@ const consoleFallbackLogger: Pick<Logger, 'info' | 'error'> = {
  * 4. `registerGracefulShutdown({ logger, stop })` when `stop` was returned
  *
  * ```ts
- * await runElysiaServer({
+ * await runServer({
  *   logger: bootstrapLogger,
  *   load: async () => {
  *     await loadVaultSecrets();
@@ -108,8 +157,8 @@ const consoleFallbackLogger: Pick<Logger, 'info' | 'error'> = {
  * @returns The listening app, or `undefined` when bootstrap failed and
  *   `exitProcess: false` was combined with a stubbed `process.exit`.
  */
-export async function runElysiaServer<TApp extends ListenableApp>(
-  options: RunElysiaServerOptions<TApp>,
+export async function runServer<TApp extends ListenableApp>(
+  options: RunServerOptions<TApp>,
 ): Promise<TApp | undefined> {
   const { load, logger, exitProcess = true, shutdown } = options;
   const bootstrapLogger = (logger ?? consoleFallbackLogger) as Logger;
@@ -145,3 +194,9 @@ export async function runElysiaServer<TApp extends ListenableApp>(
 
   return app;
 }
+
+/** @deprecated Renamed to {@link runServer} — nothing about it is Elysia-specific. */
+export const runElysiaServer = runServer;
+
+/** @deprecated Renamed to {@link RunServerOptions}. */
+export type RunElysiaServerOptions<TApp extends ListenableApp> = RunServerOptions<TApp>;

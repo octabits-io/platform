@@ -10,7 +10,7 @@ import {
   errorResponses,
   successResponses,
   ALL_ERROR_STATUSES,
-} from './responses';
+} from '../server/responses';
 import {
   getStatusCodeForError,
   statusErrorWithSet,
@@ -34,7 +34,7 @@ import {
   assertNotInProduction,
   parseCsv,
   parseCorsOrigins,
-} from './config';
+} from '../server/config';
 
 describe('getStatusCodeForError', () => {
   it('maps by key convention', () => {

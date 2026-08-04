@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Elysia } from 'elysia';
 import type { Logger } from '../logger/index.ts';
-import { createElysiaApp, registerGracefulShutdown } from './create-app';
+import { createElysiaApp } from './create-app';
+import { registerGracefulShutdown } from '../server/run';
 import { NotFoundError } from './errors';
 
 const silentLogger: Logger = {

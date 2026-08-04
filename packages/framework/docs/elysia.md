@@ -8,6 +8,19 @@ production APIs. Domain-agnostic — errors are
 `statusOverrides`. Foundation is a **peer dependency** — this package is part
 of the octabits stack, not a standalone kit.
 
+Streaming and other special transports are **fetch-first**: write a plain
+`(request: Request) => Promise<Response>` handler and `.mount()` it (or wrap it
+in a four-line Elysia route) instead of bending the Elysia context around it —
+that costs no Elysia type budget. Shipped examples: `../events`'
+`createEventStreamHandler` (SSE; a thin `.use()` wrapper lives at
+`./elysia/events`) and `../storage`'s postgres serve handlers.
+
+> The framework-agnostic server toolkit (env config, `runServer` +
+> `registerGracefulShutdown`, `buildSwaggerOptions`, response schemas, the
+> request-test harness) lives in [`@octabits-io/framework/server`](./server.md).
+> It is also re-exported here for backwards compatibility — prefer the
+> `./server` subpath.
+
 ## Contents
 
 - **`createSecurityHeadersPlugin(options?)`** — sets standard hardening response
@@ -15,7 +28,8 @@ of the octabits stack, not a standalone kit.
   `X-XSS-Protection: 0`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`,
   `Cross-Origin-Resource-Policy`, CSP, and HSTS in production) on every
   response, **including error responses** (headers are staged in `onRequest`).
-  All values configurable/disable-able via options.
+  All values configurable/disable-able via options. `buildSecurityHeaders`
+  exposes the pure options→header-map core.
 - **`createClientIpPlugin(trustedProxies)`** — derives `clientIp` from
   `X-Forwarded-For` only when the direct connection is a trusted proxy (`'*'`,
   an IP allowlist, or `[]` for none), walking the chain **right-to-left** past
@@ -25,7 +39,9 @@ of the octabits stack, not a standalone kit.
 - **Error mapping** — `getStatusCodeForError`, `statusErrorWithSet`,
   `mapResultError`, the `ApiError` class family (`NotFoundError`,
   `ForbiddenError`, `ConflictError`, …), `isDbConnectionError`, and the
-  `createErrorHandler` global plugin. Response bodies are whitelisted to
+  `createErrorHandler` global plugin (a thin `onError` adapter over the
+  framework-neutral `resolveErrorResponse(error, { code, production, logger })`
+  classifier). Response bodies are whitelisted to
   `{ key, message[, fields] }`, and 5xx messages are redacted in production (the
   stable `key` is kept). A thrown `Response` passes through the error handler
   verbatim (the `resolve`-short-circuit escape hatch — see
@@ -62,25 +78,11 @@ of the octabits stack, not a standalone kit.
   the handler still runs), so the seam is throw-based; return a `Response` to
   short-circuit verbatim (the JSON-RPC-envelope case), or a custom `Error` for
   your own `onError` to format.
-- **`buildSwaggerOptions({ title, version, description?, tags?, path?, exclude? })`**
-  — flattens the repeated `@elysiajs/swagger` options literal. Returns a plain
-  structurally-typed object; **no dependency on `@elysiajs/swagger`** (the caller
-  builds the plugin: `swagger(buildSwaggerOptions({ … }))`). `path` defaults to
-  `/swagger`; unset optionals are omitted rather than emitted as `undefined`.
-- **`runElysiaServer({ load, logger?, exitProcess?, shutdown? })`** — the
-  `main()` tail: `await load()` → `app.listen(port)` → started-log → 
-  `registerGracefulShutdown`. Everything that can fail during bootstrap lives in
-  the caller's `load()`, so a throw there is uniformly logged as
-  `'Failed to start server'` + `process.exit(1)` instead of becoming an
-  unhandled rejection. `load()` returns `{ app, port, logger?, stop?, onStarted? }`
-  — `logger` is returned (not passed) because the app logger usually only exists
-  once the container is up; it falls back to the bootstrap `logger`. Runtime-
-  agnostic (the app only needs `.listen(port)`, so Elysia is never imported) and
-  **importing the module boots nothing**. `exitProcess: false` rethrows instead
-  of exiting, for tests and embedders.
 - **`createElysiaApp(routes, options)`** — the standard app skeleton
   (`securityHeaders → clientIp → rateLimit → [cors/swagger] → errorHandler → routes`),
-  preserving the routes' type for Eden Treaty; plus **`registerGracefulShutdown`**.
+  preserving the routes' type for Eden Treaty. (The `main()` run tail and
+  graceful-shutdown wiring are [`./server`](./server.md)'s `runServer` /
+  `registerGracefulShutdown`.)
 - **`createHealthRoutes({ checkReady })`** — `/health` + `/live` + `/ready` with the
   readiness-failure → 503 mapping.
 - **`createRequestScopePlugin({ createScope, contextKey?, guard?, logger? })`** — a
@@ -144,32 +146,13 @@ of the octabits stack, not a standalone kit.
   (domain body shape, `entityRef` convention, quota/auth policy).
   `@octabits-io/flow` is an optional peer, pulled in only by this `./flow`
   subpath.
-- **Env-config helpers** — `getEnv*`, `isProduction`, `parseCsv`,
-  `parseCorsOrigins`, and **`assertNotInProduction(name, value?)`** — fails
-  startup when a dev-only escape hatch (auth bypass, seed endpoint, debug route)
-  is set in production. Omit `value` to read `process.env[name]`. Any non-empty
-  string counts as set (including `'false'` — these are presence-flags).
-- **Response schemas** — `SCHEMA_ERROR_RESPONSE`, `SCHEMA_VALIDATION_ERROR`,
-  `SCHEMA_SUCCESS_RESPONSE`, the `CommonErrorResponses` superset, and the
-  `errorResponses(...codes)` selector.
-- **`successResponses(status, schema)`** — `{ [status]: schema, 200: schema }`.
-  An Eden Treaty workaround, not an HTTP nicety: Eden derives `data` as
-  `Extract<Response, SuccessCodes>`, and Elysia infers a 200 entry from the
-  handler's return union — so on a route whose only *declared* success code is
-  non-200 (e.g. `201`), that inferred 200 carries the whole union, error bodies
-  included, and Eden folds them into `data`. Declaring 200 explicitly pins the
-  entry so the union splits correctly:
-  `response: { ...successResponses(201, Created), ...errorResponses(400, 409) }`.
-- **`@octabits-io/framework/elysia/testing`** — `testRequest(app, method, path, { body?, headers?, query?, token?, decodeBody? })`
-  and `testAuthenticatedRequest(app, method, path, options, authHeader)`: drive
-  an app through `app.handle()` — no port binding — returning
-  `{ status, data, headers }`. Default decoding: `204`/`301`/`302` → `null`,
-  JSON → parsed, `application/pdf`/`application/octet-stream` → `Buffer`
-  (byte-exact), else `text()`; override via `decodeBody` (which can delegate to
-  the exported `decodeResponseBody`). Headers merge case-insensitively over the
-  default `content-type: application/json`. A separate subpath, deliberately not
-  re-exported from the root (test helpers should not be reachable from
-  production route code), and test-runner agnostic — no vitest import.
+- **Re-exported from [`./server`](./server.md)** for backwards compatibility —
+  prefer importing them from `@octabits-io/framework/server`: the env-config
+  helpers (`getEnv*`, `isProduction`, `assertNotInProduction`, `parseCsv`,
+  `parseCorsOrigins`), the response schemas (`SCHEMA_ERROR_RESPONSE`,
+  `errorResponses`, `successResponses`, …), `buildSwaggerOptions`, and
+  `runServer`/`registerGracefulShutdown`. `@octabits-io/framework/elysia/testing`
+  likewise re-exports the request-test harness from `./server/testing`.
 
 ## Usage
 
@@ -194,4 +177,7 @@ if (!result.ok) return statusErrorWithSet(set, result.error, { tenant_not_found:
 
 Peer dependencies: `@octabits-io/framework`, `elysia`, `zod` (plus the
 optional `elysia-mcp` + `@modelcontextprotocol/sdk` peers, pulled in only by
-the `./mcp` subpath).
+the `./mcp` subpath, and `@octabits-io/flow` only by `./flow`). Hard
+dependencies: `elysia-rate-limit` (confined to `rate-limit.ts`) and
+`@sinclair/typebox` (needed only so the emitted `.d.ts` — into which Elysia's
+instance generics leak — resolves; never imported from source).

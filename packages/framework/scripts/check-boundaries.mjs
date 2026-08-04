@@ -5,7 +5,7 @@
  * The package has two tiers under src/:
  *
  *   base modules  (result, ioc, logger, utils, config-schema, rbac, auth,
- *                  signing, vault, captcha, pii, drizzle, ical, events)
+ *                  signing, vault, captcha, pii, drizzle, ical, events, server)
  *       → may import each other; must never import an app module or an
  *         app-tier vendor SDK
  *   app modules   (elysia, queue, storage, mail, zitadel)
@@ -79,6 +79,25 @@ function matches(f, name) {
   return f.startsWith('@') && !f.includes('/') ? name.startsWith(`${f}/`) || name === f : name === f;
 }
 
+// ---------------------------------------------------------------------------
+// Per-file rules inside src/elysia — the Elysia-confinement contract:
+//
+//   1. Vendor plugins are confined to single files: `elysia-mcp` may only be
+//      imported by mcp.ts, `elysia-rate-limit` only by rate-limit.ts.
+//   2. Every non-test source file in src/elysia must import `elysia` itself.
+//      A file that doesn't is framework-agnostic and belongs in src/server (or
+//      another base module) — that's how config/run/swagger/responses/testing
+//      drifted in before they were moved out. Pure re-export compat files are
+//      allowlisted.
+// ---------------------------------------------------------------------------
+// vendor → source file it is confined to (that file's *.test.ts fixtures included)
+const SINGLE_FILE_VENDORS = {
+  'elysia-mcp': 'elysia/mcp.ts',
+  'elysia-rate-limit': 'elysia/rate-limit.ts',
+};
+// Compat re-export files: no elysia import, allowed to stay for import-path stability.
+const ELYSIA_REEXPORT_FILES = new Set(['elysia/index.ts', 'elysia/testing.ts']);
+
 const IMPORT_RE = /\b(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]|\bimport\s*\(?\s*['"]([^'"]+)['"]|\brequire\(\s*['"]([^'"]+)['"]\s*\)/g;
 
 const violations = [];
@@ -88,6 +107,8 @@ for (const file of walk(SRC)) {
   const rule = RULES[mod];
   const src = readFileSync(file, 'utf8');
   const rel = relative(SRC, file);
+
+  let importsElysia = false;
 
   for (const m of src.matchAll(IMPORT_RE)) {
     const spec = m[1] ?? m[2] ?? m[3];
@@ -101,11 +122,25 @@ for (const file of walk(SRC)) {
       }
     } else if (!spec.startsWith('node:')) {
       const name = pkgName(spec);
+      // Any elysia-tier vendor counts as coupling (rate-limit.ts wraps
+      // elysia-rate-limit without importing elysia itself).
+      if (ELYSIA_VENDORS.some((f) => matches(f, name))) importsElysia = true;
       const forbidden = rule.externals.find((f) => matches(f, name));
       if (forbidden) {
         violations.push(`${rel}: '${mod || '(base)'}' may not depend on external '${name}'  →  ${spec}`);
       }
+      const onlyIn = SINGLE_FILE_VENDORS[name];
+      if (onlyIn && rel !== onlyIn && !(rel.endsWith('.test.ts') && rel.startsWith(onlyIn.replace(/\.ts$/, '')))) {
+        violations.push(`${rel}: '${name}' is confined to ${onlyIn}  →  ${spec}`);
+      }
     }
+  }
+
+  // Misfiling guard: a src/elysia source file that never imports elysia is
+  // framework-agnostic and belongs in a base module (see src/server).
+  const isTest = rel.endsWith('.test.ts');
+  if (mod === 'elysia' && !isTest && !importsElysia && !ELYSIA_REEXPORT_FILES.has(rel)) {
+    violations.push(`${rel}: no 'elysia' import — framework-agnostic code belongs in src/server (or another base module), not src/elysia`);
   }
 }
 
