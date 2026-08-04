@@ -1,5 +1,9 @@
 # @octabits-io/framework/elysia
 
+> **Status: maintenance only.** The successor glue module is
+> [`./hono`](./hono.md). This module stays fully supported while consumers
+> migrate, but gains no new capabilities.
+
 Reusable [Elysia](https://elysiajs.com) middleware and helpers, extracted from
 production APIs. Domain-agnostic — errors are
 [`@octabits-io/framework`](../foundation)'s `OctError` (`{ key, message }`;
