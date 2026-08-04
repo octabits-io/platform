@@ -50,6 +50,28 @@ describe('createRouteModule', () => {
   });
 });
 
+describe('createHonoApp hono constructor options', () => {
+  const silentLogger: Logger = {
+    debug: () => {}, info: () => {}, warn: () => {}, error: () => {},
+    child: () => silentLogger,
+  };
+
+  it('strict: false makes /x and /x/ the same route (Elysia parity for migrating consumers)', async () => {
+    const routes = new Hono().route('/nested', new Hono().get('/', (c) => c.json({ ok: true })));
+
+    const strict = createHonoApp(routes, { logger: silentLogger });
+    const loose = createHonoApp(routes, { logger: silentLogger, hono: { strict: false } });
+
+    // Default stays Hono's: the trailing-slash variant is a different route.
+    expect((await strict.request('/nested')).status).toBe(200);
+    expect((await strict.request('/nested/')).status).toBe(404);
+    // Path normalization happens on the SERVING app, so the option must be
+    // honored by the outer Hono createHonoApp constructs — not the routes app.
+    expect((await loose.request('/nested')).status).toBe(200);
+    expect((await loose.request('/nested/')).status).toBe(200);
+  });
+});
+
 /**
  * The `hc` type-preservation gate. `createHonoApp` must NOT annotate its return
  * as `Hono` — that is `BlankSchema`, and it erases every route from the client

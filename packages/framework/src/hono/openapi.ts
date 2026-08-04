@@ -61,6 +61,11 @@ export interface ApiRouteDoc {
    * (`successResponses(200, S)`, spreads of `errorResponses(...)`) verbatim.
    */
   responses?: ApiResponsesDoc;
+  /**
+   * OpenAPI specification extensions on the operation object, passed through
+   * verbatim (e.g. `'x-openai-isConsequential': true` for ChatGPT Actions).
+   */
+  [extension: `x-${string}`]: unknown;
 }
 
 /**

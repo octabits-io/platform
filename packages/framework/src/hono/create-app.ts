@@ -23,6 +23,15 @@ export interface CreateHonoAppOptions {
   logger: Logger;
   /** Error-handler options (production redaction). */
   errorHandler?: ErrorHandlerOptions;
+  /**
+   * Constructor options for the composed (serving) app. Relevant because the
+   * incoming request path is normalized by the OUTER app: pass
+   * `{ strict: false }` to treat `/x` and `/x/` as the same route —
+   * Elysia-parity for consumers migrating route-for-route (Elysia matched
+   * both; Hono's default is strict). Sub-app strictness is irrelevant —
+   * `route()` copies handlers, and only the serving app's `getPath` runs.
+   */
+  hono?: ConstructorParameters<typeof Hono>[0];
 }
 
 /**
@@ -51,7 +60,7 @@ export interface CreateHonoAppOptions {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createHonoApp<T extends Hono<any, any, any>>(routes: T, opts: CreateHonoAppOptions): T {
-  const app = new Hono();
+  const app = new Hono(opts.hono);
 
   if (opts.securityHeaders !== false) {
     app.use(createSecurityHeadersMiddleware(opts.securityHeaders));

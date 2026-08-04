@@ -42,7 +42,13 @@ function buildComposedApp() {
     )
     .post(
       '/',
-      describeApiRoute({ summary: 'Create user', tags: ['Users'], responses: successResponses(201, SCHEMA_USER) }),
+      describeApiRoute({
+        summary: 'Create user',
+        tags: ['Users'],
+        responses: successResponses(201, SCHEMA_USER),
+        // Specification-extension pass-through (ChatGPT Actions et al.).
+        'x-openai-isConsequential': true,
+      }),
       octApiValidator('json', z.object({ name: z.string().min(1) })),
       (c) => c.json({ id: 'new', name: c.req.valid('json').name }, 201),
     );
@@ -104,6 +110,12 @@ describe('openapi gate (composed app — upstream #216)', () => {
     expect(ok?.content?.['application/json']?.schema).toBeTruthy();
 
     expect(spec.paths['/api/v1/files/upload']!.post!.requestBody).toBeTruthy();
+  });
+
+  it('passes x-… specification extensions through to the operation object', async () => {
+    const spec = await fetchSpec(buildComposedApp() as never);
+    const create = spec.paths['/api/v1/users']!.post! as { 'x-openai-isConsequential'?: boolean };
+    expect(create['x-openai-isConsequential']).toBe(true);
   });
 
   it('validation failures still produce the standard validation_error body', async () => {
