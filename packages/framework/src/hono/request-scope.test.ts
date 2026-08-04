@@ -272,3 +272,88 @@ describe('Hono-specific edges', () => {
     expect(params).toEqual([{}]);
   });
 });
+
+describe('overlapping-mount dedupe', () => {
+  it('allocates ONE scope when overlapping route mounts each carry the middleware', async () => {
+    // The real-world shape: two modules mounted at the same prefix, both
+    // wrapping themselves in the shared scope middleware via use('*').
+    // Hono copies both `use` entries into the parent as `/things/*`
+    // middleware, so a request to either module's route matches both.
+    let created = 0;
+    const disposals: Array<{ commit: boolean }> = [];
+    const root = new IoC<Services>();
+    root.register('greeting', () => 'hello');
+    const middleware = createRequestScopeMiddleware({
+      createScope: () => {
+        created += 1;
+        const scope = root.createScope<RequestServices>();
+        scope.register('role', () => 'viewer', ServiceLifetime.Scoped);
+        scope.onDispose((opts) => { disposals.push({ commit: opts.commit }); });
+        return scope;
+      },
+    });
+
+    const moduleA = new Hono<HarnessEnv>()
+      .use(middleware)
+      .get('/a', (c) => c.text(c.get('scope').resolve('role')));
+    const moduleB = new Hono<HarnessEnv>()
+      .use(middleware)
+      .get('/b', (c) => c.text(c.get('scope').resolve('greeting')));
+
+    const app = new Hono<HarnessEnv>()
+      .route('/things', moduleA)
+      .route('/things', moduleB);
+
+    const res = await app.request('/things/b');
+    expect(await res.text()).toBe('hello');
+    expect(created).toBe(1);
+    expect(disposals).toEqual([{ commit: true }]);
+  });
+
+  it('still disposes exactly once when the handler under a deduped mount throws', async () => {
+    const disposals: Array<{ commit: boolean }> = [];
+    const middleware = createRequestScopeMiddleware({
+      createScope: () => ({
+        dispose: async (opts = { commit: true }) => { disposals.push({ commit: opts.commit }); },
+      }),
+    });
+
+    const moduleA = new Hono().use(middleware).get('/a', (c) => c.text('ok'));
+    const moduleB = new Hono().use(middleware).get('/b', () => {
+      throw new ForbiddenError('nope');
+    });
+    const app = createHonoApp(
+      new Hono().route('/things', moduleA).route('/things', moduleB),
+      { logger: silentLogger },
+    );
+
+    const res = await app.request('/things/b');
+    expect(res.status).toBe(403);
+    expect(disposals).toEqual([{ commit: false }]);
+  });
+
+  it('does NOT dedupe middlewares with distinct context keys', async () => {
+    let outerCreated = 0;
+    let innerCreated = 0;
+    const outer = createRequestScopeMiddleware({
+      contextKey: 'outer',
+      createScope: () => {
+        outerCreated += 1;
+        return { dispose: async () => {} };
+      },
+    });
+    const inner = createRequestScopeMiddleware({
+      contextKey: 'inner',
+      createScope: () => {
+        innerCreated += 1;
+        return { dispose: async () => {} };
+      },
+    });
+
+    const app = new Hono().use(outer).use(inner).get('/both', (c) => c.text('ok'));
+
+    await app.request('/both');
+    expect(outerCreated).toBe(1);
+    expect(innerCreated).toBe(1);
+  });
+});

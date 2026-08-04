@@ -17,6 +17,11 @@
  * The `finally` covers the only escape path `next()` has left — a thrown
  * non-`Error` (Hono rethrows those past `onError`) — with `commit: false`.
  *
+ * Overlapping route mounts (several modules sharing a mount prefix, each
+ * carrying this middleware) are deduped per request: whichever instance runs
+ * first owns the scope, later instances see the context key populated and
+ * pass through without allocating a second scope.
+ *
  * Context typing is DECLARED, not inferred: the middleware's `Env` generic
  * types `c.get('scope')` for consumers whose app declares a matching `Env`
  * (`new Hono<{ Variables: … }>()`). Unlike Elysia's `resolve` inference, the
@@ -101,6 +106,18 @@ export function createRequestScopeMiddleware<
   const contextKey = (options.contextKey ?? 'scope') as TKey;
 
   return async (c, next) => {
+    // Route-mount overlap dedupe: Hono's `.route()` copies a sub-app's
+    // `use('*')` middleware into the parent, where it also matches sibling
+    // paths under the same mount prefix — so one request can hit this
+    // middleware once per overlapping module (operator-api's nested listing
+    // routes stacked four scopes, each pinning a pooled RLS connection for
+    // the rest of the request). The first run owns the scope; later runs
+    // step aside. Deduping by contextKey assumes overlapping mounts share
+    // the same middleware semantics — modules with *different* gates must
+    // not share a covering prefix (a composition bug this guard would mask,
+    // not fix; mount such modules last or on disjoint prefixes).
+    if (c.get(contextKey as never) !== undefined) return next();
+
     const ctx = requestScopeContext(c);
     const result = await createScope(ctx);
     const { scope, extras } = unwrapCreateScopeResult(result);
