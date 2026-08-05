@@ -67,6 +67,15 @@ export interface ObjectStorageService extends ObjectStorageUrlProvider {
     key: string;
     metadata?: { readonly [key: string]: string };
     body: Uint8Array | ReadableStream<Uint8Array>;
+    /**
+     * Per-object access override. `'private'` forces owner-only access even
+     * when the provider is configured with a public default (e.g. the S3
+     * provider's `defaultACL: 'public-read'`); `'public'` forces public-read.
+     * Omitted → the provider's configured default. Providers without
+     * object-level access control (Postgres, Picsum) ignore this — access is
+     * governed by whatever serves the objects.
+     */
+    visibility?: 'public' | 'private';
   }) => Promise<Result<void, ObjectStorageError>>;
   readonly deleteObject: (params: { namespace?: string; key: string }) => Promise<Result<void, ObjectStorageError>>;
   /**

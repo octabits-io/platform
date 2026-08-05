@@ -292,6 +292,38 @@ describe('AWSObjectStorageService (S3-compatible)', () => {
     expect(sendMock.mock.calls[1]![0].input.ContentType).toBe('application/octet-stream');
   });
 
+  test('uploadObject applies the configured defaultACL and omits ACL when unset', async () => {
+    sendMock.mockResolvedValue({});
+    const withDefault = createAWSObjectStorageService({ ...baseConfig, defaultACL: 'public-read' });
+    const withoutDefault = createAWSObjectStorageService(baseConfig);
+
+    await withDefault.uploadObject({ key: 'a.jpg', body: new Uint8Array([1]) });
+    await withoutDefault.uploadObject({ key: 'b.jpg', body: new Uint8Array([1]) });
+
+    expect(sendMock.mock.calls[0]![0].input.ACL).toBe('public-read');
+    expect(sendMock.mock.calls[1]![0].input.ACL).toBeUndefined();
+  });
+
+  test('uploadObject visibility overrides the defaultACL in both directions', async () => {
+    sendMock.mockResolvedValue({});
+    const service = createAWSObjectStorageService({ ...baseConfig, defaultACL: 'public-read' });
+
+    await service.uploadObject({ key: 'secret.bin', body: new Uint8Array([1]), visibility: 'private' });
+    await service.uploadObject({ key: 'open.jpg', body: new Uint8Array([1]), visibility: 'public' });
+
+    expect(sendMock.mock.calls[0]![0].input.ACL).toBe('private');
+    expect(sendMock.mock.calls[1]![0].input.ACL).toBe('public-read');
+  });
+
+  test('uploadObject visibility: private applies even without a configured defaultACL', async () => {
+    sendMock.mockResolvedValue({});
+    const service = createAWSObjectStorageService(baseConfig);
+
+    await service.uploadObject({ key: 'secret.bin', body: new Uint8Array([1]), visibility: 'private' });
+
+    expect(sendMock.mock.calls[0]![0].input.ACL).toBe('private');
+  });
+
   test.each([
     ['../escape.txt'],
     ['a/../../other-ns/secret.txt'],

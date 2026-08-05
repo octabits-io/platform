@@ -346,11 +346,12 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
     }
   };
 
-  const uploadObject: ObjectStorageService['uploadObject'] = async ({ namespace, key, metadata, body }: {
+  const uploadObject: ObjectStorageService['uploadObject'] = async ({ namespace, key, metadata, body, visibility }: {
     namespace?: string;
     key: string;
     metadata?: { readonly [key: string]: string };
     body: Uint8Array | ReadableStream<Uint8Array>;
+    visibility?: 'public' | 'private';
   }) => {
     if (isUnsafeObjectKey(key)) {
       return { ok: false as const, error: invalidKeyError('uploadObject', key) };
@@ -361,6 +362,14 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
     // Content-Type (served on GET), falling back to application/octet-stream.
     const contentType = metadata?.['content-type'] || metadata?.['contentType'] || 'application/octet-stream';
 
+    // Object ACLs grant access independently of any bucket policy, so a
+    // sensitive object uploaded with a public default ACL stays world-readable
+    // even when the bucket policy does not cover its prefix.
+    const acl: ObjectCannedACL | undefined =
+      visibility === 'private' ? 'private'
+      : visibility === 'public' ? 'public-read'
+      : config.defaultACL;
+
     try {
       await withRetry(
         () => client.send(new PutObjectCommand({
@@ -369,7 +378,7 @@ export const createAWSObjectStorageService = (config: AWSClientObjectStorageConf
           Body: body,
           Metadata: metadata,
           ContentType: contentType,
-          ...(config.defaultACL ? { ACL: config.defaultACL } : {}),
+          ...(acl ? { ACL: acl } : {}),
         })),
         'uploadObject',
         isRetryableError,
