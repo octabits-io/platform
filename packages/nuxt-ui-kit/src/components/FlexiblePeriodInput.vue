@@ -11,6 +11,11 @@
 // i18n key contract: flexPeriod.* (earliestStart/latestEnd/nightsLabel/
 // clear/windowSpan/flexibility/example/errors.*) and period.travel.nights,
 // plus the composed DateRangeInput's dateRange.* keys.
+//
+// Sizing contract: the root is an inline-size @container (single row from
+// 512px of own width, stacked below), so its intrinsic width is 0. Parents
+// must give it a definite width — block/grid context, `flex-1`, or an
+// explicit `w-*`/`basis-*` — never shrink-to-fit.
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import UInputNumber from '@nuxt/ui/components/InputNumber.vue'
@@ -188,8 +193,13 @@ watch(
 </script>
 
 <template>
-  <div class="flex flex-col gap-1">
-    <div class="flex items-start gap-2">
+  <div class="@container flex flex-col gap-1">
+    <!-- Container-responsive: one row (window + nights + clear) from 512px of
+         *own* width; below that the window goes full-width and nights + clear
+         drop to their own line (the nights input gains a compact label, since
+         its placeholder vanishes once a value is set). The inner
+         DateRangeInput additionally stacks its two dates below 320px. -->
+    <div class="flex flex-col gap-2 @lg:flex-row @lg:items-start">
       <DateRangeInput
         v-model="innerPeriod"
         kind="travel"
@@ -198,29 +208,34 @@ watch(
         :icon="icon"
         :start-label="startAriaLabel"
         :end-label="endAriaLabel"
-        class="flex-1"
+        class="w-full @lg:flex-1"
       />
-      <UInputNumber
-        v-model="nightsValue"
-        :min="minNights"
-        :max="maxNights"
-        :size="size"
-        :disabled="disabled"
-        :color="nightsInputColor"
-        :aria-label="t('flexPeriod.nightsLabel')"
-        :placeholder="t('flexPeriod.nightsLabel')"
-        class="w-28 shrink-0"
-      />
-      <UButton
-        v-if="clearable && hasAnyValue"
-        icon="i-lucide-x"
-        color="neutral"
-        variant="ghost"
-        :size="size"
-        :disabled="disabled"
-        :aria-label="t('flexPeriod.clear')"
-        @click="clearAll"
-      />
+      <div class="flex items-end gap-2 @lg:shrink-0">
+        <div class="flex w-full flex-col gap-1 @lg:w-28">
+          <span class="text-xs text-muted @lg:hidden" aria-hidden="true">{{ t('flexPeriod.nightsLabel') }}</span>
+          <UInputNumber
+            v-model="nightsValue"
+            :min="minNights"
+            :max="maxNights"
+            :size="size"
+            :disabled="disabled"
+            :color="nightsInputColor"
+            :aria-label="t('flexPeriod.nightsLabel')"
+            :placeholder="t('flexPeriod.nightsLabel')"
+            class="w-full"
+          />
+        </div>
+        <UButton
+          v-if="clearable && hasAnyValue"
+          icon="i-lucide-x"
+          color="neutral"
+          variant="ghost"
+          :size="size"
+          :disabled="disabled"
+          :aria-label="t('flexPeriod.clear')"
+          @click="clearAll"
+        />
+      </div>
     </div>
 
     <!-- Slot for a derived summary shown between the inputs and the hints,

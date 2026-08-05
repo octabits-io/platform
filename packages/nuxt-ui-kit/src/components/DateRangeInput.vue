@@ -3,6 +3,11 @@
 // explicit — no reliance on the consumer's auto-import configuration.
 // i18n key contract: dateRange.* (checkIn/checkOut/errors.*/availability*/
 // atTime/nextDay/checking) and period.travel.nights / period.booking.days.
+//
+// Sizing contract: the root is an inline-size @container (the inputs stack
+// below 320px of own width), so its intrinsic width is 0. Parents must give
+// it a definite width — block/grid context, `flex-1`, or an explicit
+// `w-*`/`basis-*` — never shrink-to-fit.
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { CalendarDate } from '@internationalized/date'
@@ -510,109 +515,120 @@ const timeHintParts = computed(() =>
 </script>
 
 <template>
-  <div class="flex flex-col gap-1">
-    <div class="flex items-center gap-2">
-      <UInputDate
-        v-model="startDate"
-        :is-date-disabled="isDateDisabled"
-        :size="size"
-        :disabled="disabled"
-        :color="inputColor"
-        :aria-label="startLabel"
-        class="flex-1"
-      >
-        <template #trailing>
-          <UPopover v-model:open="startPopoverOpen">
-            <UButton
-              color="neutral"
-              variant="link"
-              size="sm"
-              :icon="icon"
-              :aria-label="startLabel"
-              :disabled="disabled"
-              class="px-0"
-            />
-            <template #content>
-              <div class="flex flex-col" @pointerleave="hoveredDay = null">
-                <p class="flex items-baseline justify-between gap-2 px-3 pt-2 pb-1">
-                  <span class="text-xs font-medium text-muted uppercase tracking-wide">
-                    {{ startPopoverTitle }}
-                  </span>
-                  <span v-if="spanLabel('start')" class="text-xs font-medium text-primary">
-                    {{ spanLabel('start') }}
-                  </span>
-                </p>
-                <UCalendar
-                  :model-value="startDate"
-                  :placeholder="startDate ?? endDate"
-                  :is-date-disabled="isDateDisabled"
-                  :ui="calendarUi"
-                  class="p-2"
-                  @update:model-value="onStartCalendarSelect"
-                >
-                  <template #day="{ day }">
-                    <span :class="dayPillClass(day, 'start')" @pointerenter="hoveredDay = day.toString()">
-                      {{ day.day }}
+  <div class="@container flex flex-col gap-1">
+    <!-- Container-responsive: side-by-side from 320px of *own* width, stacked
+         below. Own-width queries keep the behavior correct inside modals,
+         narrow panels, and next to the assistant dock alike. When stacked,
+         the arrow disappears and each input gets a compact label instead
+         (the popover titles), so the two identical inputs stay tellable. -->
+    <div class="flex flex-col gap-2 @xs:flex-row @xs:items-center">
+      <div class="flex w-full min-w-0 flex-col gap-1 @xs:flex-1">
+        <span class="text-xs text-muted @xs:hidden" aria-hidden="true">{{ startPopoverTitle }}</span>
+        <UInputDate
+          v-model="startDate"
+          :is-date-disabled="isDateDisabled"
+          :size="size"
+          :disabled="disabled"
+          :color="inputColor"
+          :aria-label="startLabel"
+          class="w-full"
+        >
+          <template #trailing>
+            <UPopover v-model:open="startPopoverOpen">
+              <UButton
+                color="neutral"
+                variant="link"
+                size="sm"
+                :icon="icon"
+                :aria-label="startLabel"
+                :disabled="disabled"
+                class="px-0"
+              />
+              <template #content>
+                <div class="flex flex-col" @pointerleave="hoveredDay = null">
+                  <p class="flex items-baseline justify-between gap-2 px-3 pt-2 pb-1">
+                    <span class="text-xs font-medium text-muted uppercase tracking-wide">
+                      {{ startPopoverTitle }}
                     </span>
-                  </template>
-                </UCalendar>
-              </div>
-            </template>
-          </UPopover>
-        </template>
-      </UInputDate>
-
-      <span class="text-muted shrink-0" aria-hidden="true">→</span>
-
-      <UInputDate
-        v-model="endDate"
-        :is-date-disabled="isEndDateDisabled"
-        :size="size"
-        :disabled="disabled"
-        :color="inputColor"
-        :aria-label="endLabel"
-        class="flex-1"
-      >
-        <template #trailing>
-          <UPopover v-model:open="endPopoverOpen">
-            <UButton
-              color="neutral"
-              variant="link"
-              size="sm"
-              :icon="icon"
-              :aria-label="endLabel"
-              :disabled="disabled"
-              class="px-0"
-            />
-            <template #content>
-              <div class="flex flex-col" @pointerleave="hoveredDay = null">
-                <p class="flex items-baseline justify-between gap-2 px-3 pt-2 pb-1">
-                  <span class="text-xs font-medium text-muted uppercase tracking-wide">
-                    {{ endPopoverTitle }}
-                  </span>
-                  <span v-if="spanLabel('end')" class="text-xs font-medium text-primary">
-                    {{ spanLabel('end') }}
-                  </span>
-                </p>
-                <UCalendar
-                  :model-value="endDate"
-                  :placeholder="endDate ?? startDate"
-                  :is-date-disabled="isEndDateDisabled"
-                  :ui="calendarUi"
-                  class="p-2"
-                  @update:model-value="onEndCalendarSelect"
-                >
-                  <template #day="{ day }">
-                    <span :class="dayPillClass(day, 'end')" @pointerenter="hoveredDay = day.toString()">
-                      {{ day.day }}
+                    <span v-if="spanLabel('start')" class="text-xs font-medium text-primary">
+                      {{ spanLabel('start') }}
                     </span>
-                  </template>
-                </UCalendar>
-              </div>
-            </template>
-          </UPopover>
-        </template>
-      </UInputDate>
+                  </p>
+                  <UCalendar
+                    :model-value="startDate"
+                    :placeholder="startDate ?? endDate"
+                    :is-date-disabled="isDateDisabled"
+                    :ui="calendarUi"
+                    class="p-2"
+                    @update:model-value="onStartCalendarSelect"
+                  >
+                    <template #day="{ day }">
+                      <span :class="dayPillClass(day, 'start')" @pointerenter="hoveredDay = day.toString()">
+                        {{ day.day }}
+                      </span>
+                    </template>
+                  </UCalendar>
+                </div>
+              </template>
+            </UPopover>
+          </template>
+        </UInputDate>
+      </div>
+
+      <span class="hidden shrink-0 text-muted @xs:inline" aria-hidden="true">→</span>
+
+      <div class="flex w-full min-w-0 flex-col gap-1 @xs:flex-1">
+        <span class="text-xs text-muted @xs:hidden" aria-hidden="true">{{ endPopoverTitle }}</span>
+        <UInputDate
+          v-model="endDate"
+          :is-date-disabled="isEndDateDisabled"
+          :size="size"
+          :disabled="disabled"
+          :color="inputColor"
+          :aria-label="endLabel"
+          class="w-full"
+        >
+          <template #trailing>
+            <UPopover v-model:open="endPopoverOpen">
+              <UButton
+                color="neutral"
+                variant="link"
+                size="sm"
+                :icon="icon"
+                :aria-label="endLabel"
+                :disabled="disabled"
+                class="px-0"
+              />
+              <template #content>
+                <div class="flex flex-col" @pointerleave="hoveredDay = null">
+                  <p class="flex items-baseline justify-between gap-2 px-3 pt-2 pb-1">
+                    <span class="text-xs font-medium text-muted uppercase tracking-wide">
+                      {{ endPopoverTitle }}
+                    </span>
+                    <span v-if="spanLabel('end')" class="text-xs font-medium text-primary">
+                      {{ spanLabel('end') }}
+                    </span>
+                  </p>
+                  <UCalendar
+                    :model-value="endDate"
+                    :placeholder="endDate ?? startDate"
+                    :is-date-disabled="isEndDateDisabled"
+                    :ui="calendarUi"
+                    class="p-2"
+                    @update:model-value="onEndCalendarSelect"
+                  >
+                    <template #day="{ day }">
+                      <span :class="dayPillClass(day, 'end')" @pointerenter="hoveredDay = day.toString()">
+                        {{ day.day }}
+                      </span>
+                    </template>
+                  </UCalendar>
+                </div>
+              </template>
+            </UPopover>
+          </template>
+        </UInputDate>
+      </div>
     </div>
 
     <!-- Slot for a derived summary (e.g. the resulting travel period) shown
