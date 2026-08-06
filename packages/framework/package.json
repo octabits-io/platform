@@ -282,8 +282,8 @@
   },
   "dependencies": {
     "@noble/ciphers": "^2.2.0",
-    "@noble/curves": "^2.2.0",
-    "@noble/hashes": "^2.2.0",
+    "@noble/curves": "^2.3.0",
+    "@noble/hashes": "^2.3.0",
     "@scure/base": "^2.2.0",
     "@sinclair/typebox": "^0.34.52",
     "elysia-rate-limit": "^4.6.2"
@@ -379,10 +379,10 @@
     }
   },
   "devDependencies": {
-    "@aws-sdk/client-s3": "^3.1102.0",
+    "@aws-sdk/client-s3": "^3.1105.0",
     "@elysiajs/eden": "^1.4.9",
     "@hono/mcp": "^0.3.1",
-    "@hono/standard-validator": "^0.3.0",
+    "@hono/standard-validator": "^0.4.0",
     "@hono/zod-validator": "^0.9.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@octabits-io/flow": "^0.12.0",
@@ -392,7 +392,7 @@
     "@types/bun": "^1.3.14",
     "@types/node": "^26.1.2",
     "@types/nodemailer": "^8.0.1",
-    "@types/pg": "^8.20.3",
+    "@types/pg": "^8.20.4",
     "altcha-lib": "^2.3.2",
     "drizzle-orm": "^0.45.2",
     "elysia": "^1.4.29",
