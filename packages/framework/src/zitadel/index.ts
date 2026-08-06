@@ -438,6 +438,16 @@ export function createZitadelManagementClient({
     projectOwnerOrgId?: string;
     email: string;
     role: string;
+    /**
+     * BCP-47 tag for the user Zitadel is about to create. Zitadel picks the
+     * language of the invitation mail it sends, and without this it falls back
+     * to the instance default — so an invite from a German tenant arrived in
+     * English.
+     *
+     * Only applies when the user does not exist yet: an existing user has their
+     * own preference and this must not overwrite it.
+     */
+    preferredLanguage?: string;
   }): Promise<Result<{ userId: string }, ZitadelApiError>> {
     return tryRequest(async () => {
       const userHomeOrgId = params.projectOwnerOrgId ?? params.orgId;
@@ -465,6 +475,9 @@ export function createZitadelManagementClient({
               givenName: localPart,
               familyName: localPart,
               displayName: params.email,
+              ...(params.preferredLanguage
+                ? { preferredLanguage: params.preferredLanguage }
+                : {}),
             },
             organization: { org: { id: userHomeOrgId } },
           })) as { userId: string };
