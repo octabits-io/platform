@@ -73,6 +73,19 @@ describe('useLocaleTabs', () => {
     expect(overridden.items.value.at(-1)!.label).toBe('DE');
   });
 
+  it('leads with the default locale regardless of the stored locale order', () => {
+    // The stored set is ['en', 'de'] with 'de' as the default — the tab the
+    // form actually opens on. Leaving source order alone renders [EN][DE] with
+    // DE selected, which reads as "EN is primary" on every translatable field.
+    const tabs = useLocaleTabs(() => true, source(['en', 'de'], 'de'));
+    expect(tabs.items.value.map((i) => i.value)).toEqual(['de', 'en']);
+  });
+
+  it('keeps the source order of the non-default locales', () => {
+    const tabs = useLocaleTabs(() => true, source(['en', 'fr', 'de', 'it'], 'de'));
+    expect(tabs.items.value.map((i) => i.value)).toEqual(['de', 'en', 'fr', 'it']);
+  });
+
   it('always surfaces the default locale even when it is a hidden variant', () => {
     const tabs = useLocaleTabs(() => true, source(['de', 'de-formal'], 'de-formal'));
     expect(tabs.visibleLocales.value).toContain('de-formal');

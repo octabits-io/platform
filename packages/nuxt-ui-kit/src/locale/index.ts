@@ -130,9 +130,16 @@ export function useLocaleTabs(
     // it's a register variant (e.g. `de-formal`) that register-invariant
     // fields would otherwise hide — always surface a tab for it (tabLabel
     // still renders its base form) so the operator can fill the required value.
-    return filtered.includes(defaultLocale.value)
+    const withDefault = filtered.includes(defaultLocale.value)
       ? filtered
       : [...filtered, defaultLocale.value];
+    // The default locale leads the strip, whatever order the app's locale set
+    // happens to be stored in. `active` starts on the default (below), so any
+    // other order renders the contradiction the tabs are meant to resolve —
+    // `[EN][DE]` with DE selected, on every translatable field at once.
+    // Remaining locales keep their source order.
+    if (!defaultLocale.value) return withDefault;
+    return [defaultLocale.value, ...withDefault.filter((loc) => loc !== defaultLocale.value)];
   });
 
   const active = ref('');
