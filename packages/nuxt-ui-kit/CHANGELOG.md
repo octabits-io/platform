@@ -1,5 +1,16 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.14.1
+
+### Patch Changes
+
+- [`482d9a9`](https://github.com/octabits-io/platform/commit/482d9a981d035e81b773f1e3f228db1469f2aedc) - Locale field tabs now lead with the default content locale instead of following
+  the app's stored locale order. `useLocaleTabs` already activates the default
+  locale, so an app whose locale set is `['en', 'de']` with `de` as the default
+  rendered `[EN][DE]` with DE selected — a strip that claims a primary language
+  the field does not use, on every translatable field at once. The remaining
+  locales keep their source order.
+
 ## 0.14.0
 
 ### Minor Changes
