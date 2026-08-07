@@ -21,9 +21,9 @@
  * Invalid entries (unparseable IPs or CIDRs) are silently dropped, same as before
  * CIDR support: an operator typo narrows trust rather than widening it.
  *
- * The glue modules derive `clientIp` per request from this resolver
- * (`./elysia`'s `createClientIpPlugin`, `./hono`'s `createClientIpMiddleware`);
- * it is typically used to key rate limiting.
+ * The glue module derives `clientIp` per request from this resolver
+ * (`./hono`'s `createClientIpMiddleware`); it is typically used to key rate
+ * limiting.
  */
 import { isIP } from 'node:net';
 

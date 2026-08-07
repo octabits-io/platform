@@ -1,16 +1,17 @@
 /**
  * The SSE endpoint over an {@link EventHub} — a **plain fetch handler**
- * (`(request) => Response`), not an Elysia route, on purpose:
+ * (`(request) => Response`), not a framework route, on purpose:
  *
- * - It spends no Elysia type budget. Consumers whose route chain is at
- *   TypeScript's recursion limit register it with `.mount()`; the stream has
- *   no Eden types and needs none (clients consume it with a fetch-based SSE
- *   reader, not an API client).
+ * - It spends no route-type budget. Consumers whose route chain is at
+ *   TypeScript's recursion limit register it with `.mount()`; the stream needs
+ *   no client types at all (clients consume it with a fetch-based SSE reader,
+ *   not an API client). The constraint was found on Elysia, where one more
+ *   `.use()` tipped a real consumer's chain into TS2589 — worth keeping.
  * - It runs on any web-standard runtime (Bun, Node ≥18, workers) and any
  *   framework that can hand over a `Request`.
  *
- * A thin Elysia wrapper ships at `@octabits-io/framework/elysia/events` for
- * `.use()`-style registration.
+ * A thin Hono sub-app wrapper ships at `@octabits-io/framework/hono/events`
+ * for `app.route()`-style registration.
  *
  * Wire discipline baked in:
  *

@@ -765,9 +765,9 @@ class PinnedScopeRollback extends Error {
  *   size pools accordingly.
  *
  * The factory is async (resolves once BEGIN + set_config are on the wire);
- * `createRequestScopePlugin`'s `createScope` accepts promises. Failing to
+ * `createRequestScopeMiddleware`'s `createScope` accepts promises. Failing to
  * dispose the scope leaks a pool client — use lifecycle owners that
- * guarantee dispose (the request-scope plugin, `withScope`).
+ * guarantee dispose (the request-scope middleware, `withScope`).
  */
 export function createPinnedGucScopeFactory<
   TServices extends Record<TDbKey, RlsDatabase>,

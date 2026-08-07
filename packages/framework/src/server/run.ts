@@ -9,7 +9,7 @@
  * bootstrap logger and exits 1, instead of surfacing as an unhandled rejection.
  *
  * Runtime-agnostic (Bun/Node) and framework-agnostic: the app is only required
- * to have `.listen(port)`, so nothing here imports Elysia. **Importing this
+ * to have `.listen(port)`, so nothing here imports an HTTP framework. **Importing this
  * module boots nothing** — the server starts only when `runServer` is called.
  */
 import type { Logger } from '../logger/index.ts';
@@ -64,7 +64,7 @@ export function registerGracefulShutdown({
   }
 }
 
-/** Structural contract for the app — satisfied by an Elysia instance. */
+/** Structural contract for the app — satisfied by a Hono instance (or Bun.serve's handle). */
 export interface ListenableApp {
   listen(port: number | string): unknown;
 }

@@ -1,7 +1,7 @@
 /**
  * Scope lifecycle helpers for non-HTTP contexts — queue handlers, cron
  * sweeps, CLI commands. The Elysia request path has its own equivalent
- * (`../elysia`'s `createRequestScopePlugin`); these cover everything else so
+ * (`../hono`'s `createRequestScopeMiddleware`); these cover everything else so
  * `acquire → try → finally dispose` never has to be hand-rolled again.
  */
 import type { DisposeOptions } from './container.ts';
@@ -32,7 +32,7 @@ export interface DisposableScope {
  * - `fn` threw → dispose `{ commit: false }`; a dispose failure here is
  *   swallowed (the work is being discarded) and `fn`'s error wins.
  *
- * The same commit/rollback semantics as the Elysia request-scope plugin, for
+ * The same commit/rollback semantics as the HTTP request-scope middleware, for
  * code that has no request.
  */
 export async function withScope<TScope extends DisposableScope, R>(

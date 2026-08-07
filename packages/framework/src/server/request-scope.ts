@@ -1,7 +1,6 @@
 /**
- * Framework-neutral request-scope contracts shared by the glue modules
- * (`./elysia`'s `createRequestScopePlugin`, `./hono`'s
- * `createRequestScopeMiddleware`). The scope only has to satisfy the
+ * Framework-neutral request-scope contracts for the glue module
+ * (`./hono`'s `createRequestScopeMiddleware`). The scope only has to satisfy the
  * structural {@link RequestScope} contract, so wrapped/augmented containers
  * (e.g. a scope carrying extra request context) type through unchanged.
  */

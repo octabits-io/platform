@@ -13,7 +13,7 @@ Four subpaths, split so no import drags in a vendor SDK it doesn't need:
 | `./events` | `zod` | Envelope + schema, notify codec, hub, publisher, relay, SSE fetch handler |
 | `./events/postgres` | `pg` (optional peer) | `createPgNotifyListener` — the LISTEN side |
 | `./drizzle/event-outbox` | `drizzle-orm` (optional peer) | `eventOutboxColumns` + the outbox store |
-| `./elysia/events` | `elysia` (optional peer) | Thin `.use()` wrapper over the fetch handler |
+| `./hono/events` | `hono` (optional peer) | Thin sub-app wrapper over the fetch handler |
 | `./drizzle/broadcast` | `drizzle-orm` + `pg` (optional peers) | `createBroadcastChannel` — NOTIFY-only coordination hints, outside the event taxonomy (see below) |
 
 The browser client (fetch-based SSE reader + Vue composable) is
@@ -180,12 +180,13 @@ const { handler, metrics } = createEventStreamHandler({
 app.mount('/events', handler);
 ```
 
-Prefer `.mount()`: the handler is a plain `(request) => Response` on purpose
-— it spends **no Elysia type budget** (a real consumer's route chain died of
-TS2589 from one more `.use()`) and emits no Eden types, which is fine because
+Prefer `.mount()`: the handler is a plain `(request) => Response` on purpose —
+it spends **no route-type budget** (the design was forced by a real consumer's
+Elysia route chain dying of TS2589 from one more `.use()`, and the property is
+worth keeping on Hono) and emits no client types, which is fine because
 browsers consume the stream with the kit's SSE reader, not an API client. A
-conventional wrapper exists at `./elysia/events` (`createEventStreamRoute`,
-literal-generic prefix) if your chain has room.
+conventional sub-app wrapper exists at `./hono/events` (`createEventStreamApp`)
+for `app.route('/events', …)` registration.
 
 What the handler bakes in:
 

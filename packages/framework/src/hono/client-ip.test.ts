@@ -1,7 +1,7 @@
 /**
  * Client-IP middleware: derivation of `c.get('clientIp')` through the shared
- * trust-walk resolver. The resolver's full semantics are covered by the
- * elysia-suite tests over the same core; here we pin the Hono wiring — the
+ * trust-walk resolver. The resolver's full semantics are covered by
+ * `../server/client-ip.test.ts` over the same core; here we pin the wiring — the
  * injected direct-IP seam, XFF handling per trust mode, and the off-Bun
  * fallback of the default seam.
  */

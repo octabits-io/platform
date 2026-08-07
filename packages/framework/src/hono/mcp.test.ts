@@ -1,13 +1,12 @@
 /**
- * Hono port of `../elysia/mcp.test.ts` + `../elysia/mcp-nesting.test.ts`,
- * against the REAL `@hono/mcp` transport and a real `McpServer` (no mocks —
- * the mocked boundary in the original suite hid both the cross-request
- * container race and the eager registration call).
+ * MCP harness — scope lifecycle and prefixed-parent mounting, against the REAL
+ * `@hono/mcp` transport and a real `McpServer` (no mocks — the mocked boundary
+ * in the predecessor Elysia suite hid both the cross-request container race and
+ * the eager registration call).
  *
- * Notably absent: the `Bun.randomUUIDv7` polyfill the Elysia suite needs.
- * `@hono/mcp` uses `crypto.randomUUID()` for its stream ids, so the harness
- * runs on plain Node with no globals patched (verified by the suite passing
- * without one).
+ * No `Bun.randomUUIDv7` polyfill is needed: `@hono/mcp` uses
+ * `crypto.randomUUID()` for its stream ids, so the harness runs on plain Node
+ * with no globals patched.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';

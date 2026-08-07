@@ -1,8 +1,8 @@
 # @octabits-io/framework/hono
 
-Reusable [Hono](https://hono.dev) middleware and helpers — the package's
-second HTTP glue module and the successor of
-[`./elysia`](./elysia.md). Same design rules:
+Reusable [Hono](https://hono.dev) middleware and helpers — the package's HTTP
+glue module, and since the removal of `./elysia` the only one. Same design
+rules as the Elysia layer it replaced:
 domain-agnostic, errors are `OctError` (`{ key, message }`), domain key→status
 rules injected via `statusOverrides`, and **all real logic lives in the
 framework-neutral cores under [`./server`](./server.md)** — this module is
@@ -118,9 +118,10 @@ Kept out of the root barrel so their optional peers never load with it:
   the silent-omission mode — if an upgrade trips it, the fallback is replacing
   this one file with a hand-rolled route→spec registry over the same seams.
 
-## Migrating a route file from `./elysia`
+## Migrating a route file from the removed `./elysia`
 
-The mechanical mapping:
+The mechanical mapping (kept as the porting reference for consumers still on an
+older framework release):
 
 | Elysia | Hono |
 |---|---|
@@ -134,10 +135,13 @@ The mechanical mapping:
 
 ## Confinement contract
 
-`scripts/check-boundaries.mjs` enforces the same rules as for `./elysia`:
-`hono`-tier vendors (`hono`, `@hono/zod-validator`, `@hono/mcp`) are confined
-to `src/hono`; `@hono/mcp` only in `mcp.ts`; the shared `@modelcontextprotocol`
-SDK and `@octabits-io/flow` only in each glue module's `mcp.ts`/`flow.ts`; and
-every non-test file in `src/hono` must import a hono-tier vendor — one that
-doesn't is framework-agnostic and belongs in `src/server`. The two glue
-modules may never import each other.
+`scripts/check-boundaries.mjs` enforces: `hono`-tier vendors (`hono`,
+`@hono/zod-validator`, `@hono/mcp`) are confined to `src/hono`; `@hono/mcp` only
+in `mcp.ts`; `hono-openapi` only in `openapi.ts`; the `@modelcontextprotocol`
+SDK and `@octabits-io/flow` only in `mcp.ts`/`flow.ts`; and every non-test file
+in `src/hono` must import a hono-tier vendor — one that doesn't is
+framework-agnostic and belongs in `src/server`.
+
+Elysia's vendors (`elysia`, `elysia-mcp`, `elysia-rate-limit`, `@elysiajs/*`,
+`@sinclair/typebox`) are on a package-wide ban list, so the deleted glue layer
+cannot creep back in.

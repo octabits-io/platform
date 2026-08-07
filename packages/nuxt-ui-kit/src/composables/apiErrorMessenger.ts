@@ -38,7 +38,10 @@ export interface ApiErrorMessengerOptions {
  *
  * Framework-free: pass `t`/`te` from your i18n instance (the app-side
  * composable is typically `const { t, te } = useI18n()` + this factory).
- * Eden Treaty error envelopes (`{ value }`) are unwrapped automatically.
+ * Errors wrapped in a `{ value }` envelope are unwrapped automatically — Eden
+ * Treaty's error shape originally, kept because it costs nothing and any
+ * client that boxes the body the same way gets the same handling. Hono's `hc`
+ * hands back the parsed body directly, so it takes the unwrapped path.
  */
 /** Lowercase + collapse every non-alphanumeric run to `_` (trimmed) — a flat, definable vue-i18n key segment. */
 function i18nSlug(value: string): string {

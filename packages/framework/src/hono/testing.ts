@@ -1,9 +1,8 @@
 /**
- * SPIKE (elysia-exit-option): adapter proving the framework-agnostic test
- * harness holds. `../server/testing`'s `testRequest` drives anything
+ * Adapter onto the framework-agnostic test harness.
+ * `../server/testing`'s `testRequest` drives anything
  * structural (`{ handle(Request): Promise<Response> }`); a Hono app exposes
- * `fetch` instead of `handle`, so this one-liner is the entire bridge —
- * **same tests, second implementation**.
+ * `fetch` instead of `handle`, so this one-liner is the entire bridge.
  */
 import type { Hono } from 'hono';
 import type { Env } from 'hono';

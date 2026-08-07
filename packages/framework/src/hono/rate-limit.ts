@@ -1,8 +1,8 @@
 /**
  * Rate-limit middleware, built entirely from the framework-neutral cores in
  * `../server/rate-limit` (fixed-window counter, CIDR skip matcher,
- * timing-safe secret comparison) — no vendor dependency, unlike the
- * `./elysia` wrapper around `elysia-rate-limit`.
+ * timing-safe secret comparison) — no rate-limit vendor dependency, unlike the
+ * Elysia layer this replaced, which wrapped `elysia-rate-limit`.
  *
  * Reproduces the standard configuration: a fixed window keyed on the real
  * client IP (from `./client-ip`'s `c.get('clientIp')`), a `{ key, message }`

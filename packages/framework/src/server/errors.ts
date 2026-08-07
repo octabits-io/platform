@@ -2,8 +2,8 @@
  * Framework-neutral error mapping: key-convention → HTTP status, the
  * `statusErrorWithSet` route helper, the `ApiError` class family,
  * DB-connection detection, and `resolveErrorResponse` — the classification
- * core behind every glue module's global error handler (`./elysia`'s
- * `createErrorHandler`, `./hono`'s `registerErrorHandler`).
+ * core behind the glue module's global error handler (`./hono`'s
+ * `registerErrorHandler`).
  *
  * Errors are foundation's `OctError` (`{ key, message }`). Domain-specific
  * key→status rules (e.g. `tenant_not_found → 403`) are supplied via
@@ -15,7 +15,7 @@ import { isProduction } from './config';
 
 /**
  * A domain error carrying a stable `key` and a `message`.
- * Alias of foundation's `OctError` — kept as the historical elysia-local name.
+ * Alias of foundation's `OctError` — kept as the historical HTTP-glue-local name.
  */
 export type KeyedError = OctError;
 
@@ -66,7 +66,7 @@ export function getStatusCodeForError(error: KeyedError, overrides?: ErrorStatus
   return 500;
 }
 
-/** Structural status sink — the part of a handler context we mutate (Elysia's `set`, or any `{ status }` carrier). */
+/** Structural status sink — the part of a handler context we mutate (any `{ status }` carrier). */
 interface StatusSink {
   status?: number | string;
 }
@@ -188,7 +188,7 @@ export function mapResultError(error: KeyedError, overrides?: ErrorStatusOverrid
  *
  * ```ts
  * // errors.ts in a consumer:
- * export * from '@octabits-io/framework/elysia';
+ * export * from '@octabits-io/framework/hono';
  * export const { getStatusCodeForError, statusErrorWithSet, mapResultError } =
  *   createErrorMapper({ attachment_blocked: 403, fill_already_running: 409 });
  * ```
@@ -251,7 +251,7 @@ export function isDbConnectionError(error: unknown): boolean {
   return false;
 }
 
-/** Framework validation-error shape (structural — matches Elysia's `code: 'VALIDATION'` errors and `./hono`'s `RequestValidationError`). */
+/** Framework validation-error shape (structural — matches `./hono`'s `RequestValidationError`). */
 interface ValidationErrorLike extends Error {
   all?: Array<{ path?: string; message?: string }>;
   property?: string;
@@ -271,9 +271,8 @@ export interface ResolveErrorResponseOptions {
   /**
    * The framework's error-code discriminator, when it has one. `'VALIDATION'`
    * (schema failure, structural `{ all?, property? }` field shape) and
-   * `'NOT_FOUND'` (route miss) are recognized; anything else is ignored.
-   * (Elysia's `code` union includes numbers — those fall through to the
-   * generic classification.)
+   * `'NOT_FOUND'` (route miss) are recognized; anything else — including a
+   * numeric code — falls through to the generic classification.
    */
   code?: string | number;
   /** Redact 5xx messages. Callers usually pass a boot-time `isProduction()`. */
@@ -285,17 +284,16 @@ export interface ResolveErrorResponseOptions {
 /**
  * The framework-neutral core of the global error handler: classify a thrown
  * value into `{ status, body }` (or a verbatim `Response` pass-through), with
- * production redaction and 5xx logging. `./elysia`'s `createErrorHandler`
- * wires this into Elysia's `onError`; `./hono`'s `registerErrorHandler` into
- * Hono's `app.onError`.
+ * production redaction and 5xx logging. `./hono`'s `registerErrorHandler`
+ * wires this into Hono's `app.onError`.
  */
 export function resolveErrorResponse(error: unknown, options: ResolveErrorResponseOptions): ResolvedErrorResponse {
   const { code, production, logger } = options;
 
-  // A thrown Response is an explicit, fully-formed answer — the only way to
-  // short-circuit from an Elysia `resolve` hook, which cannot do so by
-  // returning (see createBearerAuthPlugin's onUnauthorized). Pass it through
+  // A thrown Response is an explicit, fully-formed answer. Pass it through
   // verbatim instead of reporting it as an unhandled error (which would 500 it).
+  // On Hono a raw thrown Response is unsupported — wrap it as
+  // `new HTTPException(status, { res })`, whose `getResponse()` lands here.
   if (error instanceof Response) return { kind: 'response', response: error };
 
   // Schema-validation errors.

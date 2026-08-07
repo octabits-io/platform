@@ -107,9 +107,8 @@ type MaybePromise<T> = T | Promise<T>;
  * The slice of a flow engine these routes need. `WorkflowEngine<TContext>` from
  * `createWorkflowEngine` satisfies this for any `TContext`.
  *
- * Structurally identical to `../elysia/flow`'s contract and deliberately
- * duplicated: the boundary lint forbids a hono→elysia import, and neither
- * declaration names a framework, so the two cannot drift apart in substance.
+ * Declared here rather than imported from flow: it names no framework, so the
+ * routes stay decoupled from the engine's own type surface.
  */
 export interface FlowEngineReader {
   getWorkflowStatus(workflowId: number): Promise<FlowResult<WorkflowWithSteps>>;

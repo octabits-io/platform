@@ -1,12 +1,12 @@
 # @octabits-io/framework/server
 
 The framework-agnostic server toolkit: the parts of running an HTTP API that
-have nothing to do with the HTTP framework. Nothing here imports Elysia — the
-app is only ever a structural contract (`.listen(port)` for `runServer`,
-`handle(Request)` for the test helpers), so any HTTP framework or plain fetch
-handler satisfies it. Everything is also re-exported from
-[`./elysia`](./elysia.md) for backwards compatibility — prefer
-`@octabits-io/framework/server`.
+have nothing to do with the HTTP framework. Nothing here imports an HTTP
+framework — the app is only ever a structural contract (`.listen(port)` for
+`runServer`, `handle(Request)` for the test helpers), so any HTTP framework or
+plain fetch handler satisfies it. [`./hono`](./hono.md) wires these cores into
+Hono's hooks; this module is where the logic actually lives, and it survived the
+Elysia→Hono swap untouched.
 
 ## Contents
 
@@ -31,28 +31,26 @@ handler satisfies it. Everything is also re-exported from
   SIGTERM/SIGINT to an async teardown bounded by `timeoutMs` (default 10s;
   force-exit 1 on hang, exit 1 on a rejected `stop`, exit 0 on success).
 - **`buildSwaggerOptions({ title, version, description?, tags?, path?, exclude? })`**
-  — flattens the repeated `@elysiajs/swagger` options literal. Returns a plain
-  structurally-typed object; **no dependency on `@elysiajs/swagger`** (the caller
-  builds the plugin: `swagger(buildSwaggerOptions({ … }))`). `path` defaults to
-  `/swagger`; unset optionals are omitted rather than emitted as `undefined`.
+  — flattens the repeated OpenAPI options literal. Returns a plain
+  structurally-typed object with **no spec-generator dependency**; the caller
+  serves it (`mountOpenApi(app, buildSwaggerOptions({ … }))` from
+  [`./hono/openapi`](./hono.md)). `path` defaults to `/swagger`; unset optionals
+  are omitted rather than emitted as `undefined`.
 - **Response schemas** (zod) — `SCHEMA_ERROR_RESPONSE`, `SCHEMA_VALIDATION_ERROR`,
   `SCHEMA_SUCCESS_RESPONSE`, the `CommonErrorResponses` superset, and the
   `errorResponses(...codes)` selector.
 - **`successResponses(status, schema)`** — `{ [status]: schema, 200: schema }`.
-  An Eden Treaty workaround, not an HTTP nicety: Eden derives `data` as
-  `Extract<Response, SuccessCodes>`, and Elysia infers a 200 entry from the
-  handler's return union — so on a route whose only *declared* success code is
-  non-200 (e.g. `201`), that inferred 200 carries the whole union, error bodies
-  included, and Eden folds them into `data`. Declaring 200 explicitly pins the
-  entry so the union splits correctly:
-  `response: { ...successResponses(201, Created), ...errorResponses(400, 409) }`.
-  (The schemas themselves are plain zod; only the *reason* this helper exists is
-  Elysia/Eden-shaped.)
+  Originally an Eden Treaty workaround (Elysia inferred a phantom 200 out of the
+  handler's return union, which Eden then folded error bodies into). Hono's `hc`
+  declares no such phantom status, so non-200-success routes narrow on their
+  own and the helper is now **documentation**: it feeds the OpenAPI document a
+  complete response map. Pass it to `describeApiRoute`/`octApiValidator`:
+  `responses: { ...successResponses(201, Created), ...errorResponses(400, 409) }`.
 - **`@octabits-io/framework/server/testing`** — `testRequest(app, method, path, { body?, headers?, query?, token?, decodeBody? })`
   and `testAuthenticatedRequest(app, method, path, options, authHeader)`: drive
   an app through its `handle(Request)` — no port binding — returning
   `{ status, data, headers }`. The app contract is the structural `TestableApp`
-  (`{ handle(Request): Promise<Response> }`), satisfied by an Elysia instance or
+  (`{ handle(Request): Promise<Response> }`), satisfied by a Hono instance or
   any fetch-style handler. Default decoding: `204`/`301`/`302` → `null`,
   JSON → parsed, `application/pdf`/`application/octet-stream` → `Buffer`
   (byte-exact), else `text()`; override via `decodeBody` (which can delegate to
@@ -81,4 +79,4 @@ await runServer({
 });
 ```
 
-Peer dependencies: `zod` only. No Elysia, no `@elysiajs/*`.
+Peer dependencies: `zod` only. No HTTP framework.

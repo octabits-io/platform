@@ -1,13 +1,13 @@
 /**
- * SPIKE (elysia-exit-option): the assembly-level suite — error handler over
+ * Assembly-level suite — error handler over
  * the shared `resolveErrorResponse` core, `@hono/zod-validator` failures
  * mapped into the standard VALIDATION body, security headers on success AND
  * error paths, health trio, `createHonoApp` composition, and the
  * framework-agnostic SSE handler round-tripping through `app.mount()`.
  *
  * Several cases drive the app through `../server/testing`'s `testRequest` via
- * the one-line `testableHonoApp` adapter — proving the harness's structural
- * `{ handle(Request) }` contract holds for a second framework.
+ * the one-line `testableHonoApp` adapter, exercising the harness's structural
+ * `{ handle(Request) }` contract.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';

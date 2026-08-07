@@ -16,9 +16,11 @@ That second job paid for itself immediately — see [Findings](#findings).
 
 **Stack note (2026-08-04):** the API client moved from Eden Treaty to Hono's
 `hc`, following `apps/demo-server`'s Elysia→Hono migration. The kit's
-`createTreatyClientFactory` is unchanged and still shipped for Eden-based consumers — it
-simply has no consumer here any more. What the swap cost, call site by call
-site, is [Finding #10](#10-eden--hc-what-the-swap-actually-costs-2026-08-04).
+`createTreatyClientFactory` was removed outright on 2026-08-07 with the rest of
+the Elysia surface; `./api` keeps `resolveApiBaseUrl` and
+`createAccessTokenProvider`, which were never Eden-specific. What the swap cost,
+call site by call site, is
+[Finding #10](#10-eden--hc-what-the-swap-actually-costs-2026-08-04).
 
 Private workspace app. Never published.
 
@@ -134,7 +136,7 @@ routing/lazy-loading/SEO machinery would be weight without a job. `createI18n` +
 | `createAuthGuard` | `app/middleware/auth.global.ts` (incl. the `afterAuthenticated` policy hook) | ✅ |
 | `attachSessionLifecycleHandlers` | `app/plugins/10.oidc.client.ts` | ⚠️ wired for real, but with no IdP the events never fire |
 | `createLoginRedirector` | `app/plugins/10.oidc.client.ts` | ⚠️ same |
-| `createTreatyClientFactory` | — | ❌ **since 2026-08-04**: this app moved to Hono's `hc` with the server. The kit export is unchanged and still shipped for Eden-based consumers; it simply has no consumer here. Its two jobs map onto `hc` options directly — see [Findings #4](#4-the-kits-createtreatyclientfactory-monopolises-treatys-headers-obsolete-here). |
+| `createTreatyClientFactory` | — | ❌ **removed from the kit 2026-08-07.** This app moved to Hono's `hc` on 2026-08-04; the export was then deleted with the rest of the Elysia surface. Its two jobs map onto `hc` options directly — see [Findings #4](#4-the-kits-createtreatyclientfactory-monopolises-treatys-headers-obsolete-here). |
 | `createAccessTokenProvider` | `app/composables/useApi.ts` | ✅ |
 | `resolveApiBaseUrl` | `app/composables/useApi.ts` (also for `<a href>` downloads) | ✅ |
 | `createApiErrorMessenger` | `app/composables/useApiError.ts`; 403 path on `/settings` | ✅ |
@@ -244,9 +246,9 @@ option would be the natural seam.
 > **Resolved by the move to `hc` (2026-08-04), not by a kit change.** `hc` takes
 > a single async `headers` thunk, so bearer *and* `x-demo-role` are produced by
 > the same function and the `onRequest` detour is gone — the seam this finding
-> asked for turns out to be `hc`'s default. The kit factory is untouched and
-> still shipped for Eden-based consumers; for an app staying on Eden, the `extraHeaders` option
-> above is still the right addition.
+> asked for turns out to be `hc`'s default. The kit factory was removed
+> altogether on 2026-08-07, so the `extraHeaders` addition is moot; the finding
+> is kept as the record of why `hc`'s single-thunk shape is the better seam.
 
 ### 5. `useConfirm`'s singleton survives the package boundary (verified, no action)
 

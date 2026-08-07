@@ -1,7 +1,7 @@
 /**
- * SPIKE (elysia-exit-option): `../elysia/bearer-auth.test.ts` ported
- * case-for-case. The rejection seam is Hono-native (return a `Response`)
- * instead of throw-based; every status/body assertion is unchanged.
+ * Bearer-auth middleware. Ported case-for-case from the Elysia plugin's suite:
+ * the rejection seam is Hono-native (return a `Response`) instead of
+ * throw-based, and every status/body assertion is unchanged.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';

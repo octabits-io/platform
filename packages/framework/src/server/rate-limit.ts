@@ -1,9 +1,8 @@
 /**
- * Framework-neutral rate-limiting cores shared by the glue modules: the
+ * Framework-neutral rate-limiting cores for the glue module: the
  * IPv4-CIDR/exact-IP skip matcher, timing-safe string comparison, and a plain
- * fixed-window counter. `./elysia`'s `createRateLimit` wraps the
- * `elysia-rate-limit` vendor around the matcher; `./hono`'s rate-limit
- * middleware is built entirely from these cores.
+ * fixed-window counter. `./hono`'s rate-limit middleware is built entirely
+ * from these cores — no rate-limit vendor is involved.
  */
 import { timingSafeEqual } from 'node:crypto';
 import { isIP } from 'node:net';
@@ -88,7 +87,7 @@ export interface FixedWindowLimiterOptions {
  * Plain in-memory fixed-window counter: `hit(key)` counts a request against
  * the key's current window and reports whether it is over the limit.
  *
- * Per-process state (a Map) — matching what `elysia-rate-limit`'s default
+ * Per-process state (a Map) — matching what a typical rate-limit vendor's default
  * store did. Expired windows are pruned lazily on hit and in bulk whenever
  * the map grows past a sweep threshold, so idle keys don't accumulate.
  */

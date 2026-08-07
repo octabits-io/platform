@@ -1,8 +1,7 @@
 /**
  * Security response-headers core: resolve options into the concrete header
- * map — usable from any framework (set each entry on the response). The glue
- * modules apply it: `./elysia` stages the map in `onRequest`, `./hono` sets
- * it on `c.res` after `next()`.
+ * map — usable from any framework (set each entry on the response). `./hono`
+ * applies it by setting the entries on `c.res` after `next()`.
  *
  * Headers: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`,
  * `X-XSS-Protection: 0` (the legacy filter is disabled — it introduced

@@ -1,7 +1,7 @@
 /**
  * Typed `process.env` accessors plus the CSV / CORS parse patterns every API
  * config file repeats. Pure — no framework dependency; the outputs feed the
- * `./elysia` middleware (trusted proxies → client-ip, CIDRs → rate-limit,
+ * `./hono` middleware (trusted proxies → client-ip, CIDRs → rate-limit,
  * origins → CORS) but nothing here is tied to it.
  */
 

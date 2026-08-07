@@ -18,7 +18,7 @@
  * 5. {@link createEventHub} — in-process per-scope fan-out with per-subscriber
  *    audience/permission filtering.
  * 6. {@link createEventStreamHandler} — the SSE endpoint (plain fetch
- *    handler; Elysia wrapper at `elysia/events`).
+ *    handler; Hono sub-app wrapper at `hono/events`).
  *
  * The matching browser client (fetch-based SSE reader, watermark, dedupe,
  * backoff) lives in `@octabits-io/nuxt-ui-kit/events`.

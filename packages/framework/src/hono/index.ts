@@ -1,8 +1,8 @@
 /**
  * `@octabits-io/framework/hono` — reusable Hono middleware & helpers, the
- * package's second HTTP glue module (sibling of `./elysia`, same confinement
- * contract: thin replaceable glue over the framework-neutral cores in
- * `../server`). See `docs/hono.md`.
+ * package's HTTP glue module (thin replaceable glue over the framework-neutral
+ * cores in `../server`, confinement enforced by the boundary lint). See
+ * `docs/hono.md`.
  *
  * Deliberately NOT exported here (subpaths keep their optional peers out of
  * this barrel): `./hono/flow` (`@octabits-io/flow`), `./hono/mcp`

@@ -1,11 +1,11 @@
 /**
- * SPIKE (elysia-exit-option): gap probe #7 — the `t.File()` multipart one-off.
- *
- * The demo-server's `files.ts` needs Elysia's `t.File()` because a zod schema
- * cannot express the runtime `File` Elysia's body parser produces. On Hono the
- * gap disappears: `c.req.parseBody()` yields real `File` instances and zod v4
- * has a first-class `z.file()` (with `.min`/`.max`/`.mime`) to validate them —
- * no TypeBox escape hatch, one schema language end to end.
+ * Multipart file upload — the one route shape that used to need a TypeBox
+ * escape hatch (`t.File()`), because a zod schema could not express the runtime
+ * `File` Elysia's body parser produced. On Hono there is no gap:
+ * `c.req.parseBody()` yields real `File` instances and zod v4 has a first-class
+ * `z.file()` (with `.min`/`.max`/`.mime`) to validate them — one schema
+ * language end to end. Pinned so a regression would be caught here, not in a
+ * consumer's upload route.
  */
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';

@@ -1,9 +1,9 @@
 /**
- * SPIKE (elysia-exit-option): the acid test — `../elysia/request-scope.test.ts`
- * ported case-for-case against the single-middleware Hono implementation.
- * Same disposal assertions (success / handler-throw / guard-rejection /
- * createScope-throw / dispose-failure logging / contextKey / extras), plus the
- * two Hono-specific cases at the bottom (non-Error throw, params visibility).
+ * The disposal-triangle acid test: success / handler-throw / guard-rejection /
+ * createScope-throw / dispose-failure logging / contextKey / extras, against
+ * the single-middleware implementation, plus the Hono-specific cases at the
+ * bottom (non-Error throw, params visibility). Ported case-for-case from the
+ * Elysia plugin's suite, so the contract is provably unchanged across the swap.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';

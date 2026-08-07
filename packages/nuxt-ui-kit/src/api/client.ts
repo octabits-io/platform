@@ -1,8 +1,24 @@
-import { treaty, type Treaty } from '@elysiajs/eden';
-import type { Elysia } from 'elysia';
+/**
+ * Transport-agnostic API-client seams.
+ *
+ * The Eden Treaty factory that used to live here was removed with the Elysia
+ * glue: consumers build their client with Hono's `hc` (ideally the pre-compiled
+ * `hcWithType` the API package exports) and inject the bearer through `hc`'s own
+ * async `headers` thunk. These two helpers were never Eden-specific and keep
+ * their jobs — base-URL resolution and reading the token off the OIDC session.
+ *
+ * ```ts
+ * import { hcWithType } from '@acme/admin-api/client';
+ * const getToken = createAccessTokenProvider(getUserManager);
+ * const client = hcWithType(getBaseUrl(), {
+ *   headers: async () => {
+ *     const token = await getToken();
+ *     return token ? { authorization: `Bearer ${token}` } : {};
+ *   },
+ * });
+ * ```
+ */
 import type { UserManager } from 'oidc-client-ts';
-
-type AnyElysia = Elysia<any, any, any, any, any, any, any>;
 
 export interface ResolveApiBaseUrlOptions {
   /**
@@ -40,72 +56,5 @@ export function createAccessTokenProvider(
     const user = await getUserManager().getUser();
     if (!user || user.expired) return null;
     return user.access_token;
-  };
-}
-
-export interface TreatyClientFactoryOptions {
-  /** Resolve (and memoize, if desired) the base URL at first client use. */
-  getBaseUrl: () => string;
-  /** Bearer token per request; `null` sends no Authorization header. */
-  getAccessToken: () => Promise<string | null>;
-  /**
-   * Eden Treaty's auto-Date parsing on responses. Default `false`: with the
-   * default `true`, any `YYYY-MM-DD` string in a response is silently
-   * converted to a `Date` object, which then JSON-serializes back as a full
-   * ISO datetime on the next request — breaking server-side "plain ISO date
-   * string" validation. Keep the wire contract string-typed unless the API
-   * genuinely round-trips Date objects.
-   */
-  parseDate?: boolean;
-  /**
-   * Additional header source(s), applied after the bearer injector — a later
-   * entry wins on key collision, so consumers can add or override headers
-   * without losing the Authorization injection.
-   */
-  headers?: Treaty.Config['headers'];
-  /** Extra Treaty config (fetcher, onRequest, …), applied last. */
-  treatyConfig?: Omit<Treaty.Config, 'headers' | 'parseDate'>;
-}
-
-/**
- * Lazily-created Eden Treaty client singleton with OIDC bearer injection.
- *
- * ```ts
- * const getClient = createTreatyClientFactory<App>({ getBaseUrl, getAccessToken })
- * export function useApi() {
- *   const client = getClient()
- *   return { api: client.api, client }
- * }
- * ```
- */
-export function createTreatyClientFactory<App extends AnyElysia>(
-  options: TreatyClientFactoryOptions,
-): () => Treaty.Create<App> {
-  let client: Treaty.Create<App> | null = null;
-
-  return function getClient(): Treaty.Create<App> {
-    if (client) return client;
-
-    const bearerInjector = async () => {
-      const token = await options.getAccessToken();
-      if (token) {
-        return { authorization: `Bearer ${token}` } as Record<string, string>;
-      }
-      return undefined;
-    };
-    const extraHeaders =
-      options.headers === undefined
-        ? []
-        : Array.isArray(options.headers)
-          ? options.headers
-          : [options.headers];
-
-    client = treaty<App>(options.getBaseUrl(), {
-      parseDate: options.parseDate ?? false,
-      headers: [bearerInjector, ...extraHeaders],
-      ...options.treatyConfig,
-    });
-
-    return client;
   };
 }

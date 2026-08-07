@@ -2,7 +2,7 @@ import { ref, computed, type Ref, type ComputedRef } from 'vue';
 
 type OrgStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
-/** Result seam for the org fetch — mirrors an Eden Treaty `{ data, error }`. */
+/** Result seam for the org fetch — a `{ data, error }` pair, whatever the client. */
 export type FetchOrganizationsResult<TOrg> =
   | { items: TOrg[]; error?: undefined }
   | { items?: undefined; error: unknown };

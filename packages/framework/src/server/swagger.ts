@@ -1,17 +1,17 @@
 /**
  * Swagger/OpenAPI options builder.
  *
- * Every API repeats the same `swagger({ documentation: { info, tags }, path,
- * exclude })` literal, differing only in the title/version/tag list. This
- * flattens that nesting into one flat call.
+ * Every API repeats the same `{ documentation: { info, tags }, path, exclude }`
+ * literal, differing only in the title/version/tag list. This flattens that
+ * nesting into one flat call.
  *
- * **No dependency on `@elysiajs/swagger`** — the return type is structural, so
- * this module (and anything importing the `./elysia` root) stays free of the
- * plugin. The caller keeps ownership of the plugin instance:
+ * **Structural, no spec-generator dependency** — the return type is a plain
+ * interface, so this module (and anything importing `./server`) stays free of
+ * the OpenAPI plumbing. The caller keeps ownership of it:
  *
  * ```ts
- * import { swagger } from '@elysiajs/swagger';
- * plugins.push(swagger(buildSwaggerOptions({ title: 'My API', version: '1.2.0' })));
+ * import { mountOpenApi } from '@octabits-io/framework/hono/openapi';
+ * mountOpenApi(app, buildSwaggerOptions({ title: 'My API', version: '1.2.0' }));
  * ```
  */
 
@@ -21,7 +21,7 @@ export interface SwaggerTag {
   description?: string;
 }
 
-/** The structural subset of `@elysiajs/swagger`'s options this builder emits. */
+/** The structural options document this builder emits — consumed by `./hono/openapi`'s `mountOpenApi`. */
 export interface SwaggerOptions {
   documentation: {
     info: {
@@ -53,9 +53,9 @@ export interface BuildSwaggerOptionsInput {
 const DEFAULT_SWAGGER_PATH = '/swagger';
 
 /**
- * Build the options object for `@elysiajs/swagger`. Optional inputs are omitted
- * from the result rather than emitted as `undefined`, so the object stays a
- * faithful minimal literal.
+ * Build the OpenAPI options object. Optional inputs are omitted from the result
+ * rather than emitted as `undefined`, so the object stays a faithful minimal
+ * literal.
  *
  * ```ts
  * buildSwaggerOptions({

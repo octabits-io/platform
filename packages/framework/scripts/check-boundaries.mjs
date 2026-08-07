@@ -8,13 +8,16 @@
  *                  signing, vault, captcha, pii, drizzle, ical, events, server)
  *       → may import each other; must never import an app module or an
  *         app-tier vendor SDK
- *   app modules   (elysia, queue, storage, mail, zitadel)
+ *   app modules   (hono, queue, storage, mail, zitadel)
  *       → may import base modules; must never import each other, and each
  *         is confined to its own vendor SDKs
  *
  * This keeps every subpath export independently importable: pulling in
  * `@octabits-io/framework/mail` can never drag along pg-boss, the AWS SDK,
- * or Elysia.
+ * or Hono.
+ *
+ * Elysia was removed in favour of `./hono`; its vendors are on a package-wide
+ * ban list (BANNED_VENDORS) so the glue layer cannot creep back in.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -22,16 +25,21 @@ import { fileURLToPath } from 'node:url';
 
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 
-const APP_MODULES = ['elysia', 'hono', 'queue', 'storage', 'mail', 'zitadel'];
+const APP_MODULES = ['hono', 'queue', 'storage', 'mail', 'zitadel'];
 
 // Vendor SDKs that belong to exactly one app module. '@scope' entries match the
 // whole scope. Base-tier vendors (pg, drizzle-orm, jose, zod, altcha-lib,
 // ical.js, @noble/*, …) are not listed — the optional-peer setup governs those.
-// '@modelcontextprotocol' and '@octabits-io/flow' are shared by the two HTTP
-// glue modules but confined per-file (see SINGLE_FILE_VENDORS): only the
+// '@modelcontextprotocol' and '@octabits-io/flow' are used by the HTTP glue
+// module but confined per-file (see SINGLE_FILE_VENDORS): only the
 // `mcp.ts` / `flow.ts` factories may touch them (optional peers).
-const ELYSIA_VENDORS = ['elysia', 'elysia-mcp', 'elysia-rate-limit', '@sinclair/typebox'];
-const HONO_VENDORS = ['hono', '@hono/zod-validator', '@hono/mcp', 'hono-openapi', '@hono/standard-validator', '@standard-community/standard-json', '@standard-community/standard-openapi'];
+//
+// Elysia's vendors are banned everywhere, not owned by a module: the `./elysia`
+// glue was deleted once `./hono` reached parity, and `@sinclair/typebox` was
+// only ever a hard dep because Elysia's instance generics leaked it into the
+// emitted .d.ts.
+const BANNED_VENDORS = ['elysia', 'elysia-mcp', 'elysia-rate-limit', '@elysiajs', '@sinclair/typebox'];
+const HONO_VENDORS =['hono', '@hono/zod-validator', '@hono/mcp', 'hono-openapi', '@hono/standard-validator', '@standard-community/standard-json', '@standard-community/standard-openapi'];
 const GLUE_SHARED_VENDORS = ['@modelcontextprotocol', '@octabits-io/flow'];
 const QUEUE_VENDORS = ['pg-boss'];
 const STORAGE_VENDORS = ['@aws-sdk'];
@@ -42,14 +50,13 @@ const HTTP_VENDORS = ['wretch'];
 
 /** module → { internal: allowed other modules ('' = base tier), externals: forbidden packages } */
 const RULES = {
-  elysia: { internal: [''], externals: [...HONO_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
-  hono: { internal: [''], externals: [...ELYSIA_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
-  queue: { internal: [''], externals: [...ELYSIA_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
-  storage: { internal: [''], externals: [...ELYSIA_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
-  mail: { internal: [''], externals: [...ELYSIA_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS] },
-  zitadel: { internal: [''], externals: [...ELYSIA_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS] },
+  hono: { internal: [''], externals: [...BANNED_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
+  queue: { internal: [''], externals: [...BANNED_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
+  storage: { internal: [''], externals: [...BANNED_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
+  mail: { internal: [''], externals: [...BANNED_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS] },
+  zitadel: { internal: [''], externals: [...BANNED_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS] },
   // base tier: all of src/ outside the app modules
-  '': { internal: [], externals: [...ELYSIA_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
+  '': { internal: [], externals: [...BANNED_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
 };
 
 function walk(dir) {
@@ -84,13 +91,12 @@ function matches(f, name) {
 }
 
 // ---------------------------------------------------------------------------
-// Per-file rules inside the HTTP glue modules (src/elysia, src/hono) — the
-// confinement contract:
+// Per-file rules inside the HTTP glue module (src/hono) — the confinement
+// contract:
 //
-//   1. Vendor plugins are confined to single files: `elysia-mcp` may only be
-//      imported by elysia/mcp.ts, `elysia-rate-limit` only by
-//      elysia/rate-limit.ts, `@hono/mcp` only by hono/mcp.ts; the shared MCP
-//      SDK and `@octabits-io/flow` only by each glue module's mcp.ts/flow.ts.
+//   1. Vendor plugins are confined to single files: `@hono/mcp` may only be
+//      imported by hono/mcp.ts, `hono-openapi` only by hono/openapi.ts, and
+//      the MCP SDK / `@octabits-io/flow` only by hono's mcp.ts / flow.ts.
 //   2. Every non-test source file in a glue module must import its framework
 //      vendor. A file that doesn't is framework-agnostic and belongs in
 //      src/server (or another base module) — that's how config/run/swagger/
@@ -99,18 +105,15 @@ function matches(f, name) {
 // ---------------------------------------------------------------------------
 // vendor package → source files it is confined to (each file's *.test.ts fixtures included)
 const SINGLE_FILE_VENDORS = {
-  'elysia-mcp': ['elysia/mcp.ts'],
-  'elysia-rate-limit': ['elysia/rate-limit.ts'],
   '@hono/mcp': ['hono/mcp.ts'],
   'hono-openapi': ['hono/openapi.ts'],
-  '@modelcontextprotocol/sdk': ['elysia/mcp.ts', 'hono/mcp.ts'],
-  '@octabits-io/flow': ['elysia/flow.ts', 'hono/flow.ts'],
+  '@modelcontextprotocol/sdk': ['hono/mcp.ts'],
+  '@octabits-io/flow': ['hono/flow.ts'],
 };
 // Compat re-export files: no framework-vendor import, allowed to stay for import-path stability.
-const GLUE_REEXPORT_FILES = new Set(['elysia/index.ts', 'elysia/testing.ts', 'hono/index.ts']);
+const GLUE_REEXPORT_FILES = new Set(['hono/index.ts']);
 // module → vendor list that counts as "imports its framework vendor"
 const GLUE_VENDOR_TIERS = {
-  elysia: [...ELYSIA_VENDORS, ...GLUE_SHARED_VENDORS],
   hono: [...HONO_VENDORS, ...GLUE_SHARED_VENDORS],
 };
 
@@ -140,8 +143,7 @@ for (const file of walk(SRC)) {
     } else if (!spec.startsWith('node:')) {
       const name = pkgName(spec);
       // Any vendor of the module's own tier counts as framework coupling
-      // (elysia/rate-limit.ts wraps elysia-rate-limit without importing
-      // elysia itself).
+      // (hono/openapi.ts wraps hono-openapi without importing hono itself).
       if (glueVendorTier?.some((f) => matches(f, name))) importsGlueVendor = true;
       const forbidden = rule.externals.find((f) => matches(f, name));
       if (forbidden) {

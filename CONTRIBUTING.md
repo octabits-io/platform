@@ -158,15 +158,16 @@ pnpm release                # all of the above with safety gates
 
 | Package | Description | Exports |
 |---------|-------------|---------|
-| `@octabits-io/framework` | Server framework toolkit: base modules (Result, IoC, logger, utils, config-schema, RBAC, auth, signing, Vault, captcha, PII, Drizzle helpers, iCal) plus app modules for Elysia, pg-boss queues, blob storage, and mail | `./result` `./ioc` `./logger` `./utils` `./config-schema` `./rbac` `./auth` `./signing` `./vault` `./captcha` `./captcha/altcha` `./pii` `./drizzle/*` `./ical` `./elysia` `./elysia/mcp` `./elysia/testing` `./queue` `./storage` `./storage/s3` `./storage/postgres` `./mail` `./mail/smtp` `./mail/mailjet` `./mail/brevo` |
+| `@octabits-io/framework` | Server framework toolkit: base modules (Result, IoC, logger, utils, config-schema, RBAC, auth, signing, Vault, captcha, PII, Drizzle helpers, iCal) plus app modules for Hono, pg-boss queues, blob storage, and mail | `./result` `./ioc` `./logger` `./utils` `./config-schema` `./rbac` `./auth` `./signing` `./vault` `./captcha` `./captcha/altcha` `./pii` `./drizzle/*` `./ical` `./events` `./server` `./server/testing` `./hono` `./hono/mcp` `./hono/openapi` `./hono/flow` `./hono/events` `./queue` `./storage` `./storage/s3` `./storage/postgres` `./mail` `./mail/smtp` `./mail/mailjet` `./mail/brevo` |
 | `@octabits-io/nuxt-ui-kit` | Frontend kit for Nuxt/Vue admin SPAs (source-shipped SFCs) | `.` `./zod` `./dates` `./ai` `./components/*` |
 
 Inside `framework`, a boundary lint (`scripts/check-boundaries.mjs`) enforces the
-module tiers: the four app modules (`elysia`, `queue`, `storage`, `mail`) may import
-base modules but never each other, and each vendor SDK stays confined to its module.
-Heavy/vendor deps are optional peers everywhere (aws-sdk, drizzle-orm, pg, pg-boss,
-elysia, nodemailer, jose, …); the only hard deps are the tiny zero-dep
-`@noble/*`/`@scure/base` crypto primitives plus elysia's `@sinclair/typebox`/`elysia-rate-limit`.
+module tiers: the app modules (`hono`, `queue`, `storage`, `mail`, `zitadel`) may
+import base modules but never each other, and each vendor SDK stays confined to its
+module. Heavy/vendor deps are optional peers everywhere (aws-sdk, drizzle-orm, pg,
+pg-boss, hono, nodemailer, jose, …); the only hard deps are the tiny zero-dep
+`@noble/*`/`@scure/base` crypto primitives. Elysia's vendors are on a package-wide
+ban list — the `./elysia` glue module was removed once `./hono` reached parity.
 
 History: the former standalone `pii`, `drizzle-toolkit`, `ical`, `captcha`, and
 `vault` packages were folded into `foundation` (2026-06), and `foundation`,

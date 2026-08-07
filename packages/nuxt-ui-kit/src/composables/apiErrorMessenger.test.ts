@@ -33,7 +33,7 @@ describe('createApiErrorMessenger', () => {
     expect(messenger().getErrorMessage(null)).toBe('Something went wrong');
   });
 
-  it('unwraps Eden Treaty { value } envelopes', () => {
+  it('unwraps { value } error envelopes', () => {
     expect(
       messenger().getErrorMessage({ status: 404, value: { key: 'not_found', message: 'raw' } }),
     ).toBe('Not found');

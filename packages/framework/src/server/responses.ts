@@ -1,5 +1,6 @@
 /**
- * Standard HTTP response schemas for Elysia route `response` maps, plus the
+ * Standard HTTP response schemas for route response maps (`./hono/openapi`'s
+ * `describeApiRoute`/`octApiValidator` take them verbatim), plus the
  * `CommonErrorResponses` superset and an `errorResponses(...codes)` selector.
  *
  * The error body shape is generic — `{ key, message }` (+ `fields` for validation)
@@ -51,11 +52,11 @@ export const ALL_ERROR_STATUSES = [400, 401, 403, 404, 409, 422, 429, 500, 503] 
 export type ErrorStatusCode = (typeof ALL_ERROR_STATUSES)[number];
 
 /**
- * Build an Elysia `response`-map fragment mapping the given status codes to
- * `SCHEMA_ERROR_RESPONSE`. Spread into a route's `response` object.
+ * Build a response-map fragment mapping the given status codes to
+ * `SCHEMA_ERROR_RESPONSE`. Spread into a route's `responses` object.
  *
  * @example
- * response: { 200: ItemSchema, ...errorResponses(400, 404) }
+ * responses: { 200: ItemSchema, ...errorResponses(400, 404) }
  */
 export function errorResponses<const C extends readonly ErrorStatusCode[]>(
   ...codes: C
@@ -66,7 +67,7 @@ export function errorResponses<const C extends readonly ErrorStatusCode[]>(
 }
 
 /**
- * Common error responses (superset). Spread into a route's `response` map to
+ * Common error responses (superset). Spread into a route's `responses` map to
  * include the standard error status codes, or use `errorResponses(...)` to pick
  * a subset.
  */
@@ -75,21 +76,18 @@ export const CommonErrorResponses = errorResponses(...ALL_ERROR_STATUSES);
 /**
  * Declare a non-200 success schema **plus a 200 alias** for the same shape.
  *
- * This is an Eden Treaty workaround, not an HTTP nicety. Eden derives a route's
- * `data` type as `Extract<Response, SuccessCodes>` and its `error` type from the
- * rest. Elysia additionally infers a 200 entry from the handler's return union
- * whenever the handler can return a bare value — so on a route whose only
- * *declared* success code is non-200 (e.g. `201`), the inferred 200 entry ends
- * up carrying the **whole** return union, error bodies included. Eden then folds
- * those error shapes into `data`, and every caller has to re-narrow a union that
- * should already have been split.
+ * Originally an Eden Treaty workaround: Eden derived a route's `data` type as
+ * `Extract<Response, SuccessCodes>`, and Elysia inferred a phantom 200 entry
+ * from the handler's return union — so on a route whose only *declared* success
+ * code was non-200 (e.g. `201`), that inferred 200 carried the **whole** union,
+ * error bodies included, which Eden then folded into `data`.
  *
- * Declaring 200 explicitly with the success schema pins that entry, so the
- * union splits where it should: `data` is the success shape, `error` is the
- * error union.
+ * Hono's `hc` declares no such phantom status, so non-200-success routes narrow
+ * on their own and this is now **documentation**, not a workaround: it gives the
+ * OpenAPI document a complete response map.
  *
  * ```ts
- * response: { ...successResponses(201, CreatedSchema), ...errorResponses(400, 409) }
+ * responses: { ...successResponses(201, CreatedSchema), ...errorResponses(400, 409) }
  * ```
  *
  * Passing `200` is a no-op alias of itself (`{ 200: schema }`).

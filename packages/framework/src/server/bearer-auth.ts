@@ -1,7 +1,6 @@
 /**
- * Framework-neutral bearer-auth contracts shared by the glue modules
- * (`./elysia`'s `createBearerAuthPlugin`, `./hono`'s
- * `createBearerAuthMiddleware`). The service seam is **structural** —
+ * Framework-neutral bearer-auth contracts for the glue module
+ * (`./hono`'s `createBearerAuthMiddleware`). The service seam is **structural** —
  * anything with a `validateAuthorizationHeader(header)` returning a `Result`
  * fits, including `…/auth`'s `createBearerAuthService` and
  * `createJwtValidationService` — so this module has no dependency on the auth

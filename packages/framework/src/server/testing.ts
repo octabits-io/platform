@@ -1,7 +1,7 @@
 /**
  * Test-harness helpers for driving an app through its `handle()` — no port
  * binding, no HTTP stack, just Request in / Response out. The app contract is
- * structural (`{ handle(Request): Promise<Response> }`), satisfied by an Elysia
+ * structural (`{ handle(Request): Promise<Response> }`), satisfied by a Hono
  * instance but equally by any fetch-style handler wrapped in an object.
  *
  * A **separate subpath** (`@octabits-io/framework/server/testing`), deliberately
@@ -18,7 +18,7 @@
  * ```
  */
 
-/** Structural contract for the app under test — satisfied by an Elysia instance. */
+/** Structural contract for the app under test — satisfied by a Hono instance. */
 export interface TestableApp {
   handle(request: Request): Promise<Response>;
 }

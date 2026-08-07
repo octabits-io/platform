@@ -72,12 +72,12 @@ services.db; // resolves on property access
 dodge modules otherwise re-declare inline).
 
 **Scope lifecycle helpers** — for non-HTTP contexts (queue handlers, cron sweeps,
-CLI); the Elysia request path has `createRequestScopePlugin` instead:
+CLI); the HTTP request path has `./hono`'s `createRequestScopeMiddleware` instead:
 
 ```ts
 import { withScope, forEachScope } from '@octabits-io/framework/ioc';
 
-// acquire → work → dispose, with the request-scope plugin's commit semantics:
+// acquire → work → dispose, with the request-scope middleware's commit semantics:
 // success → dispose({ commit: true }) (a failure here RETHROWS — the work may
 // not be persisted); fn threw → dispose({ commit: false }), fn's error wins.
 const total = await withScope(
@@ -918,7 +918,7 @@ db IS a Drizzle-managed transaction, nested `db.transaction()` gets real
 savepoint semantics. The scope holds a pool client for its lifetime; a
 mid-scope SQL error aborts the transaction until dispose; failing to
 dispose leaks the client (use lifecycle owners that guarantee dispose —
-`createRequestScopePlugin`, `withScope`).
+`createRequestScopeMiddleware`, `withScope`).
 
 **Choosing between the two scope models** — the trade is NOT the wire
 round-trips (per-call costs 3 per operation, pinned ~N+3 per scope); at

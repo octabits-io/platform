@@ -26,16 +26,17 @@ itself, so it has no Nuxt dependency, only `vue`.
 - **Route guard builder** — `createAuthGuard` returns a handler yielding a
   redirect target or `undefined`; per-app policy (org validation, role gates)
   goes in the `afterAuthenticated` hook
-- **Eden Treaty client factory** (`@elysiajs/eden` peer) —
-  `createTreatyClientFactory<App>` (lazy singleton, bearer injection,
-  `parseDate: false` by default to keep ISO-date strings string-typed on the
-  wire), plus `createAccessTokenProvider` and `resolveApiBaseUrl`
+- **API-client seams** (`./api`, transport-agnostic) —
+  `resolveApiBaseUrl` (configured URL → page origin in production → localhost
+  dev port) and `createAccessTokenProvider` (bearer from the OIDC session).
+  Build the client with Hono's `hc` and inject the token through its own async
+  `headers` thunk
 - **Org store core** — `createOrgStoreCore<TOrg>` (granted orgs, slug-keyed
   selection, persistence, lost-access revocation) for the app's own store
 - **API error → i18n** — `createApiErrorMessenger({ t, te })`: maps
   `{ key, message }` bodies and validation errors to user-facing strings via
   the `errors.*` / `validation.fields.*` / `validation.messages.*` key
-  convention; unwraps Eden `{ value }` envelopes
+  convention; unwraps `{ value }` error envelopes
 - **Confirm dialog** — promise-based `useConfirm()` + singleton state, with a
   `./components/ConfirmDialog.vue` renderer (`common.cancel`/`common.confirm`
   i18n defaults, `zIndexClass` prop for stacking above slideovers)
@@ -113,11 +114,17 @@ export default defineNuxtPlugin((nuxtApp) => {
   })
 })
 
-// app/composables/useApi.ts
-const getClient = createTreatyClientFactory<App>({
-  getBaseUrl: () => resolveApiBaseUrl({ configuredUrl, isProductionBuild: import.meta.env.PROD, devFallbackPort: 3002 }),
-  getAccessToken: createAccessTokenProvider(getUserManager),
-})
+// app/composables/useApi.ts — `hcWithType` is the API package's pre-compiled client type
+const getAccessToken = createAccessTokenProvider(getUserManager)
+const client = hcWithType(
+  resolveApiBaseUrl({ configuredUrl, isProductionBuild: import.meta.env.PROD, devFallbackPort: 3002 }),
+  {
+    headers: async () => {
+      const token = await getAccessToken()
+      return token ? { authorization: `Bearer ${token}` } : {}
+    },
+  },
+)
 
 // app/stores/auth.ts
 export const useAuthStore = defineStore('auth', () =>

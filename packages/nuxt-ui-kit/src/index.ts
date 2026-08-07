@@ -1,7 +1,7 @@
 // Root barrel: framework-light surface only (vue is the sole required peer).
-// The OIDC harness lives on `./auth` (oidc-client-ts peer) and the Eden
-// Treaty client factory on `./api` (@elysiajs/eden peer) so importing a
-// composable never welds those packages to the consumer.
+// The OIDC harness lives on `./auth` and the API-client seams on `./api` (both
+// oidc-client-ts peer) so importing a composable never welds that package to
+// the consumer.
 
 // Org/tenant store core
 export { createOrgStoreCore } from './org/orgStore.ts';

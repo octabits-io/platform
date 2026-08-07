@@ -1,10 +1,3 @@
-// Eden Treaty client factory
-export {
-  createTreatyClientFactory,
-  createAccessTokenProvider,
-  resolveApiBaseUrl,
-} from './client.ts';
-export type {
-  TreatyClientFactoryOptions,
-  ResolveApiBaseUrlOptions,
-} from './client.ts';
+// Transport-agnostic API-client seams (base URL + OIDC bearer)
+export { createAccessTokenProvider, resolveApiBaseUrl } from './client.ts';
+export type { ResolveApiBaseUrlOptions } from './client.ts';

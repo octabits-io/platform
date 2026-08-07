@@ -1,7 +1,7 @@
 {
   "name": "@octabits-io/framework",
   "version": "0.22.0",
-  "description": "Opinionated server framework toolkit: Result types, IoC, logger, RBAC, auth, signing, Vault, captcha, PII encryption, Drizzle helpers, iCal ingestion, Elysia/Hono middleware & MCP harness, pg-boss queues, blob storage, mail dispatch, and a Zitadel management client — one package, granular subpath exports",
+  "description": "Opinionated server framework toolkit: Result types, IoC, logger, RBAC, auth, signing, Vault, captcha, PII encryption, Drizzle helpers, iCal ingestion, Hono middleware & MCP harness, pg-boss queues, blob storage, mail dispatch, and a Zitadel management client — one package, granular subpath exports",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -155,11 +155,6 @@
       "import": "./dist/drizzle/broadcast/index.js",
       "default": "./dist/drizzle/broadcast/index.js"
     },
-    "./elysia/events": {
-      "types": "./dist/elysia/events.d.ts",
-      "import": "./dist/elysia/events.js",
-      "default": "./dist/elysia/events.js"
-    },
     "./server": {
       "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js",
@@ -169,26 +164,6 @@
       "types": "./dist/server/testing.d.ts",
       "import": "./dist/server/testing.js",
       "default": "./dist/server/testing.js"
-    },
-    "./elysia": {
-      "types": "./dist/elysia/index.d.ts",
-      "import": "./dist/elysia/index.js",
-      "default": "./dist/elysia/index.js"
-    },
-    "./elysia/mcp": {
-      "types": "./dist/elysia/mcp.d.ts",
-      "import": "./dist/elysia/mcp.js",
-      "default": "./dist/elysia/mcp.js"
-    },
-    "./elysia/flow": {
-      "types": "./dist/elysia/flow.d.ts",
-      "import": "./dist/elysia/flow.js",
-      "default": "./dist/elysia/flow.js"
-    },
-    "./elysia/testing": {
-      "types": "./dist/elysia/testing.d.ts",
-      "import": "./dist/elysia/testing.js",
-      "default": "./dist/elysia/testing.js"
     },
     "./hono": {
       "types": "./dist/hono/index.d.ts",
@@ -284,9 +259,7 @@
     "@noble/ciphers": "^2.2.0",
     "@noble/curves": "^2.3.0",
     "@noble/hashes": "^2.3.0",
-    "@scure/base": "^2.2.0",
-    "@sinclair/typebox": "^0.34.52",
-    "elysia-rate-limit": "^4.6.2"
+    "@scure/base": "^2.2.0"
   },
   "peerDependencies": {
     "@aws-sdk/client-s3": "^3",
@@ -299,8 +272,6 @@
     "@standard-community/standard-openapi": "^0.2.9",
     "altcha-lib": "^2",
     "drizzle-orm": "^0.45.2",
-    "elysia": "^1.4.0",
-    "elysia-mcp": "^0.1.1",
     "hono": "^4.13.0",
     "hono-openapi": "^1.3.1",
     "ical.js": "^2",
@@ -344,12 +315,6 @@
     "drizzle-orm": {
       "optional": true
     },
-    "elysia": {
-      "optional": true
-    },
-    "elysia-mcp": {
-      "optional": true
-    },
     "hono": {
       "optional": true
     },
@@ -380,7 +345,6 @@
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.1105.0",
-    "@elysiajs/eden": "^1.4.9",
     "@hono/mcp": "^0.3.1",
     "@hono/standard-validator": "^0.4.0",
     "@hono/zod-validator": "^0.9.0",
@@ -395,8 +359,6 @@
     "@types/pg": "^8.20.4",
     "altcha-lib": "^2.3.2",
     "drizzle-orm": "^0.45.2",
-    "elysia": "^1.4.29",
-    "elysia-mcp": "^0.1.1",
     "hono": "^4.13.0",
     "hono-openapi": "^1.3.1",
     "ical.js": "^2.2.1",
