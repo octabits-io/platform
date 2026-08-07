@@ -12,7 +12,7 @@ import type { OctError } from '../../result/index.ts';
  * every provider mapping. The order is stable — treat it as the canonical
  * declaration order for enum definitions.
  */
-export const MAIL_DELIVERY_STATUSES = ['queued', 'sent', 'delivered', 'failed', 'bounced'] as const;
+export const MAIL_DELIVERY_STATUSES = ['queued', 'sent', 'delivered', 'failed', 'bounced', 'discarded'] as const;
 
 /**
  * Provider-agnostic delivery status for an outbound message. Providers map
@@ -21,6 +21,10 @@ export const MAIL_DELIVERY_STATUSES = ['queued', 'sent', 'delivered', 'failed', 
  * - `delivered` — the provider confirmed delivery.
  * - `bounced` — a hard rejection (hard bounce, spam, blocked, invalid address).
  * - `failed` — a transient/soft failure (soft bounce, deferred, provider error).
+ * - `discarded` — never handed to a provider at all: a review gate held the mail
+ *   and a human decided not to send it. No provider ever emits this; it exists so
+ *   a held-then-rejected mail is distinguishable from one that failed in transit,
+ *   which matters when the audit trail is what an operator reads.
  */
 export type DeliveryStatus = (typeof MAIL_DELIVERY_STATUSES)[number];
 
