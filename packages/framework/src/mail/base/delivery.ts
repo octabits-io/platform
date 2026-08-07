@@ -33,9 +33,15 @@ export type DeliveryStatus = (typeof MAIL_DELIVERY_STATUSES)[number];
  * consume only this shape, so a second provider can slot in by emitting it.
  */
 export interface NormalizedDeliveryEvent {
-  /** RFC 5322 Message-ID — matches `NormalizedInboundMessage.externalMessageId` / the outbound `SentMailInfo.messageId`. */
+  /**
+   * The provider's correlation handle for the message this event concerns —
+   * whatever the outbound side stored as `SentMailInfo.providerMessageId`. For
+   * SMTP and Brevo that is the RFC 5322 Message-ID, so it also matches
+   * `NormalizedInboundMessage.externalMessageId`; for Mailjet it is the
+   * `Message_GUID`, which is not a header id and never matches inbound.
+   */
   externalMessageId: string;
-  /** Raw provider event name (e.g. `delivered`, `hard_bounce`). */
+  /** Raw provider event name (e.g. `delivered`, `bounce`). */
   event: string;
   /**
    * Mapped delivery status, or `null` for events that don't change delivery

@@ -50,8 +50,12 @@ describe('createMailjetTransport', () => {
     });
 
     expect(result.ok).toBe(true);
-    // Mailjet Send v3.1 does not expose the Message-ID → always null.
-    if (result.ok) expect(result.value.messageId).toBeNull();
+    // Mailjet Send v3.1 does not expose the RFC 5322 Message-ID → always null.
+    // This stub response also carries no MessageUUID, so nothing to correlate.
+    if (result.ok) {
+      expect(result.value.messageId).toBeNull();
+      expect(result.value.providerMessageId).toBeNull();
+    }
 
     expect(post).toHaveBeenCalledWith('send', { version: 'v3.1' });
     const payload = request.mock.calls[0]![0] as { Messages: any[] };
@@ -66,6 +70,80 @@ describe('createMailjetTransport', () => {
     expect(m.Attachments).toEqual([
       { ContentType: 'application/pdf', Filename: 'doc.pdf', Base64Content: Buffer.from([1, 2, 3]).toString('base64') },
     ]);
+  });
+
+  it('surfaces the MessageUUID as providerMessageId so delivery events can be correlated', async () => {
+    request.mockResolvedValueOnce({
+      body: {
+        Messages: [{
+          Status: 'success',
+          To: [{
+            Email: 'guest@example.com',
+            MessageUUID: '1ab23cd4-e567-8901-2345-6789f0gh1i2j',
+            MessageID: '1234567890987654321',
+          }],
+        }],
+      },
+    });
+
+    const transport = createMailjetTransport({ mailjet, logger });
+    const result = await transport.send({
+      from: { address: 'noreply@tenant.com' },
+      to: ['guest@example.com'],
+      subject: 'Hi',
+      text: 't',
+      html: '<p>t</p>',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The Event API echoes this exact value back as `Message_GUID`.
+    expect(result.value.providerMessageId).toBe('1ab23cd4-e567-8901-2345-6789f0gh1i2j');
+    // Still not a header id — it must never reach inbound threading.
+    expect(result.value.messageId).toBeNull();
+  });
+
+  it('takes the first recipient uuid on a multi-recipient send', async () => {
+    request.mockResolvedValueOnce({
+      body: {
+        Messages: [{
+          To: [
+            { Email: 'a@example.com', MessageUUID: 'uuid-a' },
+            { Email: 'b@example.com', MessageUUID: 'uuid-b' },
+          ],
+        }],
+      },
+    });
+
+    const transport = createMailjetTransport({ mailjet, logger });
+    const result = await transport.send({
+      from: { address: 'noreply@tenant.com' },
+      to: ['a@example.com', 'b@example.com'],
+      subject: 'Hi',
+      text: 't',
+      html: '<p>t</p>',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.providerMessageId).toBe('uuid-a');
+  });
+
+  it('degrades to a null providerMessageId on an unreadable response shape', async () => {
+    // An accepted send whose body we cannot read must still succeed — losing
+    // correlation is not a delivery failure.
+    request.mockResolvedValueOnce({ body: { Messages: 'not-an-array' } });
+
+    const transport = createMailjetTransport({ mailjet, logger });
+    const result = await transport.send({
+      from: { address: 'noreply@tenant.com' },
+      to: ['guest@example.com'],
+      subject: 'Hi',
+      text: 't',
+      html: '<p>t</p>',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.providerMessageId).toBeNull();
   });
 
   it('defaults attachment content-type and omits ReplyTo when not provided', async () => {

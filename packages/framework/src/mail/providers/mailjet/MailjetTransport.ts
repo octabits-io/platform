@@ -57,7 +57,13 @@ export function createMailjetTransport(config: MailjetTransportCreateConfig): Ma
       // stamp `messageId` for header-threading (→ null; inbound matching falls
       // back to the tagged reply address) and `message.returnPath` is ignored
       // here — tagged bounce routing is SMTP-only.
-      await client.post('send', { version: 'v3.1' }).request({
+      //
+      // It does return a `MessageUUID` per accepted recipient, which the Event
+      // API echoes as `Message_GUID` — that is the only handle tying a Mailjet
+      // send to its later delivery/bounce events, so it goes out as
+      // `providerMessageId`. Dropping it (as this transport used to) leaves
+      // every Mailjet send unobservable after hand-off.
+      const accepted = await client.post('send', { version: 'v3.1' }).request({
         Messages: [{
           From: {
             Email: message.from.address,
@@ -79,7 +85,13 @@ export function createMailjetTransport(config: MailjetTransportCreateConfig): Ma
         }],
       });
 
-      return { ok: true, value: { messageId: null } };
+      return {
+        ok: true,
+        value: {
+          messageId: null,
+          providerMessageId: extractMailjetMessageUuid((accepted as { body?: unknown } | undefined)?.body),
+        },
+      };
     } catch (err) {
       logger.error('Error sending mail via Mailjet', err instanceof Error ? err : new Error(String(err)));
       return {
@@ -98,6 +110,29 @@ export function createMailjetTransport(config: MailjetTransportCreateConfig): Ma
     send,
     mailjetClient: client,
   };
+}
+
+/**
+ * Pull the first `MessageUUID` out of a Send v3.1 response body.
+ *
+ * Shape: `{ Messages: [{ Status, To: [{ Email, MessageUUID, MessageID, … }] }] }`.
+ * A send addressed to several recipients yields one entry per recipient; we take
+ * the first, matching the one-row-per-send shape consumers log against. Read
+ * defensively rather than through node-mailjet's loose response typing — a
+ * missing id must degrade to `null`, never throw on an otherwise-accepted send.
+ */
+function extractMailjetMessageUuid(body: unknown): string | null {
+  const messages = (body as { Messages?: unknown } | undefined)?.Messages;
+  if (!Array.isArray(messages)) return null;
+  for (const message of messages) {
+    const recipients = (message as { To?: unknown } | undefined)?.To;
+    if (!Array.isArray(recipients)) continue;
+    for (const recipient of recipients) {
+      const uuid = (recipient as { MessageUUID?: unknown } | undefined)?.MessageUUID;
+      if (typeof uuid === 'string' && uuid.length > 0) return uuid;
+    }
+  }
+  return null;
 }
 
 /**

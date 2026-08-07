@@ -81,7 +81,10 @@ export function createSmtpTransport(config: SmtpTransportCreateConfig): SmtpTran
         })),
       });
 
-      return { ok: true, value: { messageId: info.messageId ?? null } };
+      // SMTP's Message-ID serves both jobs: inbound replies echo it in
+      // `In-Reply-To`, and a relay's delivery events reference the same header.
+      const messageId = info.messageId ?? null;
+      return { ok: true, value: { messageId, providerMessageId: messageId } };
     } catch (err) {
       logger.error('Error sending mail via SMTP', err instanceof Error ? err : new Error(String(err)));
       return {

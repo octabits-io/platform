@@ -15,3 +15,14 @@ export {
 export type {
   MailjetCredentials,
 } from './providers/mailjet/mailjet-client';
+
+// --- Transactional event / delivery-status normalizer ----------------------
+// The normalized `NormalizedDeliveryEvent`/`DeliveryStatus` types and
+// `MailEventParseError` live in the root contract
+// (`@octabits-io/framework/mail`); this parser targets them. Events correlate on
+// `Message_GUID` — the `MessageUUID` the transport surfaced as
+// `SentMailInfo.providerMessageId`, not an RFC 5322 Message-ID.
+export {
+  parseMailjetEvents,
+  mapMailjetEventToDeliveryStatus,
+} from './providers/mailjet/MailjetEventProvider';

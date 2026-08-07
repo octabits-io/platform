@@ -31,10 +31,10 @@ export interface BrevoTransport extends MailTransport {
  * Creates a Brevo transport for email delivery via Brevo's Transactional Email
  * API. This transport only handles the actual sending of normalized messages.
  *
- * Unlike Mailjet, Brevo's `POST /smtp/email` returns the RFC 5322 Message-ID,
- * which we surface as `messageId`. That id can later be matched by a Brevo event
- * webhook to move the message to delivered/bounced — so Brevo is the only
- * outbound provider here that supports full delivery/bounce tracking.
+ * Brevo's `POST /smtp/email` returns the RFC 5322 Message-ID, which we surface
+ * as `messageId` — so unlike Mailjet it can thread inbound replies by header.
+ * The same id is echoed by the Brevo event webhook, so it doubles as the
+ * delivery-event correlation handle and both id fields carry it.
  *
  * @example
  * ```typescript
@@ -81,7 +81,7 @@ export function createBrevoTransport(config: BrevoTransportCreateConfig): BrevoT
         })),
       });
 
-      return { ok: true, value: { messageId } };
+      return { ok: true, value: { messageId, providerMessageId: messageId } };
     } catch (err) {
       logger.error('Error sending mail via Brevo', err instanceof Error ? err : new Error(String(err)));
       return {

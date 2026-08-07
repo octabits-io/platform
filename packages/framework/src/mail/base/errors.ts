@@ -43,13 +43,34 @@ export type MailError =
   | MailInvalidRecipientError;
 
 /**
- * Successful-send metadata. `messageId` is the provider's RFC 5322 Message-ID
- * when available (SMTP always via nodemailer; Brevo via its transactional API;
- * Mailjet does not expose it → null), used by inbound matching pipelines for
- * header-threading. `null` when the provider does not surface it.
+ * Successful-send metadata. The two ids answer different questions and a
+ * provider may expose one without the other — keep them apart.
  */
 export interface SentMailInfo {
+  /**
+   * The provider's RFC 5322 Message-ID (SMTP always, via nodemailer; Brevo via
+   * its transactional API; Mailjet never → `null`). This is the id a recipient's
+   * reply echoes in `In-Reply-To`/`References`, so it — and only it — can thread
+   * an inbound reply back to the message that prompted it.
+   */
   messageId: string | null;
+  /**
+   * An opaque, provider-scoped handle for the accepted message, used to
+   * correlate the provider's later delivery events (delivered / bounce / spam)
+   * back to it. NOT an RFC 5322 Message-ID: never use it for header threading.
+   *
+   * Providers that expose the RFC id use it for both jobs and set both fields to
+   * the same value. Mailjet is the case that forced them apart — its Send v3.1
+   * response carries a `MessageUUID` that the Event API echoes as
+   * `Message_GUID`, but no header. Collapsing the two would mean either
+   * discarding Mailjet's only correlation handle (leaving every Mailjet send
+   * unobservable after hand-off — a bounce indistinguishable from a delivery)
+   * or feeding a non-header id to inbound threading, where it can never match.
+   *
+   * Optional so existing `MailTransport` implementations keep compiling;
+   * consumers should read `providerMessageId ?? messageId`.
+   */
+  providerMessageId?: string | null;
 }
 
 export type SendMailResult = Result<SentMailInfo, MailError>;
