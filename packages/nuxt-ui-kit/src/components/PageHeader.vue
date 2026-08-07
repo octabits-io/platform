@@ -108,7 +108,7 @@ const titleClass = computed(() => props.density === 'compact' ? 'font-display te
       icon="i-lucide-arrow-left"
       color="neutral"
       variant="ghost"
-      size="sm"
+      size="md"
       :aria-label="t('pageChrome.back')"
       @click="onBack"
     />

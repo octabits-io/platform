@@ -157,10 +157,12 @@ const hasUtilityRegion = computed(() =>
     @click="item.onSelect?.()"
   />
   <!-- AI cluster: soft-primary sparkles = "AI acts on data". One item → its
-       verb label; several → the shared labeled dropdown. -->
+       verb label; several → the shared labeled dropdown. `size="md"` matches
+       PageAction — AiButton keeps its `sm` default for in-page triggers. -->
   <AiButton
     v-if="inlineAiItems.length === 1"
     :label="inlineAiItems[0]!.label"
+    size="md"
     :loading="inlineAiItems[0]!.loading"
     :disabled="inlineAiItems[0]!.disabled || Boolean(inlineAiItems[0]!.disabledReason)"
     @click="inlineAiItems[0]!.onSelect?.()"
@@ -176,7 +178,7 @@ const hasUtilityRegion = computed(() =>
       itemDescription: 'mt-0.5 whitespace-normal text-xs/4',
     }"
   >
-    <AiButton :label="t('pageChrome.ai')" trailing-icon="i-lucide-chevron-down" />
+    <AiButton :label="t('pageChrome.ai')" size="md" trailing-icon="i-lucide-chevron-down" />
     <template #item-leading="{ item }">
       <span
         class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 text-primary ring-1 ring-primary/20 ring-inset"

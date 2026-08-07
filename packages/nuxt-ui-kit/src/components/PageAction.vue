@@ -59,7 +59,10 @@ const tooltipText = computed(() =>
 const buttonProps = computed<Partial<ButtonProps>>(() => {
   const base: Partial<ButtonProps> = {
     icon: props.icon,
-    size: 'sm',
+    // `md` (the Nuxt UI default) — header actions read at the same text size as
+    // the buttons in the page body. `sm` renders text-xs, which looked shrunken
+    // next to its own icon and next to every other button on the page.
+    size: 'md',
     loading: props.loading,
     disabled: props.disabled || props.loading || isBlocked.value,
     to: props.to,

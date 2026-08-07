@@ -22,7 +22,7 @@ const showHelp = computed(() => Boolean(helpPanel?.hasActions.value))
       v-if="helpPanel"
       icon="i-lucide-circle-help"
       :label="t('pageChrome.help')"
-      size="sm"
+      size="md"
       color="neutral"
       :variant="helpPanel.isOpen.value ? 'soft' : 'ghost'"
       @click="helpPanel.toggle()"
