@@ -159,6 +159,10 @@ isn't supported` — so protobuf is what makes the exporter portable. Set
 while debugging. `content-type` is set from `encoding` and cannot be overridden
 through `headers` — the exporter encodes the body, so it owns that label.
 
+Each record carries both `timeUnixNano` and `observedTimeUnixNano` — the log
+data model requires the latter, and since records are exported from where they
+are generated, the two are the same instant.
+
 Numeric attributes map to OTLP's `intValue` only while they are safe integers;
 anything larger (`2 ** 53`, `1e21`) goes out as `doubleValue`, which is the
 precision the JavaScript number carried anyway.

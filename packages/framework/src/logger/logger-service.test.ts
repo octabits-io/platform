@@ -135,6 +135,7 @@ describe('createLoggerService', () => {
     expect(exportedRecords(fetchImpl)).toEqual([
       {
         timeUnixNano: expect.any(String),
+        observedTimeUnixNano: expect.any(String),
         severityNumber: 9,
         severityText: 'INFO',
         body: { stringValue: 'Processing' },

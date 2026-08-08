@@ -239,6 +239,13 @@ export interface OtlpKeyValue {
 export interface OtlpLogRecord {
   /** Nanoseconds since the Unix epoch, as a string (OTLP/JSON's int64 form). */
   timeUnixNano: string;
+  /**
+   * When the collection system observed the event — a field the log data model
+   * says MUST be set. These records originate in-process rather than being
+   * scraped from somewhere else, so observation *is* generation and this
+   * carries the same value as {@link OtlpLogRecord.timeUnixNano}.
+   */
+  observedTimeUnixNano: string;
   severityNumber: number;
   severityText: string;
   body: OtlpAnyValue;
@@ -295,8 +302,10 @@ export function encodeLogsPayload(records: LogRecord[]): OtlpLogsPayload {
 }
 
 function encodeRecord(record: LogRecord): OtlpLogRecord {
+  const timeUnixNano = toUnixNano(record.timestamp);
   return {
-    timeUnixNano: toUnixNano(record.timestamp),
+    timeUnixNano,
+    observedTimeUnixNano: timeUnixNano,
     severityNumber: record.severityNumber,
     severityText: record.severityText,
     body: { stringValue: record.body },

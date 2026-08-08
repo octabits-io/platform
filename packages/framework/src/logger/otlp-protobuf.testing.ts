@@ -153,6 +153,7 @@ function decodeScopeLogs(bytes: Uint8Array): OtlpScopeLogs {
 function decodeLogRecord(bytes: Uint8Array): OtlpLogRecord {
   const record: OtlpLogRecord = {
     timeUnixNano: '0',
+    observedTimeUnixNano: '0',
     severityNumber: 0,
     severityText: '',
     body: { stringValue: '' },
@@ -175,6 +176,9 @@ function decodeLogRecord(bytes: Uint8Array): OtlpLogRecord {
         return true;
       case 6:
         record.attributes.push(decodeKeyValue(reader.lengthDelimited()));
+        return true;
+      case 11:
+        record.observedTimeUnixNano = String(reader.fixed64());
         return true;
       default:
         return false;

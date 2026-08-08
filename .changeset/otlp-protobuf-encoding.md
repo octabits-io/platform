@@ -27,5 +27,10 @@ rather than the one attribute. And `content-type` is no longer overridable
 through `headers`, so a leftover `application/json` cannot mislabel a protobuf
 body.
 
+Records also now carry `observedTimeUnixNano`, which the log data model says
+MUST be set and which the exporter previously omitted in both encodings. It
+holds the same instant as `timeUnixNano`, since these records are exported from
+where they are generated.
+
 Worth knowing if you relied on the old default: a receiver that only parsed
 JSON will now reject these requests, and `onError` will say so.

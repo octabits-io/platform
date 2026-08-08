@@ -17,7 +17,8 @@
  * Resource       { 1: repeated KeyValue }
  * ScopeLogs      { 1: InstrumentationScope, 2: repeated LogRecord }
  * LogRecord      { 1: fixed64 time, 2: severity number, 3: severity text,
- *                  5: AnyValue body, 6: repeated KeyValue }
+ *                  5: AnyValue body, 6: repeated KeyValue,
+ *                  11: fixed64 observed time }
  * KeyValue       { 1: string key, 2: AnyValue value }
  * AnyValue       { oneof 1: string | 2: bool | 3: int64 | 4: double
  *                        | 5: ArrayValue | 6: KeyValueList }
@@ -230,6 +231,11 @@ function writeLogRecord(writer: ProtoWriter, record: OtlpLogRecord): void {
   for (const attribute of record.attributes) {
     writeKeyValue(writer, 6, attribute);
   }
+  // observed_time_unix_nano is field 11, so it goes out after the attributes:
+  // fields may legally appear in any order, but ascending is what canonical
+  // encoders emit and what makes a hexdump readable.
+  const observedTimeUnixNano = BigInt(record.observedTimeUnixNano);
+  if (observedTimeUnixNano !== 0n) writer.fixed64Field(11, observedTimeUnixNano);
 }
 
 function writeKeyValue(writer: ProtoWriter, field: number, keyValue: OtlpKeyValue): void {

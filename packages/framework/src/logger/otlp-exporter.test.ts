@@ -68,6 +68,8 @@ describe('encodeLogsPayload', () => {
               logRecords: [
                 {
                   timeUnixNano: `${Date.parse('2026-08-08T10:00:00.000Z')}000000`,
+                  // Observation is generation for an in-process emitter.
+                  observedTimeUnixNano: `${Date.parse('2026-08-08T10:00:00.000Z')}000000`,
                   severityNumber: 9,
                   severityText: 'INFO',
                   body: { stringValue: 'Server started' },

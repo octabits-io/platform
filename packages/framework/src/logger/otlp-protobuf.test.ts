@@ -165,6 +165,7 @@ describe('encodeLogsProtobuf', () => {
                   // 0x0102030405060708 — distinct bytes, so the assertion
                   // fails if the fixed64 goes out big-endian.
                   timeUnixNano: '72623859790382856',
+                  observedTimeUnixNano: '72623859790382856',
                   severityNumber: 9,
                   severityText: 'I',
                   body: { stringValue: 'b' },
@@ -178,12 +179,12 @@ describe('encodeLogsProtobuf', () => {
     });
 
     expect([...bytes]).toEqual([
-      0x0a, 0x28,             // resourceLogs[0], length 40
+      0x0a, 0x31,             // resourceLogs[0], length 49
       0x0a, 0x00,             //   resource, length 0
-      0x12, 0x24,             //   scopeLogs[0], length 36
+      0x12, 0x2d,             //   scopeLogs[0], length 45
       0x0a, 0x03,             //     scope, length 3
       0x0a, 0x01, 0x73,       //       name = "s"
-      0x12, 0x1d,             //     logRecords[0], length 29
+      0x12, 0x26,             //     logRecords[0], length 38
       // field 1, wire type 1 (fixed64) — little-endian
       0x09, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
       0x10, 0x09,             //       field 2 varint: severityNumber = 9
@@ -194,6 +195,8 @@ describe('encodeLogsProtobuf', () => {
       0x0a, 0x01, 0x6b,       //         key = "k"
       0x12, 0x03,             //         value, length 3
       0x0a, 0x01, 0x76,       //           stringValue = "v"
+      // field 11, wire type 1 — observed time, last so fields ascend
+      0x59, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01,
     ]);
   });
 
@@ -219,6 +222,18 @@ describe('encodeLogsProtobuf', () => {
 
     expect(() => encodeLogsProtobuf(encodeLogsPayload(records))).not.toThrow();
     expect(roundTrip(records)).toEqual(encodeLogsPayload(records));
+  });
+
+  it('carries observed time alongside event time', () => {
+    // The log data model says observed time MUST be set. These records are
+    // emitted where they are generated, so the two are the same instant — but
+    // a receiver that reads only observed time still gets a usable value.
+    const decoded = roundTrip([record({ timestamp: '2026-08-08T10:00:00.000Z' })]);
+    const logRecord = decoded.resourceLogs[0]!.scopeLogs[0]!.logRecords[0]!;
+    const expected = `${Date.parse('2026-08-08T10:00:00.000Z')}000000`;
+
+    expect(logRecord.observedTimeUnixNano).toBe(expected);
+    expect(logRecord.timeUnixNano).toBe(expected);
   });
 
   it('encodes a 64-bit timestamp as little-endian fixed64', () => {
