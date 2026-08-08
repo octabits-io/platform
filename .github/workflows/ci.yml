@@ -17,11 +17,11 @@ jobs:
     # Docker is preinstalled and running on ubuntu-latest, so the
     # testcontainers-based integration tests (flow, queue) work out of the box.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install pnpm
         # Version is read from the root package.json "packageManager" field.
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Setup Bun
         # demo-server runs its tests with `bun test` (runtime-faithful for the
@@ -29,7 +29,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
