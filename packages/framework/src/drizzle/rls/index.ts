@@ -760,7 +760,14 @@ class PinnedScopeRollback extends Error {
  *   with `current transaction is aborted` until the scope disposes (the
  *   historical pinned-model behavior; the request is failing anyway);
  * - concurrent queries on the scope serialize on its one connection
- *   (`Promise.all` is safe but not parallel);
+ *   (`Promise.all` is safe but not parallel) — but that serialization is
+ *   **pg's, not ours**: it comes from the client-level query queue pg
+ *   deprecated in 8.19 and intends to remove in 9.0 (node-postgres#3633), at
+ *   which point overlapping queries would throw instead of queueing. If that
+ *   lands, the fix is a promise chain around the pinned client, contained in
+ *   this factory. Fanning out to a second connection is NOT the workaround:
+ *   the scope's GUCs are transaction-local to this one connection, so a
+ *   second connection returns unscoped rows, not slower ones;
  * - the underlying pool client is checked out for the scope's lifetime —
  *   size pools accordingly.
  *

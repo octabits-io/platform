@@ -241,6 +241,12 @@ describe('createPinnedGucScopeFactory (per-request pinned transaction)', () => {
     await withSystemMode(db, async (tx) => tx.delete(note).where(sql`id = 'p4'`));
   });
 
+  // The overlapping queries here are the point — they exercise pg's client
+  // query queue, which is what makes this safe. That queue is deprecated in
+  // pg 8.19+ and slated for removal in 9.0, so this run emits ONE
+  // process-wide DeprecationWarning. Do not "fix" the warning by making this
+  // sequential: that deletes the only coverage of the behavior. See the note
+  // on createPinnedGucScopeFactory in ./index.ts.
   it('Promise.all on the scope db serializes safely on the one connection', async () => {
     const scope = await makeFactory()({ tenantId: 't1' });
     try {
