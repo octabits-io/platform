@@ -120,6 +120,52 @@ const reqLogger = logger.child({ requestId: 'abc123' });
 reqLogger.info('Processing'); // includes requestId in all messages
 ```
 
+#### OTLP export
+
+By default logs only go to the console — as JSON in production, for a log
+shipper (Fluent Bit, Vector) to pick up off stdout. Set `otlp` to *additionally*
+push them to a collector over OTLP/HTTP, using plain `fetch` and a JSON payload
+(no OpenTelemetry SDK, so `./logger` stays dependency-free):
+
+```ts
+const loggerService = createLoggerService({
+  config: {
+    serviceName: 'my-api',
+    environment: 'production',
+    otlp: {
+      endpoint: 'http://localhost:4318/v1/logs', // include the signal path
+      headers: { 'x-api-key': process.env.OTLP_TOKEN! },
+    },
+    // consoleOutput: false, // export only — nothing on stdout
+  },
+});
+
+// Drains the export buffer and awaits in-flight requests.
+await loggerService.shutdown();
+```
+
+`endpoint` and `headers` are exactly the fields `config-schema`'s
+`LOGGING_CONFIG_SCHEMA` parses, so a parsed `logging.otlp` section can be passed
+straight through. Batching knobs (`maxBatchSize`, `maxQueueSize`,
+`scheduledDelayMs`, `timeoutMs`) and an `onError` reporter are available in
+code; the defaults are 512 records per batch, a 2048-record buffer, a 5s
+partial-batch flush, and a 10s request timeout.
+
+Delivery is deliberately best-effort — logging must never be able to fail a
+request:
+
+- Export happens off the hot path; `logger.info(...)` never blocks or throws
+  because of the collector.
+- A full buffer drops its **oldest** records (the newest describe the incident
+  in progress), reporting the loss through `onError`.
+- Export failures go to `onError` — which defaults to `console.error` and must
+  never route back into a `Logger` feeding this exporter, or a failing collector
+  logs its own failures forever.
+- Nothing is retried, and **whatever is still buffered at exit is lost unless
+  you `await loggerService.shutdown()`**. Wire it into your shutdown path.
+
+`shutdown()` is safe (and a no-op) when `otlp` is not configured.
+
 ---
 
 ### `@octabits-io/framework/utils`

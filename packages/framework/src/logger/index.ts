@@ -4,6 +4,8 @@ export type {
   LogAttributes,
   Logger,
   LoggingConfig,
+  LogRecord,
+  OtlpExporterConfig,
 } from './types.ts';
 export { LOG_LEVEL_SEVERITY, shouldLog } from './types.ts';
 export {
@@ -13,3 +15,5 @@ export type {
   LoggerServiceDeps,
   LoggerService,
 } from './logger-service.ts';
+export { createOtlpLogExporter } from './otlp-exporter.ts';
+export type { OtlpLogExporter } from './otlp-exporter.ts';

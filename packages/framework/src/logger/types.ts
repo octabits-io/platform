@@ -90,25 +90,99 @@ export interface LoggingConfig {
 
   /**
    * OTLP exporter configuration.
-   * If provided, logs will be sent to an OTLP collector.
+   * If provided, logs are batched and POSTed to an OTLP collector over
+   * OTLP/HTTP with a JSON payload (no OpenTelemetry SDK involved).
    */
-  otlp?: {
-    /**
-     * OTLP endpoint URL (e.g., 'http://localhost:4318/v1/logs').
-     */
-    endpoint: string;
-
-    /**
-     * Optional headers for OTLP requests.
-     */
-    headers?: Record<string, string>;
-  };
+  otlp?: OtlpExporterConfig;
 
   /**
    * Whether to enable console output in addition to OTLP.
    * @default true
    */
   consoleOutput?: boolean;
+}
+
+/**
+ * OTLP/HTTP (JSON) log-export settings.
+ *
+ * `endpoint` and `headers` are the env-driven fields mirrored by
+ * `config-schema`'s `LOGGING_CONFIG_SCHEMA`; the remaining knobs tune batching
+ * and are expected to be set in code, if at all.
+ */
+export interface OtlpExporterConfig {
+  /**
+   * OTLP logs endpoint URL, including the signal path
+   * (e.g., 'http://localhost:4318/v1/logs').
+   */
+  endpoint: string;
+
+  /**
+   * Optional headers for OTLP requests (auth tokens, tenant routing, …).
+   */
+  headers?: Record<string, string>;
+
+  /**
+   * Flush once this many records are buffered.
+   * @default 512
+   */
+  maxBatchSize?: number;
+
+  /**
+   * Hard cap on buffered records. Once full, the OLDEST buffered records are
+   * dropped to make room, so an unreachable collector can never grow the
+   * process's memory without bound.
+   * @default 2048
+   */
+  maxQueueSize?: number;
+
+  /**
+   * Delay before flushing a partial batch.
+   * @default 5000
+   */
+  scheduledDelayMs?: number;
+
+  /**
+   * Per-request timeout for the export POST.
+   * @default 10000
+   */
+  timeoutMs?: number;
+
+  /**
+   * Called when an export fails or records are dropped.
+   *
+   * Defaults to a plain `console.error`. It must NEVER route back into a
+   * `Logger` that feeds this exporter — a failing collector would then log its
+   * own failures forever.
+   */
+  onError?: (error: Error) => void;
+
+  /**
+   * `fetch` implementation to use. Defaults to the global `fetch`.
+   * Primarily a test seam.
+   */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Structured log record, shaped after the OpenTelemetry Logs Data Model.
+ * This is what a `Logger` emits: the console renders it, and the OTLP
+ * exporter encodes it.
+ *
+ * @see https://opentelemetry.io/docs/specs/otel/logs/data-model/
+ */
+export interface LogRecord {
+  /** ISO-8601 timestamp of the event. */
+  timestamp: string;
+  severityNumber: number;
+  severityText: string;
+  /** The log message. */
+  body: string;
+  attributes: LogAttributes;
+  resource: {
+    'service.name': string;
+    'service.version'?: string;
+    'deployment.environment'?: string;
+  };
 }
 
 /**

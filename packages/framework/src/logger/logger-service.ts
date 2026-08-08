@@ -3,11 +3,19 @@
  *
  * Provides structured logging with OpenTelemetry-compatible output format.
  * Logs are output as structured JSON that can be collected by log shippers
- * (e.g., Fluent Bit, Vector) and sent to OTLP collectors.
+ * (e.g., Fluent Bit, Vector) and sent to OTLP collectors — and, when `otlp` is
+ * configured, exported straight to a collector over OTLP/HTTP as well.
  */
 
-import type { Logger, LogAttributes, LoggingConfig, LogLevel } from './types.ts';
+import type {
+  Logger,
+  LogAttributes,
+  LoggingConfig,
+  LogLevel,
+  LogRecord,
+} from './types.ts';
 import { LOG_LEVEL_SEVERITY, shouldLog } from './types.ts';
+import { createOtlpLogExporter, type OtlpLogExporter } from './otlp-exporter.ts';
 
 /**
  * Dependencies for creating the logger service.
@@ -16,47 +24,34 @@ export interface LoggerServiceDeps {
   config: LoggingConfig;
 }
 
-/**
- * Structured log record format compatible with OpenTelemetry Logs Data Model.
- * @see https://opentelemetry.io/docs/specs/otel/logs/data-model/
- */
-interface LogRecord {
-  timestamp: string;
-  severityNumber: number;
-  severityText: string;
-  body: string;
-  attributes: LogAttributes;
-  resource: {
-    'service.name': string;
-    'service.version'?: string;
-    'deployment.environment'?: string;
-  };
+/** Console rendering style for a logger's own output. */
+type OutputFormat = 'json' | 'pretty';
+
+/** Everything a logger and its children share, resolved once at creation. */
+interface LoggerOptions {
+  serviceName: string;
+  serviceVersion: string | undefined;
+  environment: string | undefined;
+  minLevel: LogLevel;
+  format: OutputFormat;
+  useConsole: boolean;
+  /** Extra destination for every emitted record (the OTLP exporter). */
+  sink: ((record: LogRecord) => void) | undefined;
 }
 
 /**
- * Structured logger that outputs OpenTelemetry-compatible JSON logs.
+ * Structured logger.
+ *
+ * Building the {@link LogRecord} is shared by both output formats, so what a
+ * collector receives is identical in development and production — only the
+ * console rendering differs.
  */
 class StructuredLogger implements Logger {
-  private readonly serviceName: string;
-  private readonly serviceVersion: string | undefined;
-  private readonly environment: string | undefined;
-  private readonly minLevel: LogLevel;
+  private readonly options: LoggerOptions;
   private readonly context: LogAttributes;
-  private readonly useConsole: boolean;
 
-  constructor(
-    serviceName: string,
-    serviceVersion: string | undefined,
-    environment: string | undefined,
-    minLevel: LogLevel,
-    useConsole: boolean,
-    context: LogAttributes = {}
-  ) {
-    this.serviceName = serviceName;
-    this.serviceVersion = serviceVersion;
-    this.environment = environment;
-    this.minLevel = minLevel;
-    this.useConsole = useConsole;
+  constructor(options: LoggerOptions, context: LogAttributes = {}) {
+    this.options = options;
     this.context = context;
   }
 
@@ -86,20 +81,15 @@ class StructuredLogger implements Logger {
   }
 
   child(context: LogAttributes): Logger {
-    return new StructuredLogger(
-      this.serviceName,
-      this.serviceVersion,
-      this.environment,
-      this.minLevel,
-      this.useConsole,
-      { ...this.context, ...context }
-    );
+    return new StructuredLogger(this.options, { ...this.context, ...context });
   }
 
   private emit(level: LogLevel, message: string, attributes?: LogAttributes): void {
-    if (!shouldLog(level, this.minLevel)) {
+    if (!shouldLog(level, this.options.minLevel)) {
       return;
     }
+
+    const { serviceName, serviceVersion, environment } = this.options;
 
     const record: LogRecord = {
       timestamp: new Date().toISOString(),
@@ -111,17 +101,20 @@ class StructuredLogger implements Logger {
         ...attributes,
       },
       resource: {
-        'service.name': this.serviceName,
-        ...(this.serviceVersion && { 'service.version': this.serviceVersion }),
-        ...(this.environment && { 'deployment.environment': this.environment }),
+        'service.name': serviceName,
+        ...(serviceVersion && { 'service.version': serviceVersion }),
+        ...(environment && { 'deployment.environment': environment }),
       },
     };
 
+    // Export first: a console that throws (a closed stdout on a dying process)
+    // must not cost us the record.
+    this.options.sink?.(record);
     this.output(level, record);
   }
 
   private output(level: LogLevel, record: LogRecord): void {
-    if (!this.useConsole) {
+    if (!this.options.useConsole) {
       return;
     }
 
@@ -131,75 +124,40 @@ class StructuredLogger implements Logger {
       : level === 'debug' ? console.debug
       : console.info;
 
-    // Output as JSON for structured logging
-    logFn(JSON.stringify(record));
+    if (this.options.format === 'json') {
+      // Output as JSON for structured logging
+      logFn(JSON.stringify(record));
+      return;
+    }
+
+    logFn(formatPretty(record));
+
+    // Stacks are unreadable inline — print them raw, below the message.
+    const stack = record.attributes['error.stack'];
+    if (typeof stack === 'string') {
+      console.error(stack);
+    }
   }
 }
 
 /**
- * Human-readable console logger for development.
+ * Human-readable single-line rendering for development:
+ * `[timestamp] [LEVEL] [service] message {attributes}`.
+ *
+ * `error.stack` is left out — it is printed separately, unescaped.
  */
-class DevelopmentLogger implements Logger {
-  private readonly serviceName: string;
-  private readonly minLevel: LogLevel;
-  private readonly context: LogAttributes;
+function formatPretty(record: LogRecord): string {
+  const { 'error.stack': _stack, ...attributes } = record.attributes;
+  const hasAttributes = Object.keys(attributes).length > 0;
 
-  constructor(serviceName: string, minLevel: LogLevel, context: LogAttributes = {}) {
-    this.serviceName = serviceName;
-    this.minLevel = minLevel;
-    this.context = context;
+  const prefix =
+    `[${record.timestamp}] [${record.severityText.padEnd(5)}] ` +
+    `[${record.resource['service.name']}]`;
+
+  if (hasAttributes) {
+    return `${prefix} ${record.body} ${JSON.stringify(attributes)}`;
   }
-
-  debug(message: string, attributes?: LogAttributes): void {
-    if (!shouldLog('debug', this.minLevel)) return;
-    console.debug(this.format('debug', message, attributes));
-  }
-
-  info(message: string, attributes?: LogAttributes): void {
-    if (!shouldLog('info', this.minLevel)) return;
-    console.info(this.format('info', message, attributes));
-  }
-
-  warn(message: string, attributes?: LogAttributes): void {
-    if (!shouldLog('warn', this.minLevel)) return;
-    console.warn(this.format('warn', message, attributes));
-  }
-
-  error(message: string, error?: Error, attributes?: LogAttributes): void {
-    if (!shouldLog('error', this.minLevel)) return;
-    const errorAttributes: LogAttributes = error
-      ? {
-          'error.type': error.name,
-          'error.message': error.message,
-          ...attributes,
-        }
-      : attributes ?? {};
-
-    console.error(this.format('error', message, errorAttributes));
-    if (error?.stack) {
-      console.error(error.stack);
-    }
-  }
-
-  child(context: LogAttributes): Logger {
-    return new DevelopmentLogger(this.serviceName, this.minLevel, {
-      ...this.context,
-      ...context,
-    });
-  }
-
-  private format(level: LogLevel, message: string, attributes?: LogAttributes): string {
-    const timestamp = new Date().toISOString();
-    const allAttributes = { ...this.context, ...attributes };
-    const hasAttributes = Object.keys(allAttributes).length > 0;
-
-    const prefix = `[${timestamp}] [${level.toUpperCase().padEnd(5)}] [${this.serviceName}]`;
-
-    if (hasAttributes) {
-      return `${prefix} ${message} ${JSON.stringify(allAttributes)}`;
-    }
-    return `${prefix} ${message}`;
-  }
+  return `${prefix} ${record.body}`;
 }
 
 /**
@@ -220,6 +178,9 @@ export interface LoggerService {
   /**
    * Shutdown the logger and flush pending logs.
    * Call this on application shutdown.
+   *
+   * With `otlp` configured this drains the export buffer and awaits the
+   * in-flight requests — without it, whatever was still buffered is lost.
    */
   shutdown(): Promise<void>;
 }
@@ -238,6 +199,8 @@ export interface LoggerService {
  *     serviceVersion: '1.0.0',
  *     environment: 'production',
  *     logLevel: 'info',
+ *     // Optional: also export to a collector over OTLP/HTTP
+ *     otlp: { endpoint: 'http://localhost:4318/v1/logs' },
  *   },
  * });
  *
@@ -246,6 +209,9 @@ export interface LoggerService {
  *
  * const requestLogger = logger.child({ requestId: 'abc123' });
  * requestLogger.info('Processing request');
+ *
+ * // On shutdown — flushes buffered OTLP records
+ * await loggerService.shutdown();
  * ```
  */
 export function createLoggerService(deps: LoggerServiceDeps): LoggerService {
@@ -254,31 +220,34 @@ export function createLoggerService(deps: LoggerServiceDeps): LoggerService {
   const environment = config.environment ?? 'development';
   const useConsole = config.consoleOutput ?? true;
 
-  // Use development logger for development environment (human-readable)
-  // Use structured logger for production (JSON format for log shippers)
+  // Human-readable console in development; JSON in production for log shippers.
+  // OTLP export, when configured, is identical in both.
   const isDevelopment = environment === 'development';
 
-  let logger: Logger;
-
-  if (isDevelopment) {
-    logger = new DevelopmentLogger(config.serviceName, minLevel);
-  } else {
-    logger = new StructuredLogger(
-      config.serviceName,
-      config.serviceVersion,
-      environment,
-      minLevel,
-      useConsole
-    );
+  let exporter: OtlpLogExporter | undefined;
+  if (config.otlp) {
+    exporter = createOtlpLogExporter(config.otlp);
   }
+
+  const logger: Logger = new StructuredLogger({
+    serviceName: config.serviceName,
+    // Resource attributes are carried in every environment: the pretty
+    // renderer ignores them, but an OTLP collector needs them in dev too.
+    serviceVersion: config.serviceVersion,
+    environment,
+    minLevel,
+    format: isDevelopment ? 'pretty' : 'json',
+    useConsole,
+    sink: exporter ? (record) => exporter.enqueue(record) : undefined,
+  });
 
   return {
     logger,
     child: (context) => logger.child(context),
     shutdown: async () => {
-      // No-op for now, but provides lifecycle hook for future OTLP integration
+      await exporter?.shutdown();
     },
   };
 }
 
-export type { Logger, LogAttributes, LoggingConfig, LogLevel };
+export type { Logger, LogAttributes, LoggingConfig, LogLevel, LogRecord };
