@@ -1,11 +1,14 @@
 /**
  * OTLP/HTTP log exporter — plain `fetch`, no OpenTelemetry SDK.
  *
- * Batches {@link LogRecord}s and POSTs them as OTLP/HTTP **JSON** to a
- * collector's logs endpoint (e.g. `http://localhost:4318/v1/logs`). Keeping
- * this dependency-free is deliberate: `./logger` is a base module that every
- * other module imports, so it must not drag an SDK (or its transitive
- * dependency tree) into consumers that only ever log to stdout.
+ * Batches {@link LogRecord}s and POSTs them to a collector's logs endpoint
+ * (e.g. `http://localhost:4318/v1/logs`), as OTLP/HTTP **protobuf** by default
+ * — the encoding the spec requires every receiver to accept. `encoding: 'json'`
+ * switches to OTLP/JSON, which the spec makes optional and some backends
+ * reject outright. Keeping this dependency-free is deliberate: `./logger` is a
+ * base module that every other module imports, so it must not drag an SDK (or
+ * its transitive dependency tree) into consumers that only ever log to stdout
+ * — hence the hand-written encoder in `./otlp-protobuf`.
  *
  * Delivery is best-effort, in the same spirit as a log shipper's buffer:
  * exports never block the caller, a full buffer drops its oldest records
@@ -17,6 +20,7 @@
  */
 
 import type { LogAttributes, LogAttributeValue, LogRecord, OtlpExporterConfig } from './types.ts';
+import { encodeLogsProtobuf } from './otlp-protobuf.ts';
 
 const DEFAULT_MAX_BATCH_SIZE = 512;
 const DEFAULT_MAX_QUEUE_SIZE = 2048;
@@ -72,6 +76,7 @@ export function createOtlpLogExporter(config: OtlpExporterConfig): OtlpLogExport
     maxQueueSize = DEFAULT_MAX_QUEUE_SIZE,
     scheduledDelayMs = DEFAULT_SCHEDULED_DELAY_MS,
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    encoding = 'protobuf',
     onError = defaultOnError,
     fetchImpl,
   } = config;
@@ -111,11 +116,19 @@ export function createOtlpLogExporter(config: OtlpExporterConfig): OtlpLogExport
 
   const send = async (batch: LogRecord[]): Promise<void> => {
     const doFetch = fetchImpl ?? globalThis.fetch;
+    const payload = encodeLogsPayload(batch);
+    const json = encoding === 'json';
     try {
       const response = await doFetch(endpoint, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...headers },
-        body: JSON.stringify(encodeLogsPayload(batch)),
+        headers: {
+          ...headers,
+          // Last, not first: the body is encoded right here, so a stray
+          // `content-type` in the caller's `headers` must not be able to
+          // mislabel protobuf as JSON.
+          'content-type': json ? 'application/json' : 'application/x-protobuf',
+        },
+        body: json ? JSON.stringify(payload) : encodeLogsProtobuf(payload),
         signal: AbortSignal.timeout(timeoutMs),
       });
 
@@ -204,8 +217,12 @@ export function createOtlpLogExporter(config: OtlpExporterConfig): OtlpLogExport
 // OTLP/HTTP JSON encoding
 // ----------------------------------------------------------------------------
 
-/** OTLP `AnyValue`, JSON encoding. */
-type OtlpAnyValue =
+/**
+ * OTLP `AnyValue`. The JSON encoding is the source shape for both wire
+ * formats — `./otlp-protobuf` serializes this same tree — so `intValue` is a
+ * string here, as OTLP/JSON requires for 64-bit integers.
+ */
+export type OtlpAnyValue =
   | { stringValue: string }
   | { boolValue: boolean }
   | { intValue: string }
@@ -213,9 +230,34 @@ type OtlpAnyValue =
   | { arrayValue: { values: OtlpAnyValue[] } }
   | { kvlistValue: { values: OtlpKeyValue[] } };
 
-interface OtlpKeyValue {
+export interface OtlpKeyValue {
   key: string;
   value: OtlpAnyValue;
+}
+
+/** A single OTLP `LogRecord`. */
+export interface OtlpLogRecord {
+  /** Nanoseconds since the Unix epoch, as a string (OTLP/JSON's int64 form). */
+  timeUnixNano: string;
+  severityNumber: number;
+  severityText: string;
+  body: OtlpAnyValue;
+  attributes: OtlpKeyValue[];
+}
+
+export interface OtlpScopeLogs {
+  scope: { name: string };
+  logRecords: OtlpLogRecord[];
+}
+
+export interface OtlpResourceLogs {
+  resource: { attributes: OtlpKeyValue[] };
+  scopeLogs: OtlpScopeLogs[];
+}
+
+/** An OTLP `ExportLogsServiceRequest`. */
+export interface OtlpLogsPayload {
+  resourceLogs: OtlpResourceLogs[];
 }
 
 /**
@@ -226,12 +268,7 @@ interface OtlpKeyValue {
  *
  * Exported for tests.
  */
-export function encodeLogsPayload(records: LogRecord[]): {
-  resourceLogs: Array<{
-    resource: { attributes: OtlpKeyValue[] };
-    scopeLogs: Array<{ scope: { name: string }; logRecords: unknown[] }>;
-  }>;
-} {
+export function encodeLogsPayload(records: LogRecord[]): OtlpLogsPayload {
   const groups = new Map<string, { resource: LogRecord['resource']; records: LogRecord[] }>();
 
   for (const record of records) {
@@ -257,7 +294,7 @@ export function encodeLogsPayload(records: LogRecord[]): {
   };
 }
 
-function encodeRecord(record: LogRecord): Record<string, unknown> {
+function encodeRecord(record: LogRecord): OtlpLogRecord {
   return {
     timeUnixNano: toUnixNano(record.timestamp),
     severityNumber: record.severityNumber,
@@ -299,7 +336,14 @@ function toAnyValue(value: LogAttributeValue): OtlpAnyValue | undefined {
       // NaN/Infinity are not representable in JSON — `JSON.stringify` would
       // silently turn them into `null` and break the payload's typing.
       if (!Number.isFinite(value)) return { stringValue: String(value) };
-      return Number.isInteger(value) ? { intValue: String(value) } : { doubleValue: value };
+      // Only *safe* integers go out as int64. Past 2^53 a double is no longer
+      // an exact integer anyway, and the string form stops being int64-shaped:
+      // beyond 2^63 it overflows the field, and from 1e21 `String` switches to
+      // exponent notation (`"1e+21"`) that the protobuf encoder's `BigInt`
+      // parse rejects outright — which would throw mid-encode and lose the
+      // whole batch, not just the attribute. `doubleValue` holds every one of
+      // these to the same precision the JS number already had.
+      return Number.isSafeInteger(value) ? { intValue: String(value) } : { doubleValue: value };
   }
 
   if (Array.isArray(value)) {

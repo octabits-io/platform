@@ -91,7 +91,7 @@ export interface LoggingConfig {
   /**
    * OTLP exporter configuration.
    * If provided, logs are batched and POSTed to an OTLP collector over
-   * OTLP/HTTP with a JSON payload (no OpenTelemetry SDK involved).
+   * OTLP/HTTP, protobuf-encoded by default (no OpenTelemetry SDK involved).
    */
   otlp?: OtlpExporterConfig;
 
@@ -103,7 +103,7 @@ export interface LoggingConfig {
 }
 
 /**
- * OTLP/HTTP (JSON) log-export settings.
+ * OTLP/HTTP log-export settings.
  *
  * `endpoint` and `headers` are the env-driven fields mirrored by
  * `config-schema`'s `LOGGING_CONFIG_SCHEMA`; the remaining knobs tune batching
@@ -146,6 +146,18 @@ export interface OtlpExporterConfig {
    * @default 10000
    */
   timeoutMs?: number;
+
+  /**
+   * Wire encoding for the export POST.
+   *
+   * `'protobuf'` is the OTLP spec's required encoding — every conformant
+   * receiver accepts it. `'json'` is optional in the spec and some backends
+   * refuse it outright, so switch only for a collector you know accepts it, or when
+   * you want a readable payload while debugging.
+   *
+   * @default 'protobuf'
+   */
+  encoding?: 'protobuf' | 'json';
 
   /**
    * Called when an export fails or records are dropped.

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createLoggerService } from './logger-service.ts';
+import { decodeLogsProtobuf } from './otlp-protobuf.testing.ts';
 
 const ENDPOINT = 'http://collector.test:4318/v1/logs';
 
@@ -26,11 +27,10 @@ function stubFetch() {
 function exportedRecords(fetchImpl: typeof fetch): Array<Record<string, unknown>> {
   const mock = fetchImpl as unknown as ReturnType<typeof vi.fn>;
   return mock.mock.calls.flatMap((call: unknown[]) => {
-    const payload = JSON.parse(String((call[1] as RequestInit).body));
-    return payload.resourceLogs.flatMap((rl: { scopeLogs: Array<{ logRecords: unknown[] }> }) =>
-      rl.scopeLogs.flatMap((sl) => sl.logRecords)
-    );
-  }) as Array<Record<string, unknown>>;
+    // Exports go out as OTLP protobuf, so read them back off the wire.
+    const payload = decodeLogsProtobuf((call[1] as RequestInit).body as Uint8Array);
+    return payload.resourceLogs.flatMap((rl) => rl.scopeLogs.flatMap((sl) => sl.logRecords));
+  }) as unknown as Array<Record<string, unknown>>;
 }
 
 describe('createLoggerService', () => {
@@ -160,13 +160,11 @@ describe('createLoggerService', () => {
     service.logger.info('Processing');
     await service.shutdown();
 
-    const payload = JSON.parse(
-      String(
-        ((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit])[1]
-          .body
-      )
+    const payload = decodeLogsProtobuf(
+      ((fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit])[1]
+        .body as Uint8Array
     );
-    expect(payload.resourceLogs[0].resource.attributes).toEqual([
+    expect(payload.resourceLogs[0]!.resource.attributes).toEqual([
       { key: 'service.name', value: { stringValue: 'api' } },
       { key: 'service.version', value: { stringValue: '1.0.0' } },
       { key: 'deployment.environment', value: { stringValue: 'development' } },

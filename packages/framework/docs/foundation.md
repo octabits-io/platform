@@ -124,8 +124,8 @@ reqLogger.info('Processing'); // includes requestId in all messages
 
 By default logs only go to the console — as JSON in production, for a log
 shipper (Fluent Bit, Vector) to pick up off stdout. Set `otlp` to *additionally*
-push them to a collector over OTLP/HTTP, using plain `fetch` and a JSON payload
-(no OpenTelemetry SDK, so `./logger` stays dependency-free):
+push them to a collector over OTLP/HTTP, using plain `fetch` and a hand-written
+protobuf encoder (no OpenTelemetry SDK, so `./logger` stays dependency-free):
 
 ```ts
 const loggerService = createLoggerService({
@@ -144,12 +144,24 @@ const loggerService = createLoggerService({
 await loggerService.shutdown();
 ```
 
-`endpoint` and `headers` are exactly the fields `config-schema`'s
+`endpoint`, `headers`, and `encoding` are exactly the fields `config-schema`'s
 `LOGGING_CONFIG_SCHEMA` parses, so a parsed `logging.otlp` section can be passed
 straight through. Batching knobs (`maxBatchSize`, `maxQueueSize`,
 `scheduledDelayMs`, `timeoutMs`) and an `onError` reporter are available in
 code; the defaults are 512 records per batch, a 2048-record buffer, a 5s
 partial-batch flush, and a 10s request timeout.
+
+Records go out as `application/x-protobuf`, the encoding the OTLP spec requires
+every receiver to support. OTLP/JSON is optional in the spec and some backends
+refuse it outright — VictoriaLogs answers such a POST with `400 … json encoding
+isn't supported` — so protobuf is what makes the exporter portable. Set
+`encoding: 'json'` for a collector you know accepts it, or to read a payload
+while debugging. `content-type` is set from `encoding` and cannot be overridden
+through `headers` — the exporter encodes the body, so it owns that label.
+
+Numeric attributes map to OTLP's `intValue` only while they are safe integers;
+anything larger (`2 ** 53`, `1e21`) goes out as `doubleValue`, which is the
+precision the JavaScript number carried anyway.
 
 Delivery is deliberately best-effort — logging must never be able to fail a
 request:

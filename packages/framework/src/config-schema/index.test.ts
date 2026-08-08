@@ -108,6 +108,17 @@ describe('LOGGING_CONFIG_SCHEMA', () => {
     expect(LOGGING_CONFIG_SCHEMA.safeParse({ otlp: { endpoint: 'nope' } }).success).toBe(false);
     expect(LOGGING_CONFIG_SCHEMA.safeParse({ otlp: { endpoint: 'https://c.io' } }).success).toBe(true);
   });
+
+  it('parses the optional otlp encoding, so the escape hatch is env-reachable', () => {
+    const parsed = LOGGING_CONFIG_SCHEMA.safeParse({
+      otlp: { endpoint: 'https://c.io', encoding: 'json' },
+    });
+    expect(parsed.success && parsed.data.otlp?.encoding).toBe('json');
+    expect(
+      LOGGING_CONFIG_SCHEMA.safeParse({ otlp: { endpoint: 'https://c.io', encoding: 'yaml' } })
+        .success
+    ).toBe(false);
+  });
 });
 
 describe('MAIL_CONFIG_SCHEMA', () => {

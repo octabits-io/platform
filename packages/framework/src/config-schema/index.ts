@@ -92,6 +92,7 @@ export const LOGGING_CONFIG_SCHEMA = z.object({
   otlp: z.object({
     endpoint: nonEmptyUrl(),
     headers: z.record(z.string(), z.string()).optional(),
+    encoding: z.enum(['protobuf', 'json']).optional(),
   }).optional(),
   consoleOutput: booleanFromEnv().optional(),
 });

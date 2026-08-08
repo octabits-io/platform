@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createOtlpLogExporter, encodeLogsPayload } from './otlp-exporter.ts';
+import { decodeLogsProtobuf } from './otlp-protobuf.testing.ts';
 import type { LogAttributes, LogRecord } from './types.ts';
 
 const ENDPOINT = 'http://collector.test:4318/v1/logs';
@@ -24,11 +25,17 @@ function stubFetch(impl?: (url: string, init: RequestInit) => Promise<Response>)
   }) as unknown as typeof fetch;
 }
 
-/** Bodies of every export POST made to a stub, decoded. */
+/**
+ * Bodies of every export POST made to a stub, decoded off the wire — protobuf
+ * by default, so these assertions cover the encoding real deployments send.
+ */
 function sentPayloads(fetchImpl: typeof fetch): Array<ReturnType<typeof encodeLogsPayload>> {
-  return (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
-    (call: unknown[]) => JSON.parse(String((call[1] as RequestInit).body))
-  );
+  return (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls.map((call: unknown[]) => {
+    const body = (call[1] as RequestInit).body;
+    return body instanceof Uint8Array
+      ? decodeLogsProtobuf(body)
+      : JSON.parse(String(body));
+  });
 }
 
 describe('encodeLogsPayload', () => {
@@ -116,6 +123,28 @@ describe('encodeLogsPayload', () => {
     expect(JSON.parse(JSON.stringify(encoded)).attributes).toEqual(encoded.attributes);
   });
 
+  it('sends integers beyond 2^53 as doubles rather than an unencodable int64', () => {
+    // int64 only holds exact integers up to 2^63, and `String` gives up on
+    // integer notation entirely at 1e21 ("1e+21") — a form the protobuf
+    // encoder's BigInt parse rejects. A double is representable either way and
+    // is no less precise than the JS number already was.
+    const encoded = encodeLogsPayload([
+      record({
+        attributes: {
+          safe: Number.MAX_SAFE_INTEGER,
+          beyond: 2 ** 53,
+          huge: 1e21,
+        },
+      }),
+    ]).resourceLogs[0]!.scopeLogs[0]!.logRecords[0]!;
+
+    expect(encoded.attributes).toEqual([
+      { key: 'safe', value: { intValue: '9007199254740991' } },
+      { key: 'beyond', value: { doubleValue: 9007199254740992 } },
+      { key: 'huge', value: { doubleValue: 1e21 } },
+    ]);
+  });
+
   it('groups records by resource', () => {
     const payload = encodeLogsPayload([
       record({ resource: { 'service.name': 'api' }, body: 'one' }),
@@ -134,7 +163,7 @@ describe('createOtlpLogExporter', () => {
     vi.useRealTimers();
   });
 
-  it('POSTs JSON to the endpoint with the configured headers', async () => {
+  it('POSTs protobuf to the endpoint with the configured headers', async () => {
     const fetchImpl = stubFetch();
     const exporter = createOtlpLogExporter({
       endpoint: ENDPOINT,
@@ -150,8 +179,65 @@ describe('createOtlpLogExporter', () => {
     const [url, init] = mock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(ENDPOINT);
     expect(init.method).toBe('POST');
-    expect(init.headers).toEqual({ 'content-type': 'application/json', 'x-api-key': 'secret' });
+    expect(init.headers).toEqual({
+      'content-type': 'application/x-protobuf',
+      'x-api-key': 'secret',
+    });
+    expect(init.body).toBeInstanceOf(Uint8Array);
     expect(sentPayloads(fetchImpl)[0]!.resourceLogs[0]!.scopeLogs[0]!.logRecords).toHaveLength(1);
+  });
+
+  it('POSTs JSON instead when the encoding is overridden', async () => {
+    const fetchImpl = stubFetch();
+    const exporter = createOtlpLogExporter({ endpoint: ENDPOINT, encoding: 'json', fetchImpl });
+
+    exporter.enqueue(record({ body: 'hello' }));
+    await exporter.forceFlush();
+
+    const mock = fetchImpl as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = mock.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).toEqual({ 'content-type': 'application/json' });
+    expect(typeof init.body).toBe('string');
+    expect(JSON.parse(String(init.body))).toEqual(encodeLogsPayload([record({ body: 'hello' })]));
+  });
+
+  it('keeps content-type authoritative over a caller-supplied header', async () => {
+    // The body is encoded here, so the caller cannot be allowed to relabel it
+    // — a `content-type: application/json` left over from the JSON default
+    // would otherwise announce JSON while shipping protobuf bytes.
+    const fetchImpl = stubFetch();
+    const exporter = createOtlpLogExporter({
+      endpoint: ENDPOINT,
+      headers: { 'content-type': 'application/json', 'x-api-key': 'secret' },
+      fetchImpl,
+    });
+
+    exporter.enqueue(record());
+    await exporter.forceFlush();
+
+    const mock = fetchImpl as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = mock.mock.calls[0] as [string, RequestInit];
+    expect(init.headers).toEqual({
+      'content-type': 'application/x-protobuf',
+      'x-api-key': 'secret',
+    });
+  });
+
+  it('exports the rest of a batch when one attribute holds an unencodable number', async () => {
+    // Encoding runs once per batch, so a value that breaks it takes every
+    // record down with it, not just its own.
+    const fetchImpl = stubFetch();
+    const onError = vi.fn();
+    const exporter = createOtlpLogExporter({ endpoint: ENDPOINT, onError, fetchImpl });
+
+    for (let i = 0; i < 9; i++) exporter.enqueue(record({ body: `healthy ${i}` }));
+    exporter.enqueue(record({ body: 'huge', attributes: { size: 1e21 } }));
+    await exporter.forceFlush();
+
+    expect(onError).not.toHaveBeenCalled();
+    const logRecords = sentPayloads(fetchImpl)[0]!.resourceLogs[0]!.scopeLogs[0]!.logRecords;
+    expect(logRecords).toHaveLength(10);
+    expect(logRecords[9]!.attributes).toEqual([{ key: 'size', value: { doubleValue: 1e21 } }]);
   });
 
   it('does not export anything while the buffer is below the batch size', async () => {
