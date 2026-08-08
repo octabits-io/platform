@@ -1,5 +1,29 @@
 # @octabits-io/framework
 
+## 0.24.1
+
+### Patch Changes
+
+- [`cf47a81`](https://github.com/octabits-io/platform/commit/cf47a811c3b39e398c533abab30349ce292fc942) - Bump the `@noble/ciphers` and `@scure/base` hard dependencies to `^2.3.0`, aligning them with `@noble/curves`/`@noble/hashes`.
+
+  Both releases carry changes that do not affect this package's usage:
+
+  - `@scure/base` 2.3.0 removes its internal `utils`/`bytesToString`/`stringToBytes` exports and the `SomeCoders` type. `./pii` imports only the coders (`base64`, `base64nopad`, `bech32`), which are unaffected. The release also brings a large encode/decode speed-up.
+  - `@noble/ciphers` 2.3.0 now throws when AAD is passed to a cipher that does not support it. `./pii` uses `chacha20poly1305` (which supports AAD) and passes none.
+
+- [`9e504a3`](https://github.com/octabits-io/platform/commit/9e504a376f3db75a6d73832096cf388e7ada0103) - Widen the `@hono/standard-validator` peer range to `^0.3.0 || ^0.4.0`.
+
+  The range was left at `^0.3.0` when the devDependency moved to `^0.4.0`, so
+  the declared peer excluded the only version this package is actually built and
+  tested against (and the current `latest`). A consumer following the peer range
+  would install 0.3.x.
+
+  The peer itself is load-bearing despite nothing in `src/` importing it:
+  `hono-openapi` statically imports `sValidator` from `@hono/standard-validator`
+  at the top of its entry module, so anything that pulls in
+  `@octabits-io/framework/hono/openapi` needs it resolvable at runtime. It stays
+  optional, since only that subpath requires it.
+
 ## 0.24.0
 
 ### Minor Changes
