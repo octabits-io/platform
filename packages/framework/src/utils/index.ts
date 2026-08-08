@@ -57,7 +57,13 @@ export {
 export type { Locale, LocaleMap } from './locale.ts';
 
 // WCAG contrast helpers + Tailwind swatch palette
-export { getContrastColor } from './color-contrast.ts';
+export {
+  getContrastColor,
+  getContrastRatio,
+  getReadableTextColor,
+  WCAG_AA_LARGE_TEXT,
+  WCAG_AA_NORMAL_TEXT,
+} from './color-contrast.ts';
 export {
   TAILWIND_COLOR_HEX,
   TAILWIND_COLOR_NAMES,
