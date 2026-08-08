@@ -35,14 +35,20 @@ await runServer({
     const config = loadConfig();
 
     // `createLoggerService` returns a LoggerService facade; `.logger` is the root
-    // `Logger` every framework module actually takes.
-    const { logger } = createLoggerService({
+    // `Logger` every framework module actually takes. Keep the facade around
+    // anyway — with `otlp` configured, `shutdown()` is what drains the export
+    // buffer, so destructuring `{ logger }` and dropping the rest silently
+    // loses whatever hadn't been POSTed yet.
+    const loggerService = createLoggerService({
       config: {
         serviceName: 'demo-server',
         logLevel: config.logging.level,
         environment: config.logging.environment,
+        // Unset unless OTLP_LOGS_ENDPOINT is — console-only is the default.
+        otlp: config.logging.otlp,
       },
     });
+    const logger = loggerService.logger;
 
     const pool = new Pool({ connectionString: config.database.url });
     await ensureSchema(pool, logger);
@@ -132,6 +138,9 @@ await runServer({
         await worker.stop();
         await boss.stop();
         await pool.end();
+        // Last: everything above still logs on the way down, and this is the
+        // call that flushes those records to the collector.
+        await loggerService.shutdown();
       },
     };
   },

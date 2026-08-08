@@ -121,7 +121,7 @@ saw nothing but preflight failures. A browser is the only client that tests CORS
 | --- | --- | --- |
 | `./result` | Everywhere — every service returns `Result<T, E>` | ✅ |
 | `./ioc` | [`container.ts`](./src/container.ts) — service map, `createSystemScope` for the queue worker, and per-request child scopes (`createDemoRequestScope`) with a Scoped `settingsService` override | ✅ |
-| `./logger` | [`main.ts`](./src/main.ts) — root logger, childed per component | ✅ |
+| `./logger` | [`main.ts`](./src/main.ts) — root logger, childed per component; OTLP export behind `OTLP_LOGS_ENDPOINT`, drained by `loggerService.shutdown()` in the teardown tail | ✅ |
 | `./utils` | [`routes/tools.ts`](./src/routes/tools.ts) (`slugify`), `createDateProvider` in the container | ✅ |
 | `./config-schema` | [`config.ts`](./src/config.ts) — `DATABASE_CONFIG_SCHEMA`, `LOGGING_CONFIG_SCHEMA`, `MAIL_CONFIG_SCHEMA`, `createConfigParser`, `nonEmptyString/Url` | ✅ |
 | `./rbac` | [`rbac.ts`](./src/rbac.ts) — statement matrix + `admin`/`viewer` roles | ✅ |
@@ -207,7 +207,11 @@ no Docker.
 Things that cost time here and are worth knowing before you copy this code:
 
 - **`createLoggerService(...)` returns a facade, not a `Logger`.** Every module
-  wants the `Logger`; destructure it: `const { logger } = createLoggerService(…)`.
+  wants the `Logger` — but keep the facade, don't destructure it away. With
+  `otlp` configured, `shutdown()` is the only thing that drains the export
+  buffer, so `const { logger } = createLoggerService(…)` silently loses whatever
+  hadn't been POSTed at exit. `main.ts` holds `loggerService` and awaits
+  `shutdown()` last in `stop`, after the components that log on the way down.
 - **`withDbErrorHandling` needs explicit type arguments** when the callback can
   return more than one error type — inference latches onto one branch and
   rejects the rest. See `getById` in `services/contacts.ts`.

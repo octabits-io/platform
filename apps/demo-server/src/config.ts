@@ -21,6 +21,7 @@ import {
   assertNotInProduction,
   getEnv,
   getEnvNumber,
+  getEnvOptional,
   isProduction,
   parseCsv,
 } from '@octabits-io/framework/server';
@@ -86,6 +87,7 @@ const parseConfig = createConfigParser(SCHEMA_CONFIG);
 export function loadConfig(): AppConfig {
   const ageIdentity = getEnv('DEMO_AGE_IDENTITY', DEV_AGE_IDENTITY);
   const blindIndexKey = getEnv('DEMO_BLIND_INDEX_KEY', DEV_BLIND_INDEX_KEY);
+  const otlpEndpoint = getEnvOptional('OTLP_LOGS_ENDPOINT');
 
   // `assertNotInProduction` throws when the flag is truthy AND NODE_ENV is
   // production — the presence-flag here is "the committed dev key material is
@@ -104,6 +106,11 @@ export function loadConfig(): AppConfig {
     logging: {
       level: getEnv('LOG_LEVEL', 'debug'),
       environment: getEnv('NODE_ENV', 'development'),
+      // Unset by default: no collector, console only. Point it at a collector's
+      // logs signal path (…:4318/v1/logs) and the same records ship there too —
+      // `LOGGING_CONFIG_SCHEMA.otlp` parses exactly what `createLoggerService`
+      // takes, so `main.ts` forwards this section untouched.
+      otlp: otlpEndpoint === undefined ? undefined : { endpoint: otlpEndpoint },
     },
     pii: { ageIdentity, blindIndexKey },
     mail: {

@@ -166,6 +166,40 @@ request:
 
 `shutdown()` is safe (and a no-op) when `otlp` is not configured.
 
+##### Using the exporter directly
+
+`createOtlpLogExporter` is exported too, for records that don't come from this
+package's `Logger` — a vendor SDK's log callback, a batch job's own event
+stream, a second exporter aimed at a different collector. It takes the same
+`OtlpExporterConfig` and owns its own buffer, so it must be drained by whoever
+created it:
+
+```ts
+import { createOtlpLogExporter, LOG_LEVEL_SEVERITY } from '@octabits-io/framework/logger';
+
+const exporter = createOtlpLogExporter({
+  endpoint: 'http://localhost:4318/v1/logs',
+  maxBatchSize: 128,
+  scheduledDelayMs: 1_000,
+  onError: (error) => console.error('[otlp]', error.message), // never a Logger feeding this
+});
+
+exporter.enqueue({
+  timestamp: new Date().toISOString(),
+  severityNumber: LOG_LEVEL_SEVERITY.warn,
+  severityText: 'WARN',
+  body: 'Upstream rate limit hit',
+  attributes: { vendor: 'acme' },
+  resource: { 'service.name': 'my-api' },
+});
+
+await exporter.shutdown(); // or forceFlush() to drain without closing
+```
+
+`enqueue` never throws or blocks; after `shutdown()` it silently drops, so an
+exporter that outlives its owner stays harmless. `fetchImpl` overrides the
+global `fetch` — primarily a test seam.
+
 ---
 
 ### `@octabits-io/framework/utils`
