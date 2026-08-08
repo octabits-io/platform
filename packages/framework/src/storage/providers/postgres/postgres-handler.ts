@@ -44,6 +44,37 @@ export interface ServeHandlerOptions {
    * fully trusted.
    */
   readonly contentDisposition?: string;
+  /**
+   * Value for the `Cache-Control` response header. Default:
+   * {@link DEFAULT_CACHE_CONTROL} — `private, no-store`.
+   *
+   * A namespaced blob store usually holds per-namespace, access-controlled
+   * objects, so the default keeps them out of shared caches. Opt in to
+   * `'public, max-age=31536000, immutable'` ONLY for content-addressed public
+   * assets: on an authenticated route, `public` lets a CDN or reverse proxy
+   * store one user's object and re-serve it to another.
+   */
+  readonly cacheControl?: string;
+}
+
+/**
+ * Default `Cache-Control` for served objects: no shared-cache storage. Objects
+ * behind an authenticated route are the norm for this store, so the safe value
+ * is the default and public caching is opt-in (see
+ * {@link ServeHandlerOptions.cacheControl}).
+ */
+export const DEFAULT_CACHE_CONTROL = 'private, no-store';
+
+/**
+ * Body returned for a 5xx. The underlying storage error can carry internals
+ * (driver/SQL detail), matching `./server`'s production redaction of 5xx
+ * messages — the real error is the caller's to log.
+ */
+const INTERNAL_ERROR_BODY = 'Internal error';
+
+/** Client-safe response body for a serve error: internals only leak on 4xx. */
+function errorBody(error: ServeObjectError): string {
+  return error.statusCode >= 500 ? INTERNAL_ERROR_BODY : error.message;
 }
 
 /**
@@ -155,7 +186,7 @@ export function createExpressHandler(fileServer: ObjectFileServer, namespace?: s
     const result = await getObjectData(fileServer, { namespace, key });
 
     if (!result.ok) {
-      res.status(result.error.statusCode).send(result.error.message);
+      res.status(result.error.statusCode).send(errorBody(result.error));
       return;
     }
 
@@ -178,8 +209,7 @@ export function createExpressHandler(fileServer: ObjectFileServer, namespace?: s
       res.set('Last-Modified', new Date(obj.lastModified).toUTCString());
     }
 
-    // Set cache headers (adjust as needed)
-    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.set('Cache-Control', options?.cacheControl ?? DEFAULT_CACHE_CONTROL);
 
     // Check If-None-Match for 304 responses
     const ifNoneMatch = req.headers['if-none-match'];
@@ -229,7 +259,7 @@ export function createNitroHandler(fileServer: ObjectFileServer, namespace?: str
 
     if (!result.ok) {
       event.node.res.statusCode = result.error.statusCode;
-      return result.error.message;
+      return errorBody(result.error);
     }
 
     const obj = result.value;
@@ -251,7 +281,7 @@ export function createNitroHandler(fileServer: ObjectFileServer, namespace?: str
       event.node.res.setHeader('Last-Modified', new Date(obj.lastModified).toUTCString());
     }
 
-    event.node.res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    event.node.res.setHeader('Cache-Control', options?.cacheControl ?? DEFAULT_CACHE_CONTROL);
 
     // Check If-None-Match for 304 responses
     const ifNoneMatch = event.node.req.headers['if-none-match'];
@@ -278,7 +308,7 @@ export async function createWebResponse(
   const result = await getObjectData(fileServer, params);
 
   if (!result.ok) {
-    return new Response(result.error.message, {
+    return new Response(errorBody(result.error), {
       status: result.error.statusCode,
       headers: {
         'Content-Type': 'text/plain',
@@ -323,7 +353,7 @@ export async function createWebResponse(
     headers.set('Last-Modified', new Date(obj.lastModified).toUTCString());
   }
 
-  headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+  headers.set('Cache-Control', options?.cacheControl ?? DEFAULT_CACHE_CONTROL);
 
   // Convert Buffer to Uint8Array for Response body compatibility
   // Data is always present when getObjectData returns ok
@@ -363,7 +393,7 @@ export function createGenericHandler(fileServer: ObjectFileServer, options?: Ser
           'Content-Type': 'text/plain',
           'X-Content-Type-Options': 'nosniff',
         },
-        body: result.error.message,
+        body: errorBody(result.error),
       };
     }
 
@@ -383,7 +413,7 @@ export function createGenericHandler(fileServer: ObjectFileServer, options?: Ser
     }
 
     const headers: Record<string, string> = {
-      'Cache-Control': 'public, max-age=31536000, immutable',
+      'Cache-Control': options?.cacheControl ?? DEFAULT_CACHE_CONTROL,
       // Content-Type reflects user-controlled upload metadata — never let
       // browsers MIME-sniff it into something executable.
       'X-Content-Type-Options': 'nosniff',

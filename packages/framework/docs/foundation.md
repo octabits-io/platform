@@ -618,7 +618,9 @@ const keyService = createScopedKeyService({
   store,
   scope,
   masterKeyProvider,
-  cache,                          // e.g. LRU with ~5-minute TTL
+  cache,                          // storage only — expiry is enforced below
+  cacheTtlMs: 5 * 60_000,         // default: DEFAULT_KEY_CACHE_TTL_MS
+  onKeysDestroyed: (s) => bus.publish('keys.destroyed', s), // see below
 });
 
 const keys = await keyService.getKeys();     // lazy-generates on first use
@@ -644,6 +646,46 @@ other failure (`scoped_key_store_failure`) — which the service translates to i
 (`master_key_error` / `master_key_unsupported_plaintext`).
 
 Cache entries are keyed by `column:value` (URI-encoded). Don't share one cache instance across services whose stores persist keys in different tables under the same scope column and value — use one cache per key store.
+
+**Cached keys are plaintext.** A cache entry holds a decrypted age identity as
+a JS string: not zeroizable, and readable in a heap or core dump for as long as
+it is cached. The service enforces `cacheTtlMs` itself on every read rather
+than trusting the injected cache's eviction policy — the seam is structural, so
+a consumer can satisfy it with a plain `Map`, and expiry must not become
+optional by accident. `cacheTtlMs: 0` disables expiry; use it only in tests.
+
+**`destroyKeys()` is process-local.** It crypto-shreds the row and drops the
+calling process's cache, but every other pod/worker/replica keeps serving its
+own cached copy for the rest of its TTL — a real window on an offboarding or
+erasure path. Wire `onKeysDestroyed` to a broadcast the other processes listen
+on and have each receiver call `invalidateCache()`:
+
+```ts
+// publisher side — injected into the key service
+onKeysDestroyed: (scope) => events.emit('encryption_keys.destroyed', scope),
+
+// every process, on receipt
+keyService.invalidateCache();
+```
+
+A failing broadcast is logged (pass `logger`) and does not fail the destroy:
+the row is already gone, so the failure degrades to TTL-bounded staleness
+rather than a false error.
+
+#### Blind indexes: what they hide, and what they don't
+
+A blind index is deterministic by design, which is also its leak: anyone who
+can read the column learns **equality and frequency** — which rows share a
+value and how often each repeats — with no key at all. And the index is only as
+unguessable as the value under it; if the HMAC key ever leaks alongside the
+table, every low-entropy field falls to candidate hashing (emails, phone
+numbers, postcodes, dates of birth).
+
+So index only fields you genuinely look up by, prefer high-entropy values, and
+never blind-index a low-cardinality attribute (status, country, gender) — the
+frequency histogram alone can re-identify rows there. Keep the key in a
+different trust domain from the database; `createScopedKeyService` does this by
+storing it master-key-encrypted and decrypting only in the app process.
 
 #### Low-Level Primitives
 

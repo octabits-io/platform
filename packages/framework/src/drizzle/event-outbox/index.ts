@@ -115,7 +115,20 @@ export interface CreateDrizzleEventOutboxStoreDeps {
    * (`createPgNotifyListener({ channel })`). Plain identifier only.
    */
   channel: string;
-  /** Scope column to stamp/filter. Omit entirely in a single-scope deployment. */
+  /**
+   * Scope column to stamp/filter.
+   *
+   * Omit it ONLY in a genuine single-scope deployment. With no scope column
+   * there is nothing to filter on, so `readSince` cannot restrict rows to the
+   * requested `scopeKey` — it returns the whole outbox and labels every
+   * envelope with the caller's `scopeKey`, which then sails through the hub's
+   * scope check. In a multi-scope deployment that is a cross-scope leak on the
+   * replay path.
+   *
+   * The store therefore refuses to run in single-scope mode the moment it sees
+   * a second distinct `scopeKey` (on append, notify, or read) rather than
+   * silently mixing scopes. If that throws for you, you need a `scope`.
+   */
   scope?: EventOutboxScope;
 }
 
@@ -150,10 +163,33 @@ export function createDrizzleEventOutboxStore(
     return scope?.value ?? envelope.scopeKey;
   }
 
+  // Single-scope mode (no `scope` configured) has no column to filter on, so
+  // it is only sound while exactly one scopeKey exists. Remember the first one
+  // and fail loud on the second — a misconfigured multi-scope deployment must
+  // not degrade into cross-scope replay reads. Cheap: one string compare.
+  let soleScopeKey: string | undefined;
+
+  function assertSingleScope(scopeKey: string, operation: string): void {
+    if (scope) return;
+    if (soleScopeKey === undefined) {
+      soleScopeKey = scopeKey;
+      return;
+    }
+    if (soleScopeKey !== scopeKey) {
+      throw new Error(
+        `Event outbox store was constructed without a 'scope', which only works for a single scope, ` +
+          `but ${operation} saw a second one ('${soleScopeKey}' then '${scopeKey}'). ` +
+          `Without a scope column, readSince() cannot filter by scope and would replay every scope's ` +
+          `events to whoever reconnects. Pass 'scope: { column }' to createDrizzleEventOutboxStore.`,
+      );
+    }
+  }
+
   async function append(envelope: EventEnvelope, tx?: unknown): Promise<{ seq: number }> {
     if (envelope.lane !== 'durable') {
       throw new Error(`append() is durable-lane only; got '${envelope.lane}' for event '${envelope.type}'`);
     }
+    assertSingleScope(envelope.scopeKey, 'append()');
     const target = conn(tx);
     const rows = (await target
       .insert(table)
@@ -182,6 +218,7 @@ export function createDrizzleEventOutboxStore(
     if (envelope.lane !== 'ephemeral') {
       throw new Error(`notify() is ephemeral-lane only; got '${envelope.lane}' for event '${envelope.type}'`);
     }
+    assertSingleScope(envelope.scopeKey, 'notify()');
     await conn(tx).execute(sql`select pg_notify(${channel}, ${encodeInlineEvent(envelope)})`);
   }
 
@@ -201,6 +238,10 @@ export function createDrizzleEventOutboxStore(
   }
 
   async function readSince(scopeKey: string, afterSeq: number, limit = 200): Promise<EventEnvelope[]> {
+    // A read-only process (a replica serving SSE but never publishing) has no
+    // append history to compare against, so this is also where the guard first
+    // bites there.
+    assertSingleScope(scopeKey, 'readSince()');
     const seqFilter = sql`${table.id} > ${afterSeq}`;
     const where = scope
       ? sql`${table[scope.column]} = ${scope.value ?? scopeKey} and ${seqFilter}`

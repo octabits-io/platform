@@ -23,6 +23,8 @@
  */
 import crypto from 'node:crypto';
 import { type OctError, type Result, ok, err } from '../result/index.ts';
+import type { Logger } from '../logger/index.ts';
+import type { DateProvider } from '../utils/DateProvider.ts';
 import type { MasterKeyProvider, MasterKeyProviderError } from './master-key.ts';
 import { generateIdentity, identityToRecipient } from './typage/index.ts';
 
@@ -122,14 +124,31 @@ export interface ScopedKeys {
   keyVersion: number;
 }
 
-/** Structural cache seam — satisfied by foundation's `LruCache`. */
+/**
+ * Structural cache seam — satisfied by foundation's `LruCache`.
+ *
+ * Deliberately has no `has`: every read goes through the service's own TTL
+ * check (see {@link ScopedKeyServiceDeps.cacheTtlMs}), and a `has` that
+ * answered `true` for an entry the service considers expired would be a way
+ * around it. Storage and eviction only.
+ */
 export interface ScopedKeyCache {
   get(key: string): ScopedKeys | undefined;
   set(key: string, value: ScopedKeys): void;
-  has(key: string): boolean;
   delete(key: string): boolean;
   clear(): void;
 }
+
+/**
+ * Default lifetime of a decrypted-key cache entry (5 minutes).
+ *
+ * Decrypted keys are plaintext age identities held as JS strings — not
+ * zeroizable, and visible in a heap or core dump for as long as they are
+ * cached. The TTL bounds that exposure, and it is also the window in which a
+ * process still serves keys another process has already destroyed (see
+ * {@link ScopedKeyServiceDeps.onKeysDestroyed}).
+ */
+export const DEFAULT_KEY_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export interface ScopedKeyServiceDeps {
   /**
@@ -145,25 +164,95 @@ export interface ScopedKeyServiceDeps {
   scope: KeyScope;
   masterKeyProvider: MasterKeyProvider;
   /**
-   * Decrypted-key cache (recommend LRU with ~5-minute TTL).
+   * Decrypted-key cache.
    *
    * Cache entries are keyed by `encodeURIComponent(column):encodeURIComponent(value)`,
    * NOT by the store. WARNING: do not share one cache instance across services
    * whose stores persist keys in DIFFERENT tables under the same scope
    * column+value — their entries would collide. Use one cache per key store.
+   *
+   * The cache's own eviction policy is not trusted for expiry — the service
+   * enforces {@link ScopedKeyServiceDeps.cacheTtlMs} itself, so passing a plain
+   * `Map` cannot end up pinning decrypted keys in memory forever.
    */
   cache: ScopedKeyCache;
+  /**
+   * How long a decrypted-key cache entry stays valid, in ms. Defaults to
+   * {@link DEFAULT_KEY_CACHE_TTL_MS} (5 minutes). Enforced by the service on
+   * every read, independently of the injected cache's own TTL (if it has one).
+   *
+   * `0` disables expiry — only for tests and short-lived processes: it pins
+   * plaintext age identities in memory for the process's lifetime and removes
+   * the upper bound on how long a destroyed scope's keys stay usable here.
+   */
+  cacheTtlMs?: number;
+  /** Clock seam for the TTL. Defaults to `Date.now()`. */
+  dateProvider?: DateProvider;
+  /**
+   * Called after {@link ScopedKeyService.destroyKeys} deletes the key row —
+   * the cross-process invalidation seam.
+   *
+   * `destroyKeys` is crypto-shredding, but it can only drop the *calling*
+   * process's cache. Every other process (pod, worker, replica) keeps serving
+   * decrypted keys for the rest of its `cacheTtlMs` — a real window on an
+   * offboarding or erasure path. Wire this to a broadcast the other processes
+   * listen on (`./events`' ephemeral lane, a `pg_notify` channel, your bus)
+   * and have each receiver call `invalidateCache()`, and the window closes.
+   *
+   * Left unset, `cacheTtlMs` is your only bound. Failures are logged and
+   * contained: the key row is already gone, so the destroy still succeeds.
+   */
+  onKeysDestroyed?: (scope: KeyScope) => void | Promise<void>;
+  /** Used only to report a failing `onKeysDestroyed` broadcast. */
+  logger?: Logger;
 }
 
 /**
  * Service for managing per-scope encryption keys: generation, cached
  * retrieval + decryption, destruction (offboarding), cache invalidation.
  */
-export function createScopedKeyService({ store, scope, masterKeyProvider, cache }: ScopedKeyServiceDeps) {
+export function createScopedKeyService({
+  store,
+  scope,
+  masterKeyProvider,
+  cache,
+  cacheTtlMs = DEFAULT_KEY_CACHE_TTL_MS,
+  dateProvider,
+  onKeysDestroyed,
+  logger,
+}: ScopedKeyServiceDeps) {
   const keyCache = cache;
   // Qualified cache key: scope value alone would collide across services bound
   // to different scope columns (e.g. workspaceId 'x' vs tenantId 'x').
   const cacheKey = `${encodeURIComponent(scope.column)}:${encodeURIComponent(scope.value)}`;
+  const now = () => (dateProvider ? dateProvider.now().getTime() : Date.now());
+
+  // One service instance is bound to one scope, so the whole cache state this
+  // service owns is a single expiry stamp. Expiry lives HERE rather than in
+  // the injected cache: the seam is structural, so a consumer can satisfy it
+  // with a plain Map, and then nothing would ever evict a decrypted identity.
+  let cacheExpiresAt = 0;
+
+  /** Cache read that treats an expired entry as a miss (and evicts it). */
+  function readCache(): ScopedKeys | undefined {
+    const cached = keyCache.get(cacheKey);
+    if (cached === undefined) return undefined;
+    if (cacheTtlMs > 0 && now() >= cacheExpiresAt) {
+      dropCache();
+      return undefined;
+    }
+    return cached;
+  }
+
+  function writeCache(keys: ScopedKeys): void {
+    keyCache.set(cacheKey, keys);
+    cacheExpiresAt = cacheTtlMs > 0 ? now() + cacheTtlMs : Number.POSITIVE_INFINITY;
+  }
+
+  function dropCache(): void {
+    keyCache.delete(cacheKey);
+    cacheExpiresAt = 0;
+  }
 
   /**
    * Generate a new encryption key pair for the scope. Call at scope creation
@@ -220,7 +309,7 @@ export function createScopedKeyService({ store, scope, masterKeyProvider, cache 
       if (!txStore) {
         const rowResult = await store.find();
         if (rowResult.ok && rowResult.value) {
-          keyCache.set(cacheKey, { recipient, identity, blindIndexKey, keyVersion: rowResult.value.keyVersion });
+          writeCache({ recipient, identity, blindIndexKey, keyVersion: rowResult.value.keyVersion });
         }
       }
 
@@ -234,7 +323,7 @@ export function createScopedKeyService({ store, scope, masterKeyProvider, cache 
   }
 
   async function getKeysInner(depth: number): Promise<Result<ScopedKeys, ScopedKeyError>> {
-    const cached = keyCache.get(cacheKey);
+    const cached = readCache();
     if (cached) return ok(cached);
 
     const rowResult = await store.find();
@@ -283,7 +372,7 @@ export function createScopedKeyService({ store, scope, masterKeyProvider, cache 
       keyVersion: row.keyVersion,
     };
 
-    keyCache.set(cacheKey, keys);
+    writeCache(keys);
     return ok(keys);
   }
 
@@ -298,7 +387,7 @@ export function createScopedKeyService({ store, scope, masterKeyProvider, cache 
 
   /** Check if the scope has encryption keys. */
   async function hasKeys(): Promise<Result<boolean, ScopedKeyError>> {
-    if (keyCache.has(cacheKey)) return ok(true);
+    if (readCache() !== undefined) return ok(true);
     const existsResult = await store.exists();
     if (!existsResult.ok) {
       return err({
@@ -314,9 +403,13 @@ export function createScopedKeyService({ store, scope, masterKeyProvider, cache 
    *
    * WARNING: makes all encrypted data for this scope unrecoverable. Only for
    * offboarding when data should be permanently deleted.
+   *
+   * Drops THIS process's cache and fires `onKeysDestroyed`. Without that hook,
+   * other processes keep serving their cached copy for up to `cacheTtlMs` —
+   * see {@link ScopedKeyServiceDeps.onKeysDestroyed}.
    */
   async function destroyKeys(): Promise<Result<void, ScopedKeyError>> {
-    keyCache.delete(cacheKey);
+    dropCache();
     const deleteResult = await store.destroy();
     if (!deleteResult.ok) {
       return err({
@@ -324,17 +417,34 @@ export function createScopedKeyService({ store, scope, masterKeyProvider, cache 
         message: `Failed to destroy keys for ${scope.column}=${scope.value}: ${deleteResult.error.message}`,
       });
     }
+    if (onKeysDestroyed) {
+      // The row is already gone — a failed broadcast must not report the
+      // destroy as failed. It degrades to TTL-bounded staleness elsewhere,
+      // which is worth a loud log line.
+      try {
+        await onKeysDestroyed(scope);
+      } catch (error) {
+        logger?.error(
+          `Failed to broadcast key destruction for ${scope.column}=${scope.value} — other processes may serve cached keys for up to ${cacheTtlMs}ms`,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    }
     return ok(undefined);
   }
 
-  /** Invalidate cached keys (use after key rotation). */
+  /**
+   * Invalidate cached keys (use after key rotation, and on receipt of another
+   * process's `onKeysDestroyed` broadcast).
+   */
   function invalidateCache(): void {
-    keyCache.delete(cacheKey);
+    dropCache();
   }
 
   /** Clear the entire key cache (forces re-decryption for all scopes). */
   function clearCache(): void {
     keyCache.clear();
+    cacheExpiresAt = 0;
   }
 
   return {

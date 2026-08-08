@@ -77,10 +77,20 @@ Every handler validates the request key before touching storage (traversal
 segments — plain or percent-encoded — leading slashes, and empty keys are
 rejected with 400), emits ETag / `Last-Modified` / `Cache-Control` /
 `X-Content-Type-Options: nosniff` headers, and honors `If-None-Match` (304).
-An optional `ServeHandlerOptions.contentDisposition` (e.g. `'attachment'`) is
-available on every handler factory — strongly recommended when serving
-user-uploaded SVG/HTML from your app's origin, since inline rendering of
-untrusted markup enables stored XSS.
+`ServeHandlerOptions` is available on every handler factory:
+
+- `contentDisposition` (e.g. `'attachment'`) — strongly recommended when
+  serving user-uploaded SVG/HTML from your app's origin, since inline
+  rendering of untrusted markup enables stored XSS.
+- `cacheControl` — defaults to `DEFAULT_CACHE_CONTROL` (`private, no-store`),
+  because a namespaced blob store normally sits behind an authenticated route.
+  Opt in to `'public, max-age=31536000, immutable'` only for content-addressed
+  **public** assets: on an authenticated route, `public` lets a CDN or reverse
+  proxy store one caller's object and re-serve it to another.
+
+5xx responses carry a fixed `Internal error` body — the underlying storage
+error can name driver/SQL internals, and it is the caller's to log. 4xx bodies
+are passed through: they describe the caller's own request.
 
 ## Examples
 
@@ -198,6 +208,7 @@ import { createWebResponse } from '@octabits-io/framework/storage/postgres';
 return createWebResponse(storage, { namespace: 't1', key: pathAfterPrefix }, request.headers);
 // single-tenant: return createWebResponse(storage, { key }, request.headers);
 // untrusted uploads: pass { contentDisposition: 'attachment' } as the 4th arg
+// public assets only: { cacheControl: 'public, max-age=31536000, immutable' }
 ```
 
 ## Testing

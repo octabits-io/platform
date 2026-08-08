@@ -18,6 +18,26 @@ export const MIN_BLIND_INDEX_KEY_LENGTH = 16;
  * trimmed before hashing, so visually identical inputs (e.g. composed vs
  * decomposed accents) produce the same index.
  *
+ * ## What a blind index does and does not hide
+ *
+ * The index is deterministic — that is the point, and it is also the leak.
+ * Anyone who can read the column learns **equality and frequency** without any
+ * key: which rows share a value, and how often each value repeats. Encrypting
+ * the field does not hide that; only the plaintext is hidden.
+ *
+ * And an index is only as unguessable as the value under it. The key stops
+ * offline enumeration, but if the key ever leaks alongside the table, an
+ * attacker recovers every low-entropy field by hashing candidates: email
+ * addresses, phone numbers, postcodes, dates of birth, and anything drawn from
+ * a small set (status, country, gender) fall immediately. High-entropy values
+ * (account numbers, long random ids) do not.
+ *
+ * So: **index only the fields you must actually look up by**, prefer them to
+ * be high-entropy, and never blind-index a low-cardinality attribute — the
+ * frequency histogram alone can re-identify rows there. Keep the key in a
+ * different trust domain from the database (here: encrypted at rest under the
+ * master key, decrypted only in the app process).
+ *
  * @param value - The plaintext value to hash
  * @param key - The HMAC key (should be a secure, randomly generated secret)
  * @returns A Buffer containing the HMAC-SHA256 hash

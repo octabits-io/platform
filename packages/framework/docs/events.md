@@ -80,6 +80,10 @@ const store = createDrizzleEventOutboxStore({
   db, table: eventOutbox, channel: 'app_events',
   scope: { column: 'tenantId' }, // stamped from envelope.scopeKey; omit in single-scope apps
 });
+// Omitting `scope` means there is no column to filter on, so readSince() cannot
+// restrict replay to one scope — it would hand every scope's events to whoever
+// reconnects. The store enforces that: it throws as soon as it sees a second
+// distinct scopeKey rather than mixing them. If that fires, configure a scope.
 const publisher = createEventPublisher({ store });
 
 // At a write site:
@@ -213,6 +217,14 @@ Evaluated per subscriber at delivery time, in the hub:
    `can(...)`. The framework never interprets it; your permission model stays
    yours. A permission-carrying event with no evaluator is withheld
    (**fail closed**).
+
+Filters 2 and 3 both apply (AND) and live in one exported predicate,
+`isEnvelopePermitted`. Replay reads the outbox directly and never passes
+through `hub.publish`, so it calls that same predicate rather than re-deriving
+the rule — a second copy is how the replay path once lost the `audience.users`
+filter and delivered user-targeted events to every subscriber in the scope.
+**If you build your own replay or catch-up source, run `isEnvelopePermitted`
+on every envelope before you emit it.**
 
 ## Ordering, replay, and the bigserial gap
 

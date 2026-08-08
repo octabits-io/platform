@@ -7,6 +7,7 @@ import {
   createGenericHandler,
   createExpressHandler,
   createWebResponse,
+  DEFAULT_CACHE_CONTROL,
 } from './postgres-handler';
 import type { ExpressLikeResponse } from './postgres-handler';
 import type { ObjectFileServer } from '../../base/interfaces';
@@ -173,8 +174,44 @@ describe('ObjectStorageService.postgres.handler', () => {
       expect(response.headers['Content-Type']).toBe('text/plain');
       expect(response.headers['Content-Length']).toBeDefined();
       expect(response.headers['ETag']).toBeDefined();
-      expect(response.headers['Cache-Control']).toBe('public, max-age=31536000, immutable');
+      expect(response.headers['Cache-Control']).toBe('private, no-store');
       expect(response.body.toString()).toBe('Generic handler test');
+    });
+
+    test('defaults Cache-Control to private, no-store and only goes public on request', async () => {
+      // A namespaced blob store normally sits behind an authenticated route, so
+      // `public` would let a shared CDN/proxy re-serve one caller's object to
+      // another. Public caching is opt-in, per object-storage deployment.
+      const secure = createGenericHandler(fileServer);
+      const secureResponse = await secure({ namespace: NAMESPACE, key: 'handler/test.txt' });
+      expect(secureResponse.headers['Cache-Control']).toBe(DEFAULT_CACHE_CONTROL);
+      expect(DEFAULT_CACHE_CONTROL).toBe('private, no-store');
+
+      const publicHandler = createGenericHandler(fileServer, {
+        cacheControl: 'public, max-age=31536000, immutable',
+      });
+      const publicResponse = await publicHandler({ namespace: NAMESPACE, key: 'handler/test.txt' });
+      expect(publicResponse.headers['Cache-Control']).toBe('public, max-age=31536000, immutable');
+    });
+
+    test('does not leak the underlying storage error message on 5xx', async () => {
+      const failing: ObjectFileServer = {
+        getObjectData: async () => ({
+          ok: false,
+          error: { key: 'internal_error', message: 'relation "object_storage" does not exist' },
+        }),
+      };
+      const handler = createGenericHandler(failing);
+      const response = await handler({ namespace: NAMESPACE, key: 'handler/test.txt' });
+
+      expect(response.statusCode).toBe(500);
+      expect(response.body.toString()).toBe('Internal error');
+      expect(response.body.toString()).not.toContain('object_storage');
+
+      // 4xx messages stay intact — they describe the caller's own request.
+      const notFound = await createGenericHandler(fileServer)({ namespace: NAMESPACE, key: 'missing.txt' });
+      expect(notFound.statusCode).toBe(404);
+      expect(notFound.body.toString()).toContain('missing.txt');
     });
 
     test('should return 404 for non-existent object', async () => {

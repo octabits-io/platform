@@ -55,6 +55,29 @@ export interface CreateEventHubDeps {
   logger?: Logger;
 }
 
+/**
+ * The delivery gate: personal targeting (`audience.users`) AND the subscriber's
+ * `authorize` predicate, both applied, fail-closed on a permission with no
+ * evaluator.
+ *
+ * Exported and shared on purpose. A replay source (the SSE handler's
+ * `Last-Event-ID` catch-up) reads envelopes straight out of the outbox and
+ * never passes through {@link EventHub.publish}, so it must run the *same*
+ * check — a second, hand-written copy of the rule is exactly how the replay
+ * path came to drop the `audience.users` filter and deliver user-targeted
+ * events to every subscriber in the scope.
+ */
+export function isEnvelopePermitted(
+  envelope: EventEnvelope,
+  subscriber: Pick<EventHubSubscriber, 'subscriberId' | 'authorize'>,
+): boolean {
+  const audience = envelope.audience;
+  if (audience?.users && !audience.users.includes(subscriber.subscriberId)) return false;
+  if (subscriber.authorize) return subscriber.authorize(envelope);
+  // No authorize predicate: fail closed if the envelope demands a permission.
+  return audience?.permission === undefined;
+}
+
 export function createEventHub(deps: CreateEventHubDeps = {}): EventHub {
   const { logger } = deps;
   const byScope = new Map<string, Set<EventHubSubscriber>>();
@@ -72,21 +95,13 @@ export function createEventHub(deps: CreateEventHubDeps = {}): EventHub {
     };
   }
 
-  function isPermitted(envelope: EventEnvelope, subscriber: EventHubSubscriber): boolean {
-    const audience = envelope.audience;
-    if (audience?.users && !audience.users.includes(subscriber.subscriberId)) return false;
-    if (subscriber.authorize) return subscriber.authorize(envelope);
-    // No authorize predicate: fail closed if the envelope demands a permission.
-    return audience?.permission === undefined;
-  }
-
   function publish(envelope: EventEnvelope): PublishStats {
     const stats: PublishStats = { delivered: 0, filtered: 0 };
     const set = byScope.get(envelope.scopeKey);
     if (!set) return stats;
     // Snapshot: a subscriber may unsubscribe from within its own callback.
     for (const subscriber of [...set]) {
-      if (!isPermitted(envelope, subscriber)) {
+      if (!isEnvelopePermitted(envelope, subscriber)) {
         stats.filtered += 1;
         continue;
       }

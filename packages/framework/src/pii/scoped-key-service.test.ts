@@ -19,7 +19,6 @@ function makeCache(): ScopedKeyCache & { keys(): string[] } {
   return {
     get: (k) => map.get(k),
     set: (k, v) => { map.set(k, v); },
-    has: (k) => map.has(k),
     delete: (k) => map.delete(k),
     clear: () => map.clear(),
     keys: () => [...map.keys()],
@@ -198,7 +197,7 @@ describe('createScopedKeyService — generation & cache semantics', () => {
 
     const result = await service.generateKeyPair();
     expect(result.ok).toBe(true);
-    expect(cache.has('tenantId:t1')).toBe(true);
+    expect(cache.keys()).toEqual(['tenantId:t1']);
 
     const keys = await service.getKeys();
     expect(keys.ok).toBe(true);
@@ -245,6 +244,107 @@ describe('createScopedKeyService — storage failures return err instead of thro
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.key).toBe('scoped_key_storage_error');
     // Cache is invalidated before the store call, regardless of its outcome.
-    expect(cache.has('workspaceId:w1')).toBe(false);
+    expect(cache.keys()).toEqual([]);
+  });
+});
+
+describe('createScopedKeyService — decrypted-key cache lifetime', () => {
+  /** A controllable clock, so TTL behavior is asserted rather than slept on. */
+  function fakeClock(startMs = 1_000_000) {
+    let ms = startMs;
+    return { dateProvider: { now: () => new Date(ms) }, advance: (by: number) => { ms += by; } };
+  }
+
+  it('re-reads from the store once a cached entry outlives cacheTtlMs', async () => {
+    const { store, find } = makeInMemoryStore();
+    const { dateProvider, advance } = fakeClock();
+    const service = createScopedKeyService({
+      store, scope, masterKeyProvider, cache: makeCache(), cacheTtlMs: 60_000, dateProvider,
+    });
+
+    await service.generateKeyPair();
+    const callsAfterGenerate = find.mock.calls.length;
+
+    // Inside the TTL: served from cache, store untouched.
+    await service.getKeys();
+    expect(find).toHaveBeenCalledTimes(callsAfterGenerate);
+
+    advance(60_001);
+    await service.getKeys();
+    expect(find.mock.calls.length).toBeGreaterThan(callsAfterGenerate);
+  });
+
+  it('expires entries even when the injected cache never evicts (a plain Map)', async () => {
+    // The seam is structural, so a consumer CAN pass a cache with no TTL of its
+    // own. Expiry must not depend on it — otherwise decrypted age identities
+    // sit in memory for the process's lifetime.
+    const map = new Map<string, ScopedKeys>();
+    const neverEvicts: ScopedKeyCache = {
+      get: (k) => map.get(k),
+      set: (k, v) => { map.set(k, v); },
+      delete: (k) => map.delete(k),
+      clear: () => map.clear(),
+    };
+    const { store } = makeInMemoryStore();
+    const { dateProvider, advance } = fakeClock();
+    const service = createScopedKeyService({
+      store, scope, masterKeyProvider, cache: neverEvicts, cacheTtlMs: 60_000, dateProvider,
+    });
+
+    await service.generateKeyPair();
+    expect(map.size).toBe(1);
+
+    advance(60_001);
+    await service.hasKeys(); // any read evicts the stale entry
+    expect(map.has('workspaceId:w1')).toBe(false);
+  });
+
+  it('hasKeys does not report a stale cached entry as present', async () => {
+    const { store, exists } = makeInMemoryStore();
+    const { dateProvider, advance } = fakeClock();
+    const service = createScopedKeyService({
+      store, scope, masterKeyProvider, cache: makeCache(), cacheTtlMs: 60_000, dateProvider,
+    });
+
+    await service.generateKeyPair();
+    exists.mockClear();
+    await service.hasKeys();
+    expect(exists).not.toHaveBeenCalled(); // fresh cache short-circuits
+
+    advance(60_001);
+    await service.hasKeys();
+    expect(exists).toHaveBeenCalled(); // stale cache falls through to the store
+  });
+
+  it('fires onKeysDestroyed so other processes can drop their copies', async () => {
+    const { store } = makeInMemoryStore();
+    const onKeysDestroyed = vi.fn();
+    const service = createScopedKeyService({
+      store, scope, masterKeyProvider, cache: makeCache(), onKeysDestroyed,
+    });
+
+    await service.generateKeyPair();
+    const result = await service.destroyKeys();
+
+    expect(result.ok).toBe(true);
+    expect(onKeysDestroyed).toHaveBeenCalledWith(scope);
+  });
+
+  it('still succeeds — and logs — when the destruction broadcast fails', async () => {
+    // The key row is already gone; a broken bus must not make destroyKeys look
+    // like it failed. It degrades to TTL-bounded staleness elsewhere.
+    const { store } = makeInMemoryStore();
+    const logger = { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
+    const service = createScopedKeyService({
+      store, scope, masterKeyProvider, cache: makeCache(),
+      onKeysDestroyed: async () => { throw new Error('bus down'); },
+      logger: logger as unknown as Parameters<typeof createScopedKeyService>[0]['logger'],
+    });
+
+    await service.generateKeyPair();
+    const result = await service.destroyKeys();
+
+    expect(result.ok).toBe(true);
+    expect(logger.error).toHaveBeenCalled();
   });
 });

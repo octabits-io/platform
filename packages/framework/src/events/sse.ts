@@ -33,7 +33,7 @@
  */
 import type { Logger } from '../logger/index.ts';
 import type { EventEnvelope, EventOutboxStore } from './types.ts';
-import type { EventHub } from './hub.ts';
+import { isEnvelopePermitted, type EventHub } from './hub.ts';
 
 /** What the consumer's auth resolution yields for one stream request. */
 export interface ResolvedEventSubscriber {
@@ -187,11 +187,18 @@ export function createEventStreamHandler(deps: CreateEventStreamHandlerDeps): Ev
         request.signal.addEventListener('abort', close);
         send(`retry: ${retryHintMs}\n\n`);
 
+        // The permission half of the gate. The hub applies the `audience.users`
+        // half itself around this, so the live path must NOT duplicate it here.
         const authorize = (envelope: EventEnvelope): boolean => {
           const permission = envelope.audience?.permission;
           if (permission === undefined) return true;
           return subscriber.can ? subscriber.can(permission) : false;
         };
+        // Replay reads the outbox directly and never reaches `hub.publish`, so
+        // it has to run the hub's full gate itself — permission AND personal
+        // targeting. Same predicate, not a second copy of the rule.
+        const permitted = (envelope: EventEnvelope): boolean =>
+          isEnvelopePermitted(envelope, { subscriberId, authorize });
 
         const subscribeLive = () => {
           if (closed) return;
@@ -213,7 +220,7 @@ export function createEventStreamHandler(deps: CreateEventStreamHandlerDeps): Ev
           void Promise.resolve(store.readSince(scopeKey, afterSeq, replayLimit))
             .then((envelopes) => {
               for (const envelope of envelopes) {
-                if (authorize(envelope)) send(sseFrame(envelope));
+                if (permitted(envelope)) send(sseFrame(envelope));
               }
             })
             .catch((error) => {

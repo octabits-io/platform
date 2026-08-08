@@ -164,6 +164,51 @@ describe('createEventStreamHandler', () => {
     abort();
   });
 
+  it('applies audience.users on the REPLAY path, not just the live one', async () => {
+    // Regression: replay read the outbox directly and ran only the permission
+    // half of the gate, so a durable event addressed to another user was
+    // delivered to anyone in the scope who reconnected with a Last-Event-ID —
+    // and lastEventId is client-supplied, so it was requestable on demand.
+    const hub = createEventHub();
+    const readSince = vi.fn(async () => [
+      { ...durable(41), id: 'for-someone-else', audience: { users: ['u2'] } },
+      { ...durable(42), id: 'for-me', audience: { users: ['u1'] } },
+      { ...durable(43), id: 'for-everyone' },
+    ]);
+    const { handler } = createEventStreamHandler({
+      hub,
+      resolveSubscriber: () => subscriber, // subscriberId 'u1'
+      store: { readSince },
+    });
+    const { req, abort } = request({ 'last-event-id': '44' });
+    const response = await handler(req);
+
+    const buffer = await readUntil(response, (b) => b.includes('for-everyone'));
+    expect(buffer).not.toContain('for-someone-else');
+    expect(buffer).toContain('for-me');
+    expect(buffer).toContain('for-everyone');
+    abort();
+  });
+
+  it('withholds permission-carrying replayed events the same way the live path does', async () => {
+    const hub = createEventHub();
+    const readSince = vi.fn(async () => [
+      { ...durable(41), id: 'replay-denied', audience: { permission: 'denied' } },
+      { ...durable(42), id: 'replay-granted', audience: { permission: 'granted' } },
+    ]);
+    const { handler } = createEventStreamHandler({
+      hub,
+      resolveSubscriber: () => ({ ...subscriber, can: (p: unknown) => p === 'granted' }),
+      store: { readSince },
+    });
+    const { req, abort } = request({ 'last-event-id': '43' });
+    const response = await handler(req);
+
+    const buffer = await readUntil(response, (b) => b.includes('replay-granted'));
+    expect(buffer).not.toContain('replay-denied');
+    abort();
+  });
+
   it('closes the stream at the connection age cap', async () => {
     vi.useFakeTimers();
     try {

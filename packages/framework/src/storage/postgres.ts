@@ -28,6 +28,7 @@ export {
   parseStoragePath,
   isValidObjectKey,
   sanitizeObjectKey,
+  DEFAULT_CACHE_CONTROL,
 } from './providers/postgres/postgres-handler';
 export type {
   ServeObjectParams,

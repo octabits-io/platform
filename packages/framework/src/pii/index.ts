@@ -32,7 +32,7 @@ export type { SymmetricEncryptionError, HybridEncryptionError, HybridDecryptionE
 export { Encrypter, Decrypter, generateIdentity, identityToRecipient } from './typage/index.ts';
 
 // Scoped encryption-key management (generic over the scope column)
-export { createScopedKeyService } from './scoped-key-service.ts';
+export { createScopedKeyService, DEFAULT_KEY_CACHE_TTL_MS } from './scoped-key-service.ts';
 export type {
   ScopedKeyService,
   ScopedKeyServiceDeps,
