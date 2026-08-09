@@ -211,9 +211,21 @@ function resolvePinnablePool(rawDb: RlsDatabase): Pool | undefined {
   const poolLike = candidate as { connect?: unknown; release?: unknown };
   if (typeof poolLike.connect !== 'function') return undefined;
   if (typeof poolLike.release === 'function') return undefined;
-  const schema = (rawDb as { schema?: unknown }).schema;
+  const schema = schemaModuleOf(rawDb);
   if (!schema || typeof schema !== 'object') return undefined;
   return candidate as Pool;
+}
+
+/**
+ * The schema module off an augmented instance. Read `.tables`, not `.schema`:
+ * `.tables` is the factory's own field and is always the module, while on a
+ * transaction `.schema` is Drizzle's RelationalSchemaConfig (the factory
+ * deliberately leaves that one alone so nested transactions keep their
+ * relational query API).
+ */
+function schemaModuleOf(rawDb: RlsDatabase): Record<string, unknown> | undefined {
+  const tables = (rawDb as { tables?: unknown }).tables;
+  return tables && typeof tables === 'object' ? (tables as Record<string, unknown>) : undefined;
 }
 
 /**
@@ -224,7 +236,7 @@ function resolvePinnablePool(rawDb: RlsDatabase): Pool | undefined {
 const clientDbCache = new WeakMap<object, { schema: unknown; db: unknown }>();
 
 function clientBoundDb<TDb extends RlsDatabase>(rawDb: TDb, client: PoolClient): TDb {
-  const schema = (rawDb as { schema?: unknown }).schema as Record<string, unknown>;
+  const schema = schemaModuleOf(rawDb) as Record<string, unknown>;
   const cached = clientDbCache.get(client);
   if (cached && cached.schema === schema) return cached.db as TDb;
   // Reuse the raw db's logger so scoped queries keep logging like unscoped

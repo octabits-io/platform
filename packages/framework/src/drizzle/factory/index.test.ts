@@ -1,10 +1,35 @@
 import { describe, it, expect } from 'vitest';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { pgTable, serial, text } from 'drizzle-orm/pg-core';
 import { augmentDrizzle } from './drizzle.ts';
 
 const schema = {
   users: { name: 'users' },
   posts: { name: 'posts' },
 } as const;
+
+/**
+ * Minimal stand-in for a pg Pool: enough for Drizzle to open a transaction and
+ * issue `begin` / `savepoint` / `commit` without a database. The constructor
+ * name matters — Drizzle's node-postgres session branches on
+ * `constructor.name.includes('Pool')` to decide whether to `connect()`.
+ */
+class FakePool {
+  readonly statements: string[] = [];
+
+  async query(text: string | { text: string }) {
+    this.statements.push(typeof text === 'string' ? text : text.text);
+    return { rows: [], fields: [], rowCount: 0 };
+  }
+
+  async connect() {
+    const self = this;
+    return {
+      query: (text: string | { text: string }) => self.query(text),
+      release() {},
+    };
+  }
+}
 
 describe('augmentDrizzle', () => {
   it('attaches .tables and .schema pointing at the passed schema', () => {
@@ -94,5 +119,70 @@ describe('augmentDrizzle', () => {
     expect(deepest.tables).toBe(schema);
     expect(deepest.schema).toBe(schema);
     expect(deepest.level).toBe(2);
+  });
+
+  it('leaves a schema the target already owns in place, but still sets .tables', () => {
+    // Stands in for Drizzle's PgTransaction, which owns `schema` (its
+    // RelationalSchemaConfig) and feeds it to nested transactions.
+    const ownSchema = { fullSchema: {}, schema: {}, tableNamesMap: {} };
+    const tx = { schema: ownSchema };
+
+    const augmented = augmentDrizzle(tx, schema);
+
+    expect(augmented.tables).toBe(schema);
+    expect(augmented.schema).toBe(ownSchema);
+  });
+});
+
+describe('augmentDrizzle over real Drizzle instances', () => {
+  const users = pgTable('users', { id: serial('id').primaryKey(), name: text('name') });
+  const realSchema = { users };
+
+  function makeDb() {
+    const pool = new FakePool();
+    const db = augmentDrizzle(
+      drizzle({ client: pool as never, schema: realSchema }),
+      realSchema,
+    );
+    return { db: db as never as Record<string, any>, pool };
+  }
+
+  it('keeps the relational query API on a nested transaction', async () => {
+    const { db, pool } = makeDb();
+
+    expect(db.query.users).toBeDefined();
+
+    let level1: any;
+    let level2: any;
+    await db.transaction(async (tx1: any) => {
+      level1 = tx1;
+      await tx1.transaction(async (tx2: any) => {
+        level2 = tx2;
+      });
+    });
+
+    // Regression: `augmentDrizzle` used to overwrite `PgTransaction.schema`
+    // with the schema module, so the savepoint transaction was constructed
+    // with no relational config and came back with `query === {}`. Anything
+    // calling `tx.query.*` one level down died on `undefined`.
+    expect(level1.query.users).toBeDefined();
+    expect(level2.query.users).toBeDefined();
+
+    // And the nested tx really was a savepoint, not a no-op.
+    expect(pool.statements.some(s => s.includes('savepoint'))).toBe(true);
+  });
+
+  it('still augments both levels with .tables', async () => {
+    const { db } = makeDb();
+
+    let level2: any;
+    await db.transaction(async (tx1: any) => {
+      expect(tx1.tables).toBe(realSchema);
+      await tx1.transaction(async (tx2: any) => {
+        level2 = tx2;
+      });
+    });
+
+    expect(level2.tables).toBe(realSchema);
   });
 });

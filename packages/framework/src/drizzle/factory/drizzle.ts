@@ -37,6 +37,10 @@ export interface CreateDrizzleFromClientOptions {
  * `.transaction()` so the tx passed into the callback also carries the same
  * augmentation. The recursive call inside the wrapper covers nested savepoints.
  *
+ * `.tables` is the accessor to reach for — it is ours, and always the schema
+ * module. `.schema` is a convenience alias that exists only where Drizzle does
+ * not already own that field (see below).
+ *
  * Exported as a low-level primitive so callers that build their own Drizzle
  * instance can opt into the same augmentation (and so it can be unit-tested in
  * isolation without a live database).
@@ -45,9 +49,21 @@ export function augmentDrizzle<TSchema extends AnySchema, T extends object>(
   d: T,
   schema: TSchema,
 ): T & { tables: TSchema; schema: TSchema } {
+  // Probed through `d`, not `augmented` — the cast below asserts `schema`
+  // exists, which would narrow the check away to `never`.
+  const drizzleOwnsSchema = 'schema' in (d as object);
+
   const augmented = d as T & { tables: TSchema; schema: TSchema };
   augmented.tables = schema;
-  augmented.schema = schema;
+  // Never clobber a `schema` Drizzle owns. `PgTransaction` keeps its
+  // RelationalSchemaConfig ({ fullSchema, schema, tableNamesMap }) there, and
+  // its nested `.transaction()` feeds exactly that field to the savepoint tx's
+  // constructor — overwriting it with the raw schema module leaves the nested
+  // tx with no relational config and an empty `.query` API, so `tx.query.foo`
+  // is `undefined` two levels down. `PgDatabase` keeps its config on `_` and
+  // has no own `schema`, so there the assignment is purely additive; that
+  // asymmetry is why only the second level ever broke.
+  if (!drizzleOwnsSchema) augmented.schema = schema;
 
   const original = (augmented as any).transaction?.bind(augmented);
   if (typeof original === 'function') {
@@ -92,6 +108,11 @@ export type AppDatabase<TSchema extends AnySchema> = Omit<
  * Transaction context from `db.transaction()` callback. Structurally identical
  * to `AppDatabase` for our usage (Drizzle's PgTransaction extends PgDatabase),
  * so we alias it here to keep call sites that need the `tx` semantics readable.
+ *
+ * One caveat the alias papers over: on a transaction, `.schema` is Drizzle's
+ * own RelationalSchemaConfig, not the schema module — `augmentDrizzle` leaves
+ * it alone so nested transactions keep working. Use `.tables` to reach tables;
+ * that is the documented accessor and is the schema module on both.
  */
 export type AppTransaction<TSchema extends AnySchema> = AppDatabase<TSchema>;
 
