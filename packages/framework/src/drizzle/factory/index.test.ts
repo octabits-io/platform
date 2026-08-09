@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { pgTable, serial, text } from 'drizzle-orm/pg-core';
 import { augmentDrizzle } from './drizzle.ts';
+import type { AppDatabase, AppTransaction, DbOrTransaction } from './drizzle.ts';
 
 const schema = {
   users: { name: 'users' },
@@ -184,5 +185,50 @@ describe('augmentDrizzle over real Drizzle instances', () => {
     });
 
     expect(level2.tables).toBe(realSchema);
+  });
+});
+
+/**
+ * The runtime rule above has a type-level half: `.schema` is only real on a
+ * connection, so only `AppDatabase` may declare it. These assertions are the
+ * enforcement — without them the aliases silently drift back into promising a
+ * transaction field that Drizzle keeps `protected` and the factory never sets.
+ */
+describe('AppDatabase / AppTransaction types', () => {
+  type Schema = typeof realSchemaForTypes;
+  const realSchemaForTypes = { users: pgTable('users', { id: serial('id') }) };
+
+  it('gives a connection `.schema`, and `.tables` to both', () => {
+    expectTypeOf<AppDatabase<Schema>>().toHaveProperty('schema');
+    expectTypeOf<AppDatabase<Schema>>().toHaveProperty('tables');
+    expectTypeOf<AppTransaction<Schema>>().toHaveProperty('tables');
+  });
+
+  it('does not offer `.schema` on a transaction', () => {
+    // The regression this locks down: as a plain alias of `AppDatabase`,
+    // `tx.schema.users` typechecked and returned `undefined` at runtime —
+    // Drizzle declares `PgTransaction.schema` protected and stores its own
+    // RelationalSchemaConfig there.
+    expectTypeOf<AppTransaction<Schema>>().not.toHaveProperty('schema');
+    expectTypeOf<DbOrTransaction<Schema>>().not.toHaveProperty('schema');
+  });
+
+  it('accepts a connection wherever either is allowed, but not the reverse', () => {
+    // `tx?: DbOrTransaction` call sites are passed a `db` constantly.
+    expectTypeOf<AppDatabase<Schema>>().toExtend<DbOrTransaction<Schema>>();
+    expectTypeOf<AppDatabase<Schema>>().toExtend<AppTransaction<Schema>>();
+    // And a transaction is not a stand-in for a connection — that asymmetry is
+    // the whole point of separating them.
+    expectTypeOf<AppTransaction<Schema>>().not.toExtend<AppDatabase<Schema>>();
+  });
+
+  it('hands the transaction shape, not the connection shape, to the callback', () => {
+    type TxParam = Parameters<Parameters<AppDatabase<Schema>['transaction']>[0]>[0];
+    expectTypeOf<TxParam>().not.toHaveProperty('schema');
+    expectTypeOf<TxParam>().toHaveProperty('tables');
+    // Nested savepoints stay augmented all the way down.
+    type NestedTxParam = Parameters<Parameters<TxParam['transaction']>[0]>[0];
+    expectTypeOf<NestedTxParam>().toHaveProperty('tables');
+    expectTypeOf<NestedTxParam>().not.toHaveProperty('schema');
   });
 });
