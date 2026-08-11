@@ -89,6 +89,62 @@ describe('registerErrorHandler', () => {
     expect(res.data).toEqual({ jsonrpc: '2.0', error: { code: -32001, message: 'nope' } });
   });
 
+  it('logs a 4xx HTTPException as a warning (the pass-through is otherwise silent)', async () => {
+    // Regression: Hono's own json validator raises HTTPException for a
+    // malformed body and answers with a bare text/plain response. While the
+    // pass-through skipped the logger, such a failure was observable from
+    // neither side — absent from the logs, and unreadable by any client that
+    // expects the framework's JSON error envelope.
+    const warn = vi.fn();
+    const logger: Logger = { ...silentLogger, warn };
+    const app = registerErrorHandler(
+      new Hono().post('/x', () => { throw new HTTPException(400, { message: 'Malformed JSON in request body' }); }),
+      logger,
+      { production: false },
+    );
+    await app.request('/x', { method: 'POST' });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Malformed JSON in request body'),
+      expect.objectContaining({
+        'http.request.method': 'POST',
+        'url.path': '/x',
+        'http.response.status_code': 400,
+      }),
+    );
+  });
+
+  it('logs a 5xx HTTPException at error level, with the error itself', async () => {
+    const error = vi.fn();
+    const logger: Logger = { ...silentLogger, error };
+    const app = registerErrorHandler(
+      new Hono().get('/x', () => { throw new HTTPException(503, { message: 'upstream down' }); }),
+      logger,
+      { production: false },
+    );
+    await app.request('/x');
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('upstream down'),
+      expect.any(Error),
+      expect.any(Object),
+    );
+  });
+
+  it('does NOT log a sub-4xx HTTPException-carried Response (a deliberate exact answer)', async () => {
+    const warn = vi.fn();
+    const error = vi.fn();
+    const logger: Logger = { ...silentLogger, warn, error };
+    const app = registerErrorHandler(
+      new Hono().get('/x', () => {
+        throw new HTTPException(200, { res: new Response('ok', { status: 200 }) });
+      }),
+      logger,
+      { production: false },
+    );
+    await app.request('/x');
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
+  });
+
   it('statusErrorWithSet works in a Hono handler via a set shim (route-glue parity)', async () => {
     // The reynt route idiom `if (!result.ok) return statusErrorWithSet(set, result.error)`
     // maps to Hono as a two-liner with a local set object.

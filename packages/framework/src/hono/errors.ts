@@ -68,10 +68,44 @@ export function octValidator<Target extends keyof ValidationTargets, S extends Z
 }
 
 /**
+ * Log an `HTTPException` before its response is handed back verbatim.
+ *
+ * Without this the pass-through is silent, and the errors it carries are
+ * exactly the ones with no other trace: Hono's own middleware raises
+ * `HTTPException` for a malformed JSON body, an unparseable `FormData` body and
+ * a failed bearer check, and answers them with a bare `text/plain` body. A
+ * client that expects the framework's JSON error envelope cannot read that
+ * body, so such a failure could otherwise be observed from neither side.
+ *
+ * Only >= 400 is logged: `HTTPException(status, { res })` is also the supported
+ * way to answer with an exact `Response` from deep inside a handler, and a
+ * successful one of those is not an error event.
+ */
+function logHttpException(error: HTTPException, c: Context, logger: Logger): void {
+  if (error.status < 400) return;
+
+  const attributes = {
+    'http.request.method': c.req.method,
+    'url.path': new URL(c.req.url).pathname,
+    'http.response.status_code': error.status,
+  };
+  const message = `Request failed with ${error.status}${error.message ? `: ${error.message}` : ''}`;
+
+  // 5xx is a fault worth a stack; a 4xx is the client being told "no" and would
+  // only add noise as an error-level event.
+  if (error.status >= 500) logger.error(message, error, attributes);
+  else logger.warn(message, attributes);
+}
+
+/**
  * Register the global error handler: `HTTPException` passes through verbatim,
  * everything else goes to the shared `resolveErrorResponse` core
  * (`ApiError` → status+body, DB-connection errors → 503, validation → 400
  * with fields, production redaction for 5xx).
+ *
+ * The pass-through is still LOGGED (see {@link logHttpException}). It answers
+ * the client without touching the error core, so it is the one path where a
+ * failure would otherwise leave no server-side trace at all.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function registerErrorHandler<T extends Hono<any, any, any>>(
@@ -82,7 +116,10 @@ export function registerErrorHandler<T extends Hono<any, any, any>>(
   const production = options.production ?? isProduction();
 
   app.onError((error, c) => {
-    if (error instanceof HTTPException) return error.getResponse();
+    if (error instanceof HTTPException) {
+      logHttpException(error, c, logger);
+      return error.getResponse();
+    }
 
     const code = error instanceof RequestValidationError ? 'VALIDATION' : undefined;
     const resolved = resolveErrorResponse(error, { code, production, logger });
