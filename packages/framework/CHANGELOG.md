@@ -1,5 +1,19 @@
 # @octabits-io/framework
 
+## 0.28.4
+
+### Patch Changes
+
+- [`3c89fb9`](https://github.com/octabits-io/platform/commit/3c89fb97cc4851f45af1e78ce340bba2b621df9b) - Follow the workflow engine's rename: `@octabits-io/flow` is now `octaflow`.
+
+  Imports and the peer range move together (`^0.12.0` → `^0.15.0`). The old
+  package is deprecated on npm at 0.13.0 and would have kept the framework three
+  minors behind — including a step-claim race and a stall where a lost dispatch
+  stranded a workflow forever, both fixed since.
+
+  No API change here: `createFlowWorkflowRoutes` and everything around it are
+  untouched, and the engine's exports kept their names through the rename.
+
 ## 0.28.3
 
 ### Patch Changes
