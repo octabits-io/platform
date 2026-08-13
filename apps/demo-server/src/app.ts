@@ -184,7 +184,7 @@ export function createDemoApp({ container, config, checkReady, ai, ...deps }: Cr
           { name: 'Queue', description: 'pg-boss monitoring' },
           { name: 'Tools', description: 'Captcha, slugify' },
           { name: 'Protected', description: 'API-key bearer auth' },
-          { name: 'AI', description: 'Durable AI workflows (@octabits-io/flow)' },
+          { name: 'AI', description: 'Durable AI workflows (octaflow)' },
           { name: 'Events', description: 'Two-lane event fan-out' },
         ],
       }),

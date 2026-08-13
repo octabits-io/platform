@@ -166,7 +166,7 @@ routing/lazy-loading/SEO machinery would be weight without a job. `createI18n` +
 | `components/AiResultReviewCard.vue` | [`AppAiResultReviewCard.ts`](./app/components/AppAiResultReviewCard.ts) re-export in `AiContactBrief.vue` — review-then-apply; "apply" is a domain write (creates a note via `POST /api/notes`) plus `markApplied` | ✅ verified in-browser |
 
 The server side of the seam is [`apps/demo-server/src/routes/ai.ts`](../demo-server/src/routes/ai.ts)
-(`@octabits-io/flow` + the `ai/test` mock model — no API key involved); the
+(`octaflow` + the `ai/test` mock model — no API key involved); the
 route serializes flow's `WorkflowWithSteps` into exactly the kit's
 `AiWorkflowData` shape, so the whole transport contract is those two files.
 
@@ -450,7 +450,7 @@ failure to expect when composing a large Hono app, and the reason
 ### AI wiring gotcha: `@` in vue-i18n messages
 
 `@` starts a *linked message* in vue-i18n's message syntax, so a locale string
-containing a bare `@octabits-io/flow` throws `Message compilation error:
+containing a bare `octaflow` throws `Message compilation error:
 Invalid linked format` **at render time** — `nuxt typecheck` is green, the
 modal just comes up empty. Escape it as `{'@'}octabits-io/flow` (see
 `ai.brief.intro` in `locales/en.json`).

@@ -18,7 +18,7 @@
  * - the trigger route — `contactId` body vocabulary, the `contact:<id>`
  *   entityRef convention, and the workflow-type dispatch table;
  * - the `ai_quota_exceeded → 429` mapping (no framework key convention);
- * - `/usage` — the quota/usage read over `@octabits-io/flow/ai`'s aggregation
+ * - `/usage` — the quota/usage read over `octaflow/ai`'s aggregation
  *   service (an AI-layer concern, not a core engine projection).
  */
 import { Hono } from 'hono';
@@ -26,7 +26,7 @@ import { z } from 'zod';
 import { errorResponses, successResponses } from '@octabits-io/framework/server';
 import { describeApiRoute, octApiValidator } from '@octabits-io/framework/hono/openapi';
 import { createFlowWorkflowRoutes } from '@octabits-io/framework/hono/flow';
-import type { AiUsageAggregationService } from '@octabits-io/flow/ai';
+import type { AiUsageAggregationService } from 'octaflow/ai';
 import { createErrorJson } from '../http.ts';
 import type { DemoAiEngine } from '../ai/engine.ts';
 import { aiWorkflowsByType, CONTACT_BRIEF_TYPE } from '../ai/workflows.ts';

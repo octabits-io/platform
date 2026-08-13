@@ -14,7 +14,7 @@
  */
 import type { Pool } from 'pg';
 import { objectStorageDdl } from '@octabits-io/framework/storage/postgres';
-import { flowStoreDdl } from '@octabits-io/flow/store-pg';
+import { flowStoreDdl } from 'octaflow/store-pg';
 import type { Logger } from '@octabits-io/framework/logger';
 
 const APP_DDL = `

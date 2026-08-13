@@ -5,7 +5,7 @@
  * `docs/hono.md`.
  *
  * Deliberately NOT exported here (subpaths keep their optional peers out of
- * this barrel): `./hono/flow` (`@octabits-io/flow`), `./hono/mcp`
+ * this barrel): `./hono/flow` (`octaflow`), `./hono/mcp`
  * (`@hono/mcp` + `@modelcontextprotocol/sdk`), `./hono/events` (the events
  * sub-app wrapper).
  */

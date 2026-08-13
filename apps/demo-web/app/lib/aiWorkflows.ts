@@ -9,7 +9,7 @@
 import { createWorkflowRegistry } from '@octabits-io/nuxt-ui-kit/ai'
 
 export interface AiWorkflowDefinition {
-  /** Server-side workflow type (`@octabits-io/flow`'s `WorkflowDefinition.type`). */
+  /** Server-side workflow type (`octaflow`'s `WorkflowDefinition.type`). */
   type: string
   labelKey: string
 }

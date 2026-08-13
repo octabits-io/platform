@@ -22,8 +22,8 @@ import {
   type DispatchStepPayload,
   type TypedWorkflow,
   type WorkflowEngine,
-} from '@octabits-io/flow';
-import type { WorkflowWithSteps } from '@octabits-io/flow';
+} from 'octaflow';
+import type { WorkflowWithSteps } from 'octaflow';
 import type { Logger } from '../logger/index.ts';
 import { testRequest } from '../server/testing.ts';
 import type { TestableApp } from '../server/testing.ts';

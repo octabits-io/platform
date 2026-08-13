@@ -6,7 +6,7 @@
  * ran in `ensureSchema`), `createPgBossDispatcher` + step/DLQ workers over the
  * SAME pg-boss instance `BossManager` owns (flow never creates its own boss —
  * `boss.getBoss()` is the seam), and the quota/usage services from
- * `@octabits-io/flow/ai` over the consumer-SQL store in `usage.ts`.
+ * `octaflow/ai` over the consumer-SQL store in `usage.ts`.
  *
  * Single-scope app ⇒ one constant partition key and one engine for the whole
  * process. A multi-tenant host would build store/dispatcher/engine per
@@ -15,18 +15,18 @@
  */
 import type { Pool } from 'pg';
 import type { PgBoss } from 'pg-boss';
-import { createPgWorkflowStore } from '@octabits-io/flow/store-pg';
+import { createPgWorkflowStore } from 'octaflow/store-pg';
 import {
   createPgBossDispatcher,
   createPgBossStepWorker,
   createPgBossDlqWorker,
-} from '@octabits-io/flow/dispatcher-pgboss';
+} from 'octaflow/dispatcher-pgboss';
 import {
   createAiQuotaService,
   createAiUsageAggregationService,
   DEFAULT_AI_QUOTA,
   type AiUsageAggregationService,
-} from '@octabits-io/flow/ai';
+} from 'octaflow/ai';
 import type { Logger } from '@octabits-io/framework/logger';
 import { createAiEngine, type DemoAiEngine } from './engine.ts';
 import { createAiUsageStore, createAiUsageRecorder } from './usage.ts';

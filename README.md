@@ -13,7 +13,7 @@ Monorepo for shared platform libraries. Managed with [pnpm workspaces](https://p
 packages (merged 2026-07-14; imports map 1:1 — see the
 [migration table](./packages/framework/README.md#migrating-from-the-split-packages)).
 
-The durable DAG workflow engine `@octabits-io/flow` lives in its own repository:
+The durable DAG workflow engine `octaflow` lives in its own repository:
 [octabits-io/flow](https://github.com/octabits-io/flow) (extracted from this monorepo 2026-07-14).
 
 ## Demo apps

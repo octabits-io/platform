@@ -177,10 +177,10 @@ Honestly not covered here:
 session, which no curl in this README can verify. Mounting it untested would be
 worse documentation than omitting it.
 
-## `@octabits-io/flow` coverage
+## `octaflow` coverage
 
 The durable AI workflow behind `/api/ai/*` consumes the **published**
-`@octabits-io/flow` from npm (not a workspace link — this app also validates
+`octaflow` from npm (not a workspace link — this app also validates
 its packaging). One workflow ships: `contact-brief`, a three-step DAG
 (`fetch` → `summarize` ∥ `followup`) whose two AI steps run in parallel because
 the engine derives that from their dependencies.

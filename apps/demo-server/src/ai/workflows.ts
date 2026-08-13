@@ -1,5 +1,5 @@
 /**
- * The demo's AI workflow — `contact-brief` (`@octabits-io/flow/ai`).
+ * The demo's AI workflow — `contact-brief` (`octaflow/ai`).
  *
  * A three-step DAG over one contact: `fetch` loads the row through the host's
  * services, then `summarize` and `followup` both depend on it and therefore run
@@ -17,8 +17,8 @@
  */
 import { z } from 'zod';
 import { generateText } from 'ai';
-import type { TypedWorkflow } from '@octabits-io/flow';
-import { defineAiStep, buildAiWorkflow, type AiContext } from '@octabits-io/flow/ai';
+import type { TypedWorkflow } from 'octaflow';
+import { defineAiStep, buildAiWorkflow, type AiContext } from 'octaflow/ai';
 import type { Logger } from '@octabits-io/framework/logger';
 import type { ContactsService } from '../services/contacts.ts';
 

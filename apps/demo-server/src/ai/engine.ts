@@ -7,15 +7,15 @@
  * in-memory store and an array-backed dispatcher — same registry, same hooks,
  * same mock model, zero test-only branches in here.
  */
-import type { Dispatcher, WorkflowStore } from '@octabits-io/flow';
-import { createStepHandlerRegistry, createWorkflowEngine, type WorkflowEngine } from '@octabits-io/flow';
+import type { Dispatcher, WorkflowStore } from 'octaflow';
+import { createStepHandlerRegistry, createWorkflowEngine, type WorkflowEngine } from 'octaflow';
 import {
   createAiWorkflowHooks,
   createCostEstimator,
   type AiContext,
   type AiQuotaPolicy,
   type AiUsageRecorder,
-} from '@octabits-io/flow/ai';
+} from 'octaflow/ai';
 import type { Logger } from '@octabits-io/framework/logger';
 import { createDemoAiModel, DEMO_MODEL_PRICING } from './model.ts';
 import { aiWorkflowsByType, type AiHost } from './workflows.ts';

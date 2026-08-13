@@ -172,5 +172,5 @@ ban list — the `./elysia` glue module was removed once `./hono` reached parity
 History: the former standalone `pii`, `drizzle-toolkit`, `ical`, `captcha`, and
 `vault` packages were folded into `foundation` (2026-06), and `foundation`,
 `elysia`, `queue`, `storage`, and `mail` were merged into `framework` (2026-07-14) —
-all deprecated on npm. The durable workflow engine `@octabits-io/flow` moved to its
+all deprecated on npm. The durable workflow engine `octaflow` moved to its
 own repository, [octabits-io/flow](https://github.com/octabits-io/flow) (2026-07-14).

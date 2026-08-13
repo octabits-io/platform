@@ -30,7 +30,7 @@ const APP_MODULES = ['hono', 'queue', 'storage', 'mail', 'zitadel'];
 // Vendor SDKs that belong to exactly one app module. '@scope' entries match the
 // whole scope. Base-tier vendors (pg, drizzle-orm, jose, zod, altcha-lib,
 // ical.js, @noble/*, …) are not listed — the optional-peer setup governs those.
-// '@modelcontextprotocol' and '@octabits-io/flow' are used by the HTTP glue
+// '@modelcontextprotocol' and 'octaflow' are used by the HTTP glue
 // module but confined per-file (see SINGLE_FILE_VENDORS): only the
 // `mcp.ts` / `flow.ts` factories may touch them (optional peers).
 //
@@ -40,7 +40,7 @@ const APP_MODULES = ['hono', 'queue', 'storage', 'mail', 'zitadel'];
 // emitted .d.ts.
 const BANNED_VENDORS = ['elysia', 'elysia-mcp', 'elysia-rate-limit', '@elysiajs', '@sinclair/typebox'];
 const HONO_VENDORS =['hono', '@hono/zod-validator', '@hono/mcp', 'hono-openapi', '@hono/standard-validator', '@standard-community/standard-json', '@standard-community/standard-openapi'];
-const GLUE_SHARED_VENDORS = ['@modelcontextprotocol', '@octabits-io/flow'];
+const GLUE_SHARED_VENDORS = ['@modelcontextprotocol', 'octaflow'];
 const QUEUE_VENDORS = ['pg-boss'];
 const STORAGE_VENDORS = ['@aws-sdk'];
 const MAIL_VENDORS = ['nodemailer', 'node-mailjet'];
@@ -96,7 +96,7 @@ function matches(f, name) {
 //
 //   1. Vendor plugins are confined to single files: `@hono/mcp` may only be
 //      imported by hono/mcp.ts, `hono-openapi` only by hono/openapi.ts, and
-//      the MCP SDK / `@octabits-io/flow` only by hono's mcp.ts / flow.ts.
+//      the MCP SDK / `octaflow` only by hono's mcp.ts / flow.ts.
 //   2. Every non-test source file in a glue module must import its framework
 //      vendor. A file that doesn't is framework-agnostic and belongs in
 //      src/server (or another base module) — that's how config/run/swagger/
@@ -108,7 +108,7 @@ const SINGLE_FILE_VENDORS = {
   '@hono/mcp': ['hono/mcp.ts'],
   'hono-openapi': ['hono/openapi.ts'],
   '@modelcontextprotocol/sdk': ['hono/mcp.ts'],
-  '@octabits-io/flow': ['hono/flow.ts'],
+  'octaflow': ['hono/flow.ts'],
 };
 // Compat re-export files: no framework-vendor import, allowed to stay for import-path stability.
 const GLUE_REEXPORT_FILES = new Set(['hono/index.ts']);

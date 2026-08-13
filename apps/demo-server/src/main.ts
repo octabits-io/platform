@@ -80,7 +80,7 @@ await runServer({
     const dlqStarted = await dlq.start({ pollingIntervalSeconds: 5 });
     if (!dlqStarted.ok) throw new Error(`Failed to start welcome-email DLQ handler: ${dlqStarted.error.message}`);
 
-    // The AI workflow engine (`@octabits-io/flow`) reuses the pool (its tables
+    // The AI workflow engine (`octaflow`) reuses the pool (its tables
     // came up in ensureSchema) and the same pg-boss instance the queue workers
     // run on. The host handed to AI step handlers is a bundle of root
     // singletons — nothing per-step to dispose.

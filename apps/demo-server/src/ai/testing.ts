@@ -14,7 +14,7 @@ import {
   type Dispatcher,
   type DispatchStepPayload,
   type WorkflowStore,
-} from '@octabits-io/flow';
+} from 'octaflow';
 import {
   createAiQuotaService,
   createAiUsageAggregationService,
@@ -23,7 +23,7 @@ import {
   type AiUsageStore,
   type AiUsageRecorder,
   type DailyUsageDelta,
-} from '@octabits-io/flow/ai';
+} from 'octaflow/ai';
 import type { Logger } from '@octabits-io/framework/logger';
 import { createAiEngine, type DemoAiEngine } from './engine.ts';
 import type { AiHost } from './workflows.ts';

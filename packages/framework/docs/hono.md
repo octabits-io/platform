@@ -89,7 +89,7 @@ handlers.
 
 Kept out of the root barrel so their optional peers never load with it:
 
-- **`./hono/flow`** — `createFlowWorkflowRoutes` over an `@octabits-io/flow`
+- **`./hono/flow`** — `createFlowWorkflowRoutes` over an `octaflow`
   engine (list/active/get/snapshot/cancel/resume). No prefix option: mount the
   returned sub-app via `app.route(prefix, …)`.
 - **`./hono/mcp`** — the MCP harness on the official `@hono/mcp`
@@ -138,7 +138,7 @@ older framework release):
 `scripts/check-boundaries.mjs` enforces: `hono`-tier vendors (`hono`,
 `@hono/zod-validator`, `@hono/mcp`) are confined to `src/hono`; `@hono/mcp` only
 in `mcp.ts`; `hono-openapi` only in `openapi.ts`; the `@modelcontextprotocol`
-SDK and `@octabits-io/flow` only in `mcp.ts`/`flow.ts`; and every non-test file
+SDK and `octaflow` only in `mcp.ts`/`flow.ts`; and every non-test file
 in `src/hono` must import a hono-tier vendor — one that doesn't is
 framework-agnostic and belongs in `src/server`.
 

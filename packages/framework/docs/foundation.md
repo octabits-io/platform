@@ -1102,7 +1102,7 @@ cleanup. Scoping is optional (`scope?: { column, value }`); ships a spreadable
 > `@octabits-io/drizzle-test`) was removed — it had no consumers; copy it from
 > git history if you need it.
 > The former `./workflow` module (DAG workflow engine) has been superseded by
-> [`@octabits-io/flow`](../flow) — a standalone durable workflow engine with a
+> [`octaflow`](../flow) — a standalone durable workflow engine with a
 > Postgres store and pg-boss dispatcher. Use that package instead.
 
 ### `@octabits-io/framework/ical`

@@ -38,7 +38,7 @@ There is no root export — every module lives behind a subpath.
 | `./events` `./events/postgres` `./drizzle/event-outbox` `./hono/events` | Two-lane event fan-out: transactional outbox + `pg_notify` (durable, replayable) and inline notifications (ephemeral); LISTEN client, relay, in-process hub, SSE endpoint as a plain fetch handler | [events](./docs/events.md) |
 | `./drizzle/broadcast` | Fire-and-forget broadcast channel over `pg_notify` for cross-process coordination hints (cache invalidation etc.) — at-most-once, Zod-validated, outside the event taxonomy | [events](./docs/events.md) |
 | `./server` `./server/testing` | Framework-agnostic server toolkit: env config, `runServer` + graceful shutdown, swagger options builder, response schemas; structural test-request helpers | [server](./docs/server.md) |
-| `./hono` `./hono/mcp` `./hono/openapi` `./hono/flow` `./hono/events` | Hono middleware & app skeleton (request-scope + bearer-auth middleware, error mapping, rate limit, route-module factory); OpenAPI spec + validation; MCP server harness; `@octabits-io/flow` read/control routes | [hono](./docs/hono.md) |
+| `./hono` `./hono/mcp` `./hono/openapi` `./hono/flow` `./hono/events` | Hono middleware & app skeleton (request-scope + bearer-auth middleware, error mapping, rate limit, route-module factory); OpenAPI spec + validation; MCP server harness; `octaflow` read/control routes | [hono](./docs/hono.md) |
 | `./queue` | pg-boss queue base: lifecycle facade + declarative queue/worker/DLQ trio (Drizzle DLQ-audit store behind `./drizzle/job-audit-store`) | [queue](./docs/queue.md) |
 | `./storage` `./storage/s3` `./storage/postgres` | Namespaced blob storage contract + providers | [storage](./docs/storage.md) |
 | `./mail` `./mail/smtp` `./mail/mailjet` `./mail/brevo` | Mail transport contract + transactional dispatch layer + providers | [mail](./docs/mail.md) |
@@ -85,7 +85,7 @@ rewrite of route and wiring files:
 longer dependencies of this package, and the boundary lint now rejects them
 package-wide. See [hono](./docs/hono.md) for the full surface.
 
-The durable DAG workflow engine [`@octabits-io/flow`](https://github.com/octabits-io/flow)
+The durable DAG workflow engine [`octaflow`](https://github.com/octabits-io/flow)
 remains a separate, standalone package by design.
 
 ## Development

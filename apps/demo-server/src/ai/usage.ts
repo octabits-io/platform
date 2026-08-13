@@ -24,7 +24,7 @@ import type {
   UsageSummaryRow,
   UsageByTypeRow,
   AiUsageCountQuery,
-} from '@octabits-io/flow/ai';
+} from 'octaflow/ai';
 import type { Logger } from '@octabits-io/framework/logger';
 
 export function createAiUsageStore(pool: Pool): AiUsageStore {

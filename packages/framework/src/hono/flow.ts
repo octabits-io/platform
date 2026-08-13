@@ -1,5 +1,5 @@
 /**
- * Hono port of `../elysia/flow` — read-side routes for `@octabits-io/flow`
+ * Hono port of `../elysia/flow` — read-side routes for `octaflow`
  * workflow engines, the framework's HTTP opinions layered over flow's public
  * wire view.
  *
@@ -75,7 +75,7 @@
  * the host app's `registerErrorHandler` — the same arrangement as every other
  * validated route in `./hono`.
  *
- * `@octabits-io/flow` is an OPTIONAL peer — only pulled in by consumers of this
+ * `octaflow` is an OPTIONAL peer — only pulled in by consumers of this
  * `./hono/flow` subpath, keeping the root `./hono` export free of it (the same
  * arrangement as `./hono/mcp` and its MCP peers).
  *
@@ -94,7 +94,7 @@ import {
   type PublicWorkflow,
   type WorkflowStatus,
   type WorkflowWithSteps,
-} from '@octabits-io/flow';
+} from 'octaflow';
 import type { ErrorStatusOverrides, KeyedError } from '../server/errors.ts';
 import { createErrorJson, octValidator } from './errors.ts';
 
