@@ -277,7 +277,7 @@
     "jose": "^6",
     "node-mailjet": "^6",
     "nodemailer": "^7 || ^8 || ^9",
-    "octaflow": ">=0.15.0 <1",
+    "octaflow": "^0.16.0",
     "pg": "^8.22.0",
     "pg-boss": "^12",
     "typescript": "^5 || ^6 || ^7",
