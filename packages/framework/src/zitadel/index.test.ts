@@ -217,6 +217,128 @@ describe("createZitadelManagementClient", () => {
     });
   });
 
+  it("addProjectRole posts the role to the owning org and defaults displayName", async () => {
+    const { requests } = mockFetch([{ match: "/projects/p1/roles", body: {} }]);
+
+    const client = createZitadelManagementClient(config);
+    const result = await client.addProjectRole({
+      projectId: "p1",
+      projectOwnerOrgId: "owner-org",
+      roleKey: "viewer",
+    });
+
+    expect(result).toEqual({ ok: true, value: undefined });
+    expect(requests[0]?.url).toBe("https://auth.example.com/management/v1/projects/p1/roles");
+    expect(requests[0]?.headers.get("x-zitadel-orgid")).toBe("owner-org");
+    expect(requests[0]?.body).toEqual({ roleKey: "viewer", displayName: "viewer", group: "" });
+  });
+
+  it("addProjectRole classifies a duplicate key as already_exists", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("role already exists", { status: 409 })),
+    );
+
+    const client = createZitadelManagementClient(config);
+    const result = await client.addProjectRole({
+      projectId: "p1",
+      projectOwnerOrgId: "owner-org",
+      roleKey: "viewer",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.key).toBe("already_exists");
+  });
+
+  it("listProjectGrants reads grantedRoleKeys, the name the search response uses", async () => {
+    const { requests } = mockFetch([
+      {
+        match: "/grants/_search",
+        body: {
+          result: [
+            { grantId: "pg-1", grantedOrgId: "org-a", grantedRoleKeys: ["admin", "member"] },
+            // Write-side spelling — accepted as a fallback.
+            { grantId: "pg-2", grantedOrgId: "org-b", roleKeys: ["admin"] },
+            // Neither field — a grant with no delegated roles.
+            { grantId: "pg-3", grantedOrgId: "org-c" },
+          ],
+        },
+      },
+    ]);
+
+    const client = createZitadelManagementClient(config);
+    const result = await client.listProjectGrants({
+      projectId: "p1",
+      projectOwnerOrgId: "owner-org",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: [
+        { grantId: "pg-1", grantedOrgId: "org-a", roleKeys: ["admin", "member"] },
+        { grantId: "pg-2", grantedOrgId: "org-b", roleKeys: ["admin"] },
+        { grantId: "pg-3", grantedOrgId: "org-c", roleKeys: [] },
+      ],
+    });
+    expect(requests[0]?.headers.get("x-zitadel-orgid")).toBe("owner-org");
+  });
+
+  it("syncProjectGrant skips the PUT when grantedRoleKeys already match", async () => {
+    const { requests } = mockFetch([
+      { match: "/roles/_search", body: { result: [{ key: "member" }, { key: "admin" }] } },
+      {
+        match: "/grants/_search",
+        body: {
+          result: [
+            { grantId: "pg-1", grantedOrgId: "granted-org", grantedRoleKeys: ["member", "admin"] },
+          ],
+        },
+      },
+    ]);
+
+    const client = createZitadelManagementClient(config);
+    const result = await client.syncProjectGrant({
+      projectId: "p1",
+      projectOwnerOrgId: "owner-org",
+      grantedOrgId: "granted-org",
+    });
+
+    expect(result).toEqual({ ok: true, value: { grantId: "pg-1" } });
+    // The whole point of the fix: an up-to-date grant is two reads and no write.
+    expect(requests.filter((r) => r.method === "PUT")).toHaveLength(0);
+  });
+
+  it("syncProjectGrant PUTs the full role set when the grant is missing one", async () => {
+    const { requests } = mockFetch([
+      {
+        match: "/roles/_search",
+        body: { result: [{ key: "member" }, { key: "admin" }, { key: "viewer" }] },
+      },
+      {
+        match: "/grants/_search",
+        body: {
+          result: [
+            { grantId: "pg-1", grantedOrgId: "granted-org", grantedRoleKeys: ["admin", "member"] },
+          ],
+        },
+      },
+      { match: "/grants/pg-1", body: {} },
+    ]);
+
+    const client = createZitadelManagementClient(config);
+    const result = await client.syncProjectGrant({
+      projectId: "p1",
+      projectOwnerOrgId: "owner-org",
+      grantedOrgId: "granted-org",
+    });
+
+    expect(result).toEqual({ ok: true, value: { grantId: "pg-1" } });
+    const put = requests.find((r) => r.method === "PUT");
+    expect(put?.url).toBe("https://auth.example.com/management/v1/projects/p1/grants/pg-1");
+    expect(put?.body).toEqual({ roleKeys: ["admin", "member", "viewer"] });
+  });
+
   it("returns a classified Result.error instead of throwing on request failure", async () => {
     vi.stubGlobal(
       "fetch",

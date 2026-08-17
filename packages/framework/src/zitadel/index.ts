@@ -61,6 +61,16 @@ export interface ZitadelUserGrantEntry {
 }
 
 /**
+ * One project grant of a project, with the role keys it currently delegates to
+ * the granted org. Returned by {@link listProjectGrants}.
+ */
+export interface ZitadelProjectGrant {
+  grantId: string;
+  grantedOrgId: string;
+  roleKeys: string[];
+}
+
+/**
  * Discriminated error returned by every public method on the Zitadel client.
  *
  * - `not_found` — resource doesn't exist (HTTP 404 or "Member not found" lookup misses).
@@ -259,16 +269,13 @@ export function createZitadelManagementClient({
     projectOwnerOrgId: string;
     grantedOrgId: string;
   }): Promise<Result<{ grantId: string } | null, ZitadelApiError>> {
-    return tryRequest(async () => {
-      const existing = (await withOrg(params.projectOwnerOrgId)
-        .url(`/management/v1/projects/${params.projectId}/grants/_search`)
-        .post({})) as {
-        result?: Array<{ grantId: string; grantedOrgId: string }>;
-      };
-      const match = existing.result?.find((g) => g.grantedOrgId === params.grantedOrgId);
-      if (!match) return { ok: true, value: null };
-      return { ok: true, value: { grantId: match.grantId } };
+    const grants = await listProjectGrants({
+      projectId: params.projectId,
+      projectOwnerOrgId: params.projectOwnerOrgId,
     });
+    if (!grants.ok) return grants;
+    const match = grants.value.find((g) => g.grantedOrgId === params.grantedOrgId);
+    return { ok: true, value: match ? { grantId: match.grantId } : null };
   }
 
   /**
@@ -337,6 +344,74 @@ export function createZitadelManagementClient({
   }
 
   /**
+   * Create a role on a project.
+   *
+   * Not idempotent on its own — Zitadel rejects a duplicate key with
+   * `already_exists`, which callers reconciling a desired role set should treat
+   * as "present" rather than as a failure.
+   *
+   * Must be called with x-zitadel-orgid set to the project's owning org.
+   */
+  async function addProjectRole(params: {
+    projectId: string;
+    projectOwnerOrgId: string;
+    roleKey: string;
+    /** Defaults to `roleKey`. */
+    displayName?: string;
+    /** Optional Zitadel role group; pass nothing for ungrouped roles. */
+    group?: string;
+  }): Promise<Result<void, ZitadelApiError>> {
+    return tryRequest(async () => {
+      await withOrg(params.projectOwnerOrgId)
+        .url(`/management/v1/projects/${params.projectId}/roles`)
+        .post({
+          roleKey: params.roleKey,
+          displayName: params.displayName ?? params.roleKey,
+          group: params.group ?? "",
+        });
+      return { ok: true, value: undefined };
+    });
+  }
+
+  /**
+   * List every project grant of a project, with the role keys each one
+   * currently delegates.
+   *
+   * The grant-search response names this field **`grantedRoleKeys`**; the
+   * `roleKeys` spelling is what the WRITE side takes, and is accepted here only
+   * as a fallback. Reading the wrong name yields an empty role list for every
+   * grant, which reads as "every grant is out of sync" instead of failing —
+   * see {@link syncProjectGrant}.
+   *
+   * Must be called with x-zitadel-orgid set to the project's owning org.
+   */
+  async function listProjectGrants(params: {
+    projectId: string;
+    projectOwnerOrgId: string;
+  }): Promise<Result<ZitadelProjectGrant[], ZitadelApiError>> {
+    return tryRequest(async () => {
+      const data = (await withOrg(params.projectOwnerOrgId)
+        .url(`/management/v1/projects/${params.projectId}/grants/_search`)
+        .post({})) as {
+        result?: Array<{
+          grantId: string;
+          grantedOrgId: string;
+          grantedRoleKeys?: string[];
+          roleKeys?: string[];
+        }>;
+      };
+      return {
+        ok: true,
+        value: (data.result ?? []).map((grant) => ({
+          grantId: grant.grantId,
+          grantedOrgId: grant.grantedOrgId,
+          roleKeys: grant.grantedRoleKeys ?? grant.roleKeys ?? [],
+        })),
+      };
+    });
+  }
+
+  /**
    * Upsert a project grant from the project-owning org to the target org so
    * that its `roleKeys` always equals (all project roles −
    * `platformOnlyRoles`).
@@ -363,12 +438,12 @@ export function createZitadelManagementClient({
         .sort();
 
       // Advisory 10014: x-zitadel-orgid must be the project OWNER when touching its grants.
-      const existing = (await withOrg(params.projectOwnerOrgId)
-        .url(`/management/v1/projects/${params.projectId}/grants/_search`)
-        .post({})) as {
-        result?: Array<{ grantId: string; grantedOrgId: string; roleKeys?: string[] }>;
-      };
-      const match = existing.result?.find((g) => g.grantedOrgId === params.grantedOrgId);
+      const existing = await listProjectGrants({
+        projectId: params.projectId,
+        projectOwnerOrgId: params.projectOwnerOrgId,
+      });
+      if (!existing.ok) return existing;
+      const match = existing.value.find((g) => g.grantedOrgId === params.grantedOrgId);
 
       if (!match) {
         const created = (await withOrg(params.projectOwnerOrgId)
@@ -389,16 +464,17 @@ export function createZitadelManagementClient({
         return { ok: true, value: { grantId: created.grantId } };
       }
 
-      const existingSorted = (match.roleKeys ?? []).slice().sort();
+      const existingSorted = match.roleKeys.slice().sort();
       const unchanged =
         existingSorted.length === desiredRoles.length &&
         existingSorted.every((r, i) => r === desiredRoles[i]);
       if (unchanged) return { ok: true, value: { grantId: match.grantId } };
 
       // Zitadel returns HTTP 400 with "NoChangesFoundc" when the PUT would be a
-      // no-op. This happens when the _search response omits roleKeys but the
-      // actual grant already has the roles we're about to set. Treat it as a
-      // successful no-op rather than a failure.
+      // no-op — a grant that already carries exactly `desiredRoles`. The diff
+      // above normally catches that, so reaching here means the read was stale
+      // (a concurrent sync) or the search omitted the roles entirely. Treat it
+      // as a successful no-op rather than a failure.
       try {
         await withOrg(params.projectOwnerOrgId)
           .url(`/management/v1/projects/${params.projectId}/grants/${match.grantId}`)
@@ -876,6 +952,8 @@ export function createZitadelManagementClient({
     updateHumanUserProfile,
     listUserGrants,
     listProjectRoles,
+    addProjectRole,
+    listProjectGrants,
     syncProjectGrant,
   };
 }
