@@ -1,5 +1,25 @@
 # @octabits-io/framework
 
+## 0.30.0
+
+### Minor Changes
+
+- [`07a7342`](https://github.com/octabits-io/platform/commit/07a7342064de0bd2f784b5f6d3ba48df2f1dbd6a) - mail: expose `baseSubject` on rendered emails
+  
+  `render()` and `buildEmailContent()` now return `baseSubject` alongside
+  `subject` — the template's own subject, before the `"<brand> - "` prefix and
+  the `"[→ …] "` redirect prefix are applied.
+  
+  Consumers that persist a rendered subject as a durable **thread title** (rather
+  than as an envelope header) should switch to `baseSubject`. Storing the branded
+  `subject` and later re-sending under it brands an already-branded string,
+  producing `"Brand - Brand - …"`, and leaks the dev-only redirect prefix into
+  stored data.
+  
+  `RenderedEmail.baseSubject` is optional so snapshots persisted before this
+  release deserialize unchanged; `dispatchRendered()` ignores it and continues to
+  send `subject` verbatim.
+
 ## 0.29.0
 
 ### Minor Changes
