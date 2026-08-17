@@ -76,7 +76,18 @@ export interface SentMailInfo {
 export type SendMailResult = Result<SentMailInfo, MailError>;
 
 export interface RenderedEmail {
+  /** Envelope subject: brand-prefixed, and redirect-prefixed when redirected. */
   subject: string;
+  /**
+   * The template's own subject, before the `"<brand> - "` and `"[→ …] "`
+   * prefixes — what to persist when a caller stores a subject as a durable
+   * *thread title* rather than sending it. Re-sending under a stored `subject`
+   * brands an already-branded string (`"Brand - Brand - …"`).
+   *
+   * Optional so snapshots persisted before this field deserialize unchanged;
+   * `dispatchRendered` ignores it and sends `subject` verbatim.
+   */
+  baseSubject?: string;
   html: string;
   text: string;
   recipients: string[];

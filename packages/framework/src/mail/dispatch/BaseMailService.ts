@@ -188,6 +188,8 @@ export function createBaseMailService<
 
   interface PreparedEmail {
     subject: string;
+    /** Template subject before brand and redirect prefixes. See `EmailContent`. */
+    baseSubject: string;
     html: string;
     text: string;
     recipientsResult: RecipientsResult;
@@ -241,6 +243,7 @@ export function createBaseMailService<
 
     return ok({
       subject: finalSubject,
+      baseSubject: contentResult.value.baseSubject,
       html: contentResult.value.html,
       text: contentResult.value.text,
       recipientsResult: recipientsResult.value,
@@ -401,6 +404,7 @@ export function createBaseMailService<
   function toRendered(prepared: PreparedEmail): RenderedEmail {
     return {
       subject: prepared.subject,
+      baseSubject: prepared.baseSubject,
       html: prepared.html,
       text: prepared.text,
       recipients: prepared.recipientsResult.recipients,

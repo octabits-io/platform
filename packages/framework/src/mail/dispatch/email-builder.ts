@@ -121,6 +121,15 @@ export function applyRedirectSubjectPrefix(
 
 export interface EmailContent {
   subject: string;
+  /**
+   * The subject before `subjectBrand` was prefixed — i.e. what the template
+   * (or `subjectOverride`) actually produced, trimmed.
+   *
+   * Callers that persist a subject as a *thread title* rather than an envelope
+   * header want this one: re-sending under a stored `subject` would brand an
+   * already-branded string, yielding `"Brand - Brand - …"`.
+   */
+  baseSubject: string;
   html: string;
   text: string;
 }
@@ -167,7 +176,12 @@ export async function buildEmailContent<TParams, TOverrides>(
   const textContentResult = await template.buildTextContent(params, overrides);
   if (!textContentResult.ok) return textContentResult;
 
-  return ok({ subject, html: htmlContentResult.value, text: textContentResult.value });
+  return ok({
+    subject,
+    baseSubject: trimmedBase,
+    html: htmlContentResult.value,
+    text: textContentResult.value,
+  });
 }
 
 // ============================================================================

@@ -852,6 +852,31 @@ describe('createBaseMailService', () => {
       expect(result.value.recipients).toEqual(['customer@example.com']);
       expect(result.value.bcc).toEqual(['admin@acme.example']);
     });
+
+    it('exposes baseSubject free of the brand and redirect prefixes', async () => {
+      const service = createBaseMailService<Params, TestOverrides, TestServerConfig>({
+        platformFromAddress: 'noreply@example.com',
+        templates: registry({ 'user-mail': mockBuilder({ subject: 'Your reservation' }) }),
+        configReader: configReaderOf({
+          scopeName: 'Acme',
+          subjectBrand: 'Acme',
+          deliveryMode: 'notifications_only',
+          notificationsAddress: 'admin@acme.example',
+        }),
+        transport,
+        logger: mockLogger,
+      });
+
+      const result = await service.render(userParams());
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      // The envelope carries both prefixes...
+      expect(result.value.subject).toBe('[→ customer@example.com] Acme - Your reservation');
+      // ...while baseSubject stays the bare template subject. Callers persisting
+      // a thread title use this one; storing `subject` and re-sending under it
+      // would yield "Acme - Acme - Your reservation".
+      expect(result.value.baseSubject).toBe('Your reservation');
+    });
   });
 
   describe('dispatchRendered()', () => {
