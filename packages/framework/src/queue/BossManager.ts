@@ -1,4 +1,5 @@
 import { PgBoss } from 'pg-boss';
+import type { ConstructorOptions } from 'pg-boss';
 import { ok, err } from '../result/index.ts';
 import type { Result } from '../result/index.ts';
 import type { Logger } from '../logger/index.ts';
@@ -27,12 +28,52 @@ export interface BossManagerConfig {
   maintenanceIntervalSeconds?: number;
   /** Queue-state monitor interval in seconds (default: 60) */
   monitorIntervalSeconds?: number;
+  /**
+   * What this process does with the queue (default: `'full'`).
+   *
+   * - `'full'` — the process consumes and/or is long-lived, so it also owns
+   *   schema migration, maintenance supervision and the cron timekeeper.
+   * - `'producer'` — the process only *sends*. See {@link PRODUCER_OPTIONS}.
+   *
+   * `send()` needs a *started* boss either way: pg-boss owns its own pool and
+   * opens it in `start()`. The role only decides how much of pg-boss's
+   * background machinery that start brings up with it.
+   */
+  role?: 'full' | 'producer';
 }
+
+/**
+ * pg-boss options for a send-only process — one that enqueues and exits (a
+ * cron pod, a one-shot CLI) or that never runs a worker.
+ *
+ * Every flag here disables *background* work that only a consumer or a
+ * long-lived process should be doing:
+ *
+ * - `supervise: false` — no maintenance/archive sweeps and no queue monitor.
+ *   Those are cluster-wide chores; a pod that lives ten seconds contributes
+ *   nothing but load, and the long-running processes already do them.
+ * - `schedule: false` — no cron timekeeper. A producer does not own schedules.
+ * - `migrate: false` — the decisive one. With `migrate` on, *every* start is a
+ *   potential DDL run; ephemeral producers would race the long-lived processes
+ *   over the same schema on every tick. Off, pg-boss instead *checks* the
+ *   installation and throws `pg-boss is not installed` / `pg-boss database
+ *   requires migrations` — which is what a producer wants: it never migrates,
+ *   and it fails loudly rather than proceeding against a schema it cannot use.
+ *
+ * Consequence worth stating plainly: a `'producer'` process cannot bootstrap a
+ * fresh database. Something with `role: 'full'` must have started at least once
+ * first.
+ */
+const PRODUCER_OPTIONS = {
+  supervise: false,
+  schedule: false,
+  migrate: false,
+} as const satisfies Partial<ConstructorOptions>;
 
 export interface BossManager {
   /** Get the pg-boss instance */
   getBoss(): PgBoss;
-  /** Start pg-boss (creates tables, starts maintenance) */
+  /** Start pg-boss — opens the pool, and under `role: 'full'` also creates/migrates tables and starts maintenance */
   start(): Promise<void>;
   /** Stop pg-boss gracefully */
   stop(): Promise<void>;
@@ -64,13 +105,18 @@ export function createBossManager(config: BossManagerConfig): BossManager {
     schema = 'pgboss',
     maintenanceIntervalSeconds = 60,
     monitorIntervalSeconds = 60,
+    role = 'full',
   } = config;
 
   const boss = new PgBoss({
     connectionString,
     schema,
+    // Harmless under `'producer'` — the subsystems these tune are never
+    // started — but kept unconditional so the two roles differ in exactly the
+    // flags PRODUCER_OPTIONS names and nothing else.
     maintenanceIntervalSeconds,
     monitorIntervalSeconds,
+    ...(role === 'producer' ? PRODUCER_OPTIONS : {}),
   });
 
   // Log pg-boss events
@@ -79,9 +125,26 @@ export function createBossManager(config: BossManagerConfig): BossManager {
   });
 
   async function start(): Promise<void> {
-    logger.info('Starting pg-boss...');
-    await boss.start();
-    logger.info('pg-boss started');
+    logger.info('Starting pg-boss...', { role });
+    try {
+      await boss.start();
+    } catch (error) {
+      // Under `'producer'` the start is a *check*, so pg-boss's own message
+      // ("pg-boss is not installed") describes a state this process is not
+      // allowed to fix — and reads like a bug rather than a deployment order
+      // problem. Say what the caller has to do instead, and keep the original
+      // as the `cause`.
+      if (role === 'producer' && error instanceof Error) {
+        throw new Error(
+          `pg-boss cannot start with role 'producer': ${error.message}. ` +
+            "A producer never installs or migrates the schema — run a process with role 'full' " +
+            'against this database first.',
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+    logger.info('pg-boss started', { role });
   }
 
   async function stop(): Promise<void> {
