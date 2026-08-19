@@ -268,16 +268,17 @@ describe('createFlowWorkflowRoutes (hono)', () => {
       input: {}, output: null, error: null, entityRef: null, idempotencyKey: null,
       parentWorkflowId: null, parentStepId: null, totalSteps: 1, completedSteps: 0,
       failedSteps: 0, metadata: null, createdAt: 'c', startedAt: null, completedAt: null,
+      deadlineAt: null,
       steps: [
         {
           id: 10, workflowId: 1, key: 'fanout', type: 'map', status: 'mapping',
           dependencies: [], input: null, output: null, error: null, metadata: null,
-          attempts: 1, parentStepId: null, startedAt: null, completedAt: null,
+          attempts: 1, parentStepId: null, heartbeatAt: null, startedAt: null, completedAt: null,
         },
         {
           id: 11, workflowId: 1, key: 'fanout#0', type: 'map-item', status: 'running',
           dependencies: [], input: null, output: null, error: null, metadata: null,
-          attempts: 1, parentStepId: 10, startedAt: null, completedAt: null,
+          attempts: 1, parentStepId: 10, heartbeatAt: null, startedAt: null, completedAt: null,
         },
       ],
     };
@@ -312,6 +313,7 @@ describe('createFlowWorkflowRoutes (hono)', () => {
       input: {}, output: null, error: null, entityRef: null, idempotencyKey: null,
       parentWorkflowId: null, parentStepId: null, totalSteps: 1, completedSteps: 1,
       failedSteps: 0, metadata: null, createdAt: 'c', startedAt: null, completedAt: null,
+      deadlineAt: null,
       steps: [],
     };
     const stub: FlowEngineReader = {

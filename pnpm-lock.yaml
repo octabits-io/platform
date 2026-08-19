@@ -231,8 +231,8 @@ importers:
         specifier: ^9.0.5
         version: 9.0.5
       octaflow:
-        specifier: ^0.16.0
-        version: 0.16.0(@ai-sdk/provider@4.0.7)(ai@7.0.66(zod@4.4.3))(pg-boss@12.27.0)(pg@8.23.0)(typescript@7.0.2)(zod@4.4.3)
+        specifier: ^0.17.0
+        version: 0.17.0(@ai-sdk/provider@4.0.7)(ai@7.0.66(zod@4.4.3))(pg-boss@12.27.0)(pg@8.23.0)(typescript@7.0.2)(zod@4.4.3)
       pg:
         specifier: ^8.23.0
         version: 8.23.0
@@ -5015,6 +5015,26 @@ packages:
 
   octaflow@0.16.0:
     resolution: {integrity: sha512-EM6GW0hQ81DSQeGIVyH2/u5/ue9i8kX2y83dpv5xgB6huH2O3D9SIifj4ev+qphonNm0KI7WBL+I6Zf/bfZAIA==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      '@ai-sdk/provider': ^4.0.0
+      ai: ^7.0.0
+      pg: ^8.0.0
+      pg-boss: ^12.21.0
+      typescript: ^5 || ^6 || ^7
+      zod: ^4.0.0
+    peerDependenciesMeta:
+      '@ai-sdk/provider':
+        optional: true
+      ai:
+        optional: true
+      pg:
+        optional: true
+      pg-boss:
+        optional: true
+
+  octaflow@0.17.0:
+    resolution: {integrity: sha512-N9yT3caup7lxc5W2lT0rIzd8iRUIs3L94lqAO0ClxjbvTrNIh97jBesffKE2VDZGWjAqvXAkJNMBT1k8H3W7RA==}
     engines: {node: '>=22'}
     peerDependencies:
       '@ai-sdk/provider': ^4.0.0
@@ -11990,6 +12010,16 @@ snapshots:
   obug@2.1.4: {}
 
   octaflow@0.16.0(@ai-sdk/provider@4.0.7)(ai@7.0.66(zod@4.4.3))(pg-boss@12.27.0)(pg@8.23.0)(typescript@7.0.2)(zod@4.4.3):
+    dependencies:
+      typescript: 7.0.2
+      zod: 4.4.3
+    optionalDependencies:
+      '@ai-sdk/provider': 4.0.7
+      ai: 7.0.66(zod@4.4.3)
+      pg: 8.23.0
+      pg-boss: 12.27.0
+
+  octaflow@0.17.0(@ai-sdk/provider@4.0.7)(ai@7.0.66(zod@4.4.3))(pg-boss@12.27.0)(pg@8.23.0)(typescript@7.0.2)(zod@4.4.3):
     dependencies:
       typescript: 7.0.2
       zod: 4.4.3
