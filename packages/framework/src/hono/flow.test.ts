@@ -94,7 +94,7 @@ function createHarness(): Harness {
     async drain() {
       while (queue.length > 0) {
         const job = queue.shift()!;
-        await engine.executeStep(job.workflowId, job.stepId);
+        await engine.handleStepJob(job);
       }
     },
     async start(workflow, input, options) {

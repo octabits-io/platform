@@ -91,7 +91,9 @@ export function createAiRuntime(deps: CreateAiRuntimeDeps): AiRuntime {
     partitionKey: AI_PARTITION_KEY,
     async start() {
       await stepWorker.start(async (payload) => {
-        await engine.executeStep(payload.workflowId, payload.stepId);
+        // `handleStepJob`, not `executeStep`: since 0.17 the queue also carries
+        // wait-deadline jobs, and only the payload's `kind` tells them apart.
+        await engine.handleStepJob(payload);
       });
       await dlqWorker.start(async (payload) => {
         await engine.handleStepExhausted(payload.workflowId, payload.stepId, 'step retries exhausted');

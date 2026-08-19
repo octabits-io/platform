@@ -193,7 +193,7 @@ export function createInMemoryAiRuntime(deps: CreateInMemoryAiRuntimeDeps): InMe
     async drain() {
       while (queue.length > 0) {
         const job = queue.shift()!;
-        await engine.executeStep(job.workflowId, job.stepId);
+        await engine.handleStepJob(job);
       }
     },
   };

@@ -191,7 +191,7 @@ the engine derives that from their dependencies.
 | `./ai` — `defineAiStep`, `buildAiWorkflow`, `createAiWorkflowHooks`, `createCostEstimator`, `createAiQuotaService`, `createAiUsageAggregationService` | [`ai/workflows.ts`](./src/ai/workflows.ts), [`ai/engine.ts`](./src/ai/engine.ts), [`ai/runtime.ts`](./src/ai/runtime.ts); the consumer-SQL `AiUsageStore`/`AiUsageRecorder` seams live in [`ai/usage.ts`](./src/ai/usage.ts) over the `ai_*` tables | ✅ |
 | `./store-pg` — `createPgWorkflowStore`, `flowStoreDdl` | [`ai/runtime.ts`](./src/ai/runtime.ts); DDL applied in [`db/ddl.ts`](./src/db/ddl.ts) next to `objectStorageDdl()` | ✅ |
 | `./dispatcher-pgboss` — dispatcher + step/DLQ workers | [`ai/runtime.ts`](./src/ai/runtime.ts) — on the **same** pg-boss instance `BossManager` owns (`boss.getBoss()`) | ✅ |
-| Not covered | `createPgStepGate`/`flowGateDdl` (global concurrency/rate gates), `createPgEventSink`/`flowEventDdl` (run-history timeline), `defineWaitStep`/`defineMapStep`/`defineSubWorkflowStep`/saga compensation, `createPgBossScheduler` (cron starts), `recoverStuckWorkflows` sweeps — the flow repo's `examples/` cover these | — |
+| Not covered | `createPgStepGate`/`flowGateDdl` (global concurrency/rate gates), `createPgEventSink`/`flowEventDdl` (run-history timeline), `defineWaitStep`/`defineMapStep`/`defineSubWorkflowStep`/saga compensation, `createPgBossScheduler` (cron starts), `recoverStuckWorkflows` sweeps, 0.17's `when` guards/`join: 'any'`, wait/workflow deadlines, step heartbeats (`heartbeatTimeoutMs`), and `retryWorkflow` — the flow repo's `examples/` cover these | — |
 
 **The model is `MockLanguageModelV4` from `ai/test`** ([`ai/model.ts`](./src/ai/model.ts)) —
 the AI SDK's scripted in-memory implementation of the same `LanguageModelV4`
