@@ -83,7 +83,7 @@
     "@octabits-io/framework": "workspace:^",
     "date-fns": "^4.4.0",
     "oidc-client-ts": "^3.5.0",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "vue": "^3.5.41",
     "zod": "^4.4.3"
   },
