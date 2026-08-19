@@ -49,4 +49,9 @@ describe('createClientIpMiddleware', () => {
     app.get('/', (c) => c.json({ clientIp: c.get('clientIp') }));
     expect(await resolvedIp(app)).toBe('unknown');
   });
+
+  // The on-Bun conninfo-failure branch needs `import('hono/bun')` to RESOLVE,
+  // which it cannot do here — see `./client-ip-bun-conninfo.test.ts`, which
+  // mocks the module in a file of its own so these tests keep exercising the
+  // genuine off-Bun path.
 });
