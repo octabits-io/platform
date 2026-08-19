@@ -114,19 +114,48 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
 
   // Create the queue with deadLetter configuration on first use
   let queueCreated = false;
-  async function ensureQueue(): Promise<void> {
+  let ensureInFlight: Promise<void> | undefined;
+
+  /**
+   * Throwing, memoized ensure step — the internal form. Callers below already
+   * sit inside a try/catch that maps to `queue_error`; the public
+   * {@link ensureQueue} wraps this for callers that don't.
+   */
+  async function ensureQueueOnce(): Promise<void> {
     if (queueCreated) return;
 
-    // Create/sync the DLQ first (must exist before referencing it), then the
-    // main queue with its deadLetter reference.
-    await ensureQueueSynced(boss, dlq, { retryLimit: 0 }); // DLQ jobs should not retry
-    await ensureQueueSynced(boss, name, {
-      retryLimit,
-      retryDelay,
-      expireInSeconds,
-      deadLetter: dlq,
+    // Dedupe concurrent first calls: an explicit ensureQueue() at boot racing
+    // the first enqueue() would otherwise run the DDL twice. Cleared on settle
+    // so a failed ensure is retried rather than cached as a rejected promise.
+    ensureInFlight ??= (async () => {
+      // Create/sync the DLQ first (must exist before referencing it), then the
+      // main queue with its deadLetter reference.
+      await ensureQueueSynced(boss, dlq, { retryLimit: 0 }); // DLQ jobs should not retry
+      await ensureQueueSynced(boss, name, {
+        retryLimit,
+        retryDelay,
+        expireInSeconds,
+        deadLetter: dlq,
+      });
+      queueCreated = true;
+    })().finally(() => {
+      ensureInFlight = undefined;
     });
-    queueCreated = true;
+
+    await ensureInFlight;
+  }
+
+  async function ensureQueue(): Promise<Result<void, QueueError>> {
+    try {
+      await ensureQueueOnce();
+      return ok(undefined);
+    } catch (error) {
+      return err({
+        key: 'queue_error',
+        message: error instanceof Error ? error.message : 'Unknown error ensuring queue',
+        queue: name,
+      });
+    }
   }
 
   async function enqueue(payload: TPayload): Promise<Result<QueuedJob, EnqueueError>> {
@@ -137,7 +166,7 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
         return err(payloadValidationError(validation.error));
       }
 
-      await ensureQueue();
+      await ensureQueueOnce();
       const jobId = await boss.send(name, validation.data, sendOptions);
 
       if (!jobId) {
@@ -175,7 +204,7 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
     }
 
     try {
-      await ensureQueue();
+      await ensureQueueOnce();
 
       // `perJobResults` acks each job individually — a failing job never fails
       // (and re-runs) batch-mates whose handlers already succeeded.
@@ -274,7 +303,7 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
         return err(payloadValidationError(validation.error));
       }
 
-      await ensureQueue();
+      await ensureQueueOnce();
       await boss.schedule(name, cron, validation.data, { ...sendOptions, key: scheduleName });
       return ok(undefined);
     } catch (error) {
@@ -299,6 +328,7 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
 
   return {
     enqueue,
+    ensureQueue,
     startWorker,
     schedule,
     stop,

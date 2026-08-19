@@ -125,6 +125,54 @@ describe('defineQueue — enqueuer', () => {
     boss = createMockBoss();
   });
 
+  it('exposes the queue-ensure step on its own, and memoizes it', async () => {
+    // For the producer that enqueues through a connection it does not own: the
+    // queue has to exist before the send, but creating it is DDL and must not
+    // ride the caller's transaction.
+    const { ensureQueue } = defineTestQueue().createEnqueuer({ boss: boss as unknown as PgBoss });
+
+    const result = await ensureQueue();
+    expect(result.ok).toBe(true);
+
+    // DLQ first, then the main queue pointing at it — no job sent.
+    expect(boss.createQueue).toHaveBeenNthCalledWith(1, 'email-dlq', { retryLimit: 0 });
+    expect(boss.createQueue).toHaveBeenNthCalledWith(
+      2,
+      'email',
+      expect.objectContaining({ deadLetter: 'email-dlq' }),
+    );
+    expect(boss.send).not.toHaveBeenCalled();
+
+    await ensureQueue();
+    expect(boss.createQueue).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns a queue_error Result instead of throwing when the ensure fails', async () => {
+    boss.createQueue.mockRejectedValueOnce(new Error('permission denied for schema pgboss'));
+    const { ensureQueue } = defineTestQueue().createEnqueuer({ boss: boss as unknown as PgBoss });
+
+    const result = await ensureQueue();
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.key).toBe('queue_error');
+    expect(result.error.message).toContain('permission denied');
+    expect(result.error.queue).toBe('email');
+
+    // A failed ensure is not cached — the next call retries the DDL.
+    const retry = await ensureQueue();
+    expect(retry.ok).toBe(true);
+  });
+
+  it('runs the ensure once when concurrent first calls race', async () => {
+    const { ensureQueue } = defineTestQueue().createEnqueuer({ boss: boss as unknown as PgBoss });
+
+    const results = await Promise.all([ensureQueue(), ensureQueue(), ensureQueue()]);
+
+    expect(results.every((r) => r.ok)).toBe(true);
+    expect(boss.createQueue).toHaveBeenCalledTimes(2); // DLQ + main queue, not 6
+  });
+
   it('enqueues a valid payload and returns the job id + queue', async () => {
     const { enqueue } = defineTestQueue().createEnqueuer({ boss: boss as unknown as PgBoss });
     const result = await enqueue(validPayload);

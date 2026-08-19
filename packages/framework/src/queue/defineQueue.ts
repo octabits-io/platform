@@ -162,10 +162,11 @@ export interface QueueDefinition<
   config: QueueDomainConfig<TPayload>;
   /** The Zod schema */
   schema: z.ZodType<TPayload>;
-  /** Factory for a scoped enqueuer (enqueue + schedule) */
+  /** Factory for a scoped enqueuer (enqueue + schedule + the queue-ensure step) */
   createEnqueuer: (deps: { boss: PgBoss }) => {
     enqueue: QueueDomain<TPayload>['enqueue'];
     schedule: QueueDomain<TPayload>['schedule'];
+    ensureQueue: QueueDomain<TPayload>['ensureQueue'];
   };
   /** Factory for the worker (needs boss + logger) */
   createWorker: (deps: { boss: PgBoss; logger: Logger }) => {
@@ -230,6 +231,7 @@ export function defineQueue<
     return {
       enqueue: domain.enqueue,
       schedule: domain.schedule,
+      ensureQueue: domain.ensureQueue,
     };
   }
 

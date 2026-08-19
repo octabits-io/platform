@@ -138,7 +138,7 @@ const emailQueue = defineQueue<EmailJob>({
 
 // Wire the three factories against a shared pg-boss + your scope factory.
 const boss = manager.getBoss();
-const { enqueue, schedule } = emailQueue.createEnqueuer({ boss });
+const { enqueue, schedule, ensureQueue } = emailQueue.createEnqueuer({ boss });
 const worker = emailQueue.createWorker({ boss, logger });
 const dlq = emailQueue.createDlqHandler({ boss, createSystemScope, logger });
 
@@ -146,6 +146,35 @@ await enqueue({ scopeKey: 't1', to: 'guest@example.com' });
 await worker.startWorker({ createSystemScope });
 await dlq.start();
 ```
+
+### Enqueueing inside someone else's transaction
+
+`enqueue` and `startWorker` create the queue and its DLQ on first use, so an
+ordinary producer never touches `ensureQueue` — it is exposed for the one
+producer that cannot rely on that.
+
+That producer writes its job through a connection it does not own: a `send`
+issued on an already-open transaction (pg-boss's `SendOptions.db`), so that the
+job and the state change that produced it commit together or not at all.
+Creating a queue is DDL and must never ride that transaction — a rollback would
+undo it, and its locks could outlive the send. Such a caller ensures the queue
+on the pool first, then sends:
+
+```ts
+const ensured = await ensureQueue(); // on the pool, outside the transaction
+if (!ensured.ok) return ensured;
+
+await db.transaction(async (tx) => {
+  await tx.insert(orders).values(order);
+  // Same transaction as the write above — the job is only visible if it commits.
+  await boss.send('email', payload, { ...sendOptions, db: txExecutor(tx) });
+});
+```
+
+`ensureQueue` is memoized per enqueuer: repeated calls after the first are free,
+concurrent first calls share a single run, and a failed ensure is not cached, so
+the next call retries. Like every other method here it returns a `Result` —
+a `queue_error` on failure, never a throw.
 
 The scope seam (`QueueScope` / `QueueScopeFactory`) is intentionally narrow —
 `resolve(key)` + `dispose()` — and is structurally compatible with

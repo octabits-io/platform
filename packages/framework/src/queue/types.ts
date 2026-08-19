@@ -124,6 +124,20 @@ export interface QueueDomain<TPayload extends BaseJobPayload> {
   /** Enqueue a job for processing */
   enqueue(payload: TPayload): Promise<Result<QueuedJob, EnqueueError>>;
   /**
+   * Create the queue and its DLQ if they do not exist yet, and sync their
+   * settings. Memoized per domain — repeated calls after the first are free,
+   * and concurrent first calls share one run. A failed ensure is not cached.
+   *
+   * {@link enqueue} and {@link startWorker} already call this, so a normal
+   * producer never needs it. It is public for the caller that enqueues through
+   * a connection it does not own — a job written inside someone else's
+   * transaction, so that the job and the state change that produced it commit
+   * together. Creating a queue is DDL and must never ride that transaction: a
+   * rollback would undo it, and its locks could outlive the send. Call this
+   * first, on the pool, then send.
+   */
+  ensureQueue(): Promise<Result<void, QueueError>>;
+  /**
    * Start the worker to process jobs.
    *
    * A domain runs at most one worker: calling this while a worker is already
