@@ -266,6 +266,19 @@ is exactly the constraint that makes this app necessary, and it does not affect
 `demo-web` (pnpm gives it its own TS 5.9.3). Noted so nobody "fixes" it by
 downgrading the root.
 
+> **Gone as of `@nuxt/ui` 4.11.0 (2026-08-23) — upstream widened the peer, no
+> change here.** 4.11.0 declares `typescript@"^5.6.3 || ^6.0.0 || ^7.0.0"`, so
+> the kit's copy resolving the root's TS 7 now satisfies it and `pnpm install`
+> is quiet. A `pnpm dedupe` in the same batch additionally collapsed the kit
+> onto `demo-web`'s 4.11.0; the kit's peer *specifier* stays the deliberately
+> wide `^4`, so nothing consumer-facing moved. Two things did **not** change,
+> and the warning's disappearance must not be read as either: the root TS 7 vs.
+> `demo-web` TS 6 split is still real, and pnpm still keys a separate `@nuxt/ui`
+> instance per peer set because of it — that is the mechanism behind §9, so
+> `vite.resolve.dedupe` stays load-bearing in `nuxt.config.ts`. This app is
+> still necessary for exactly the reason the finding gives; only the cosmetic
+> warning went away.
+
 ### 7. Three bugs that only a browser could find
 
 The first click-through found three defects that `typecheck`, `build`, and

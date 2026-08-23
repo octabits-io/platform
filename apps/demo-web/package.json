@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@internationalized/date": "^3.12.3",
-    "@nuxt/ui": "^4.10.0",
+    "@nuxt/ui": "^4.11.0",
     "@octabits-io/nuxt-ui-kit": "workspace:*",
     "@pinia/nuxt": "^1.0.2",
     "date-fns": "^4.4.0",
@@ -22,13 +22,13 @@
     "oidc-client-ts": "^3.5.0",
     "pinia": "^4.0.3",
     "vue": "^3.5.41",
-    "vue-i18n": "^11.4.8",
+    "vue-i18n": "^11.4.9",
     "vue-router": "^5.2.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@octabits-io/demo-server": "workspace:*",
     "typescript": "^6.0.3",
-    "vue-tsc": "^3.3.10"
+    "vue-tsc": "^3.3.11"
   }
 }
