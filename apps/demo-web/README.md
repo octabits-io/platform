@@ -359,8 +359,13 @@ is two physical copies of the UI stack:
 
 | Resolver | Instance | Peer-hashed against |
 | --- | --- | --- |
-| `packages/nuxt-ui-kit` | `.pnpm/@nuxt+ui@4.9.0_00acaae4…` | typescript **7.0.2** (root) |
-| `apps/demo-web` | `.pnpm/@nuxt+ui@4.9.0_04b1a366…` | typescript **5.9.3** (this app's pin) |
+| `packages/nuxt-ui-kit` | `.pnpm/@nuxt+ui@4.11.0_4e5c4731…` | typescript **7.0.2** (root) |
+| `apps/demo-web` | `.pnpm/@nuxt+ui@4.11.0_1d64ecb8…` | typescript **6.0.3** (this app's pin) |
+
+(Versions current as of 2026-08-23. The bug was originally found on `@nuxt/ui`
+4.9.0 with this app pinned to TS 5.9.3; both have moved since, the split has
+not. The instance hashes churn on unrelated bumps — re-derive them with
+`ls node_modules/.pnpm | grep @nuxt+ui` rather than trusting these.)
 
 `typescript` is a peer of `@nuxt/ui`/`reka-ui`, so pnpm keys a separate instance
 per peer set. Because the kit ships components as **source**, this app's Vite
@@ -373,9 +378,18 @@ Fixed with `vite.resolve.dedupe: ['vue', 'vue-router', '@nuxt/ui', 'reka-ui']`
 in `nuxt.config.ts`. **This is a workspace artifact, not a kit defect**: on npm,
 `@nuxt/ui` is an optional *peer* of the kit, so a real consumer installs exactly
 one copy. It is caused here by the very TypeScript split that makes this app
-necessary (root TS 7 vs. this app's TS 5.9.3 for `vue-tsc`). Worth knowing
+necessary (root TS 7 vs. this app's TS 6 for `vue-tsc`). Worth knowing
 because it hits **any** source-shipped SFC that injects provider context —
 `ConfirmDialog` survives only because `UModal` needs no such injection.
+
+> **Still live as of 2026-08-23 — verified, not assumed.** A dependency sweep
+> that bumped `@nuxt/ui` to 4.11.0 and ran `pnpm dedupe` put both resolvers on
+> the *same version*, which is easy to misread as "the two copies are gone".
+> They are not: `typescript` is still a peer, the root TS 7 vs. this app's TS 6
+> split still holds, and pnpm still keys two separate instances (hashes above).
+> `vite.resolve.dedupe` remains load-bearing. Retire this finding only when the
+> TS split itself goes away — i.e. when `vue-tsc` runs on the root's TypeScript
+> and this app stops pinning its own.
 
 ## Verification status
 
