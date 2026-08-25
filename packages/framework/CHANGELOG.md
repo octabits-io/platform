@@ -1,5 +1,40 @@
 # @octabits-io/framework
 
+## 0.33.0
+
+### Minor Changes
+
+- [`99fc21b`](https://github.com/octabits-io/platform/commit/99fc21b5ed172bb86b33522581d2610b6283dd7f) - zitadel: user lifecycle calls and an instance-wide grant index
+  
+  - `deactivateUser` / `reactivateUser` / `deleteUser` — the reversible lock and
+    the irreversible delete, previously absent, so a consumer could revoke a
+    user's grants but never touch the account itself.
+  - `listAllUserGrants()` — every grant on the instance in one pass over the
+    orgs, the inverse index to the per-user `listUserGrants`. Costs `orgs`
+    requests where asking per user costs `users × orgs`. Pages each org's search
+    (the single-org helpers take Zitadel's default page size and stop there), and
+    reports per-org failures in `failedOrgIds` instead of dropping them, so a
+    caller acting on "this user holds no grant" can refuse when the real answer
+    is "we could not ask".
+  - `ZitadelUser.type` — `human` | `machine` | `unknown`. Service accounts hold
+    no project grants by nature, so without this they are indistinguishable from
+    abandoned human accounts to any grant-based staleness test.
+
+### Patch Changes
+
+- [`f1d222d`](https://github.com/octabits-io/platform/commit/f1d222d8b5b3e09ece0be74d77e1ddef7bd28d1c) - queue: keep the queue-ensure step compatible with pg-boss 12.28's nullable queue options
+  
+  pg-boss 12.28 widened `UpdateQueueOptions` so `deadLetter`, `retryDelayMax` and
+  `heartbeatSeconds` accept `null` — the "clear this setting" signal `updateQueue`
+  understands. `createQueue` still takes `Omit<Queue, 'name'>`, where those three
+  are non-nullable, so `ensureQueueSynced` passing one options object to both no
+  longer typechecked.
+  
+  The nulls are now dropped on the create leg only: on a queue that does not exist
+  yet, "clear it" and "never set it" are the same thing, and the `updateQueue` call
+  right after applies the clear for real on an existing queue. No behavior change
+  for any options object without a `null` in it.
+
 ## 0.32.0
 
 ### Minor Changes
