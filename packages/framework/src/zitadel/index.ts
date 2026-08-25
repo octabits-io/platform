@@ -30,7 +30,22 @@ export interface ZitadelUser {
   preferredLanguage: string | null;
   state: string;
   createdAt: Date;
+  /**
+   * Whether this is a person or a service account.
+   *
+   * Zitadel's user search returns both, and they are not interchangeable: a
+   * `machine` user is how an integration authenticates (the PAT this very
+   * client runs on belongs to one), so it holds no project grant and looks
+   * exactly like an abandoned human account to any "has no grants" test.
+   * Discriminated by which sub-object the wire payload carries; `unknown`
+   * when it carries neither, so a caller filtering for deletion can refuse
+   * rather than guess.
+   */
+  type: ZitadelUserType;
 }
+
+/** Which kind of account a {@link ZitadelUser} is. */
+export type ZitadelUserType = "human" | "machine" | "unknown";
 
 /** A project grant held by a user (org membership with roles). */
 export interface ZitadelUserGrant {
@@ -154,6 +169,21 @@ async function tryRequest<T>(
     return { ok: false, error: classifyZitadelError(err) };
   }
 }
+
+/**
+ * Page size for the org-scoped user-grant search. Zitadel's `ListQuery` caps
+ * `limit` at 1000; asking for exactly the cap keeps the common case (an org
+ * with a handful of members) to one request.
+ */
+const GRANT_SEARCH_PAGE_SIZE = 1000;
+
+/**
+ * Hard stop on how far {@link createZitadelManagementClient}'s grant paging
+ * will walk a single org. A runaway loop against a paginated API is worse
+ * than an incomplete answer; nothing in this topology puts a hundred thousand
+ * grants in one org.
+ */
+const GRANT_SEARCH_MAX_TOTAL = 100_000;
 
 const noopLogger: ZitadelLogger = { warn: () => {} };
 
@@ -753,6 +783,7 @@ export function createZitadelManagementClient({
       };
       email?: { email?: string; isVerified?: boolean };
     };
+    machine?: { name?: string; description?: string };
     details?: { creationDate?: string };
   }
 
@@ -772,6 +803,7 @@ export function createZitadelManagementClient({
       preferredLanguage: profile?.preferredLanguage ?? null,
       state: raw.state ?? "USER_STATE_UNSPECIFIED",
       createdAt: new Date(raw.details?.creationDate ?? 0),
+      type: raw.human ? "human" : raw.machine ? "machine" : "unknown",
     };
   }
 
@@ -935,6 +967,133 @@ export function createZitadelManagementClient({
     return { ok: true, value: perOrg.flat() };
   }
 
+  /**
+   * Deactivate a user — Zitadel's reversible lock.
+   *
+   * The account survives with every grant, credential and id intact; it simply
+   * cannot authenticate until {@link reactivateUser}. This is the honest first
+   * move against an account that *looks* abandoned: if the judgement was
+   * wrong, the person says so and one call undoes it, where
+   * {@link deleteUser} would have cost them their identity.
+   *
+   * Idempotency is Zitadel's, not ours: deactivating an already-deactivated
+   * user answers `FAILED_PRECONDITION`, which classifies as `api_error` here
+   * rather than being swallowed — callers that treat "already locked" as
+   * success must check state first.
+   */
+  async function deactivateUser(userId: string): Promise<Result<void, ZitadelApiError>> {
+    return tryRequest(async () => {
+      await api.url(`/v2/users/${userId}/deactivate`).post({});
+      return { ok: true, value: undefined };
+    });
+  }
+
+  /** Undo {@link deactivateUser}, restoring the account's ability to log in. */
+  async function reactivateUser(userId: string): Promise<Result<void, ZitadelApiError>> {
+    return tryRequest(async () => {
+      await api.url(`/v2/users/${userId}/reactivate`).post({});
+      return { ok: true, value: undefined };
+    });
+  }
+
+  /**
+   * Permanently delete a user.
+   *
+   * Irreversible, and it takes the person's identity with it — every grant in
+   * every org, their credentials, their MFA enrolments. A deleted user who
+   * returns is a *new* user: re-inviting them mints a fresh id, so anything
+   * this deployment stored against the old one (preferences, audit trails,
+   * push subscriptions, API keys) no longer points at them.
+   *
+   * Returns `not_found` when the user is already gone, so a caller can report
+   * "already deleted" rather than a failure.
+   */
+  async function deleteUser(userId: string): Promise<Result<void, ZitadelApiError>> {
+    return tryRequest(async () => {
+      await api.url(`/v2/users/${userId}`).delete();
+      return { ok: true, value: undefined };
+    });
+  }
+
+  /**
+   * Every user grant on the instance, in one pass over the orgs — the inverse
+   * index to {@link listUserGrants}.
+   *
+   * Exists because the per-user call costs one HTTP request *per org*: asking
+   * "which of these 500 users holds no grant" one user at a time is
+   * `users × orgs` requests, where this is `orgs`. Any caller enumerating
+   * grants for more than a handful of users wants this instead.
+   *
+   * **Fails soft but says so.** A per-org search that throws is reported in
+   * `failedOrgIds` rather than dropped, because the two readings of a missing
+   * grant are opposites: "this user belongs to nobody" and "we could not ask
+   * that org". A caller about to act destructively on the first reading must
+   * refuse while `failedOrgIds` is non-empty; a caller merely displaying
+   * counts can note the gap and carry on.
+   *
+   * Paged per org, unlike the single-org searches, which take Zitadel's
+   * default page size and silently stop at it.
+   */
+  async function listAllUserGrants(): Promise<
+    Result<{ grants: ZitadelUserGrant[]; failedOrgIds: string[] }, ZitadelApiError>
+  > {
+    const orgsResult = await listOrganizations();
+    if (!orgsResult.ok) return orgsResult;
+    const orgs = orgsResult.value;
+
+    const failedOrgIds: string[] = [];
+
+    const perOrg = await Promise.all(
+      orgs.map(async (org) => {
+        try {
+          const grants: ZitadelUserGrant[] = [];
+          for (let offset = 0; offset < GRANT_SEARCH_MAX_TOTAL; offset += GRANT_SEARCH_PAGE_SIZE) {
+            const data = (await withOrg(org.id)
+              .url("/management/v1/users/grants/_search")
+              .post({
+                query: { offset: String(offset), limit: GRANT_SEARCH_PAGE_SIZE, asc: true },
+              })) as {
+              result?: Array<{
+                id: string;
+                userId: string;
+                orgId: string;
+                orgName?: string;
+                orgDomain?: string;
+                projectId: string;
+                roleKeys?: string[];
+                details?: { creationDate?: string };
+              }>;
+            };
+            const page = data.result ?? [];
+            for (const g of page) {
+              grants.push({
+                grantId: g.id,
+                userId: g.userId,
+                orgId: g.orgId,
+                orgName: g.orgName ?? org.name,
+                orgPrimaryDomain: g.orgDomain ?? org.primaryDomain,
+                projectId: g.projectId,
+                roles: g.roleKeys ?? [],
+                createdAt: new Date(g.details?.creationDate ?? 0),
+              });
+            }
+            if (page.length < GRANT_SEARCH_PAGE_SIZE) break;
+          }
+          return grants;
+        } catch (err) {
+          logger.warn("failed to list user grants for org", {
+            orgId: org.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          failedOrgIds.push(org.id);
+          return [];
+        }
+      }),
+    );
+
+    return { ok: true, value: { grants: perOrg.flat(), failedOrgIds } };
+  }
+
   return {
     listOrgMembers,
     listMembersByProjectGrant,
@@ -951,6 +1110,10 @@ export function createZitadelManagementClient({
     getUserById,
     updateHumanUserProfile,
     listUserGrants,
+    listAllUserGrants,
+    deactivateUser,
+    reactivateUser,
+    deleteUser,
     listProjectRoles,
     addProjectRole,
     listProjectGrants,
