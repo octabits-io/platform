@@ -2,6 +2,7 @@ import type {
   PgBoss,
   JobWithMetadata,
   JobResult,
+  Queue,
   SendOptions,
   UpdateQueueOptions,
 } from 'pg-boss';
@@ -23,6 +24,23 @@ import type {
 
 export interface CreateQueueDomainDeps {
   boss: PgBoss;
+}
+
+/**
+ * Drop the `null`s `updateQueue` accepts but `createQueue` does not.
+ *
+ * pg-boss 12.28 widened {@link UpdateQueueOptions} so `deadLetter`,
+ * `retryDelayMax` and `heartbeatSeconds` take `null` — the "clear this
+ * setting" signal `updateQueue` understands. `createQueue` still takes
+ * `Omit<Queue, 'name'>`, where those three are non-nullable. On a queue that
+ * does not exist yet, "clear it" and "never set it" are the same thing, so the
+ * nulls are dropped here; the `updateQueue` call right after applies the clear
+ * for real on an existing queue.
+ */
+function toCreateQueueOptions(options: UpdateQueueOptions): Omit<Queue, 'name'> {
+  return Object.fromEntries(
+    Object.entries(options).filter(([, value]) => value !== null),
+  ) as Omit<Queue, 'name'>;
 }
 
 /**
@@ -50,7 +68,10 @@ export async function ensureQueueSynced(
   queueName: string,
   options?: UpdateQueueOptions,
 ): Promise<void> {
-  await boss.createQueue(queueName, options);
+  await boss.createQueue(
+    queueName,
+    options ? toCreateQueueOptions(options) : undefined,
+  );
   // updateQueue asserts non-empty options — skip when there is nothing to sync.
   if (options && Object.keys(options).length > 0) {
     await boss.updateQueue(queueName, options);
