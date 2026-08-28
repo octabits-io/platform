@@ -4,10 +4,16 @@ import { ref, computed, watch } from 'vue';
  * Offset-based table pagination: `page`/`itemsPerPage`/`total` state with a
  * derived `offset` and ready-to-spread `queryParams { limit, offset }`.
  * `onPaginationChange` fires whenever page or page size changes (refetch hook).
+ * It may be async — the refetch it triggers almost always is — and the return
+ * value is deliberately ignored rather than awaited: the watcher is a
+ * fire-and-forget notification, not a lifecycle the caller can join. Typing it
+ * `() => void` instead made every async loader passed here a
+ * `no-misused-promises` finding at the call site (18 of them in reynt's
+ * console) for a shape that is correct by design.
  */
 export function usePagination(options: {
   defaultLimit?: number;
-  onPaginationChange?: () => void;
+  onPaginationChange?: () => void | Promise<void>;
 } = {}) {
   const { defaultLimit = 50, onPaginationChange } = options;
 
@@ -31,7 +37,7 @@ export function usePagination(options: {
   }
 
   watch([page, itemsPerPage], () => {
-    onPaginationChange?.();
+    void onPaginationChange?.();
   });
 
   return {
