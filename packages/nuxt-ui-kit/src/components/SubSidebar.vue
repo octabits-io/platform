@@ -58,6 +58,17 @@ watch(
 
 <template>
   <div class="flex h-full w-full flex-col overflow-hidden">
+    <!--
+      The page's name, for anyone not looking at the breadcrumb.
+
+      A split view names itself in the chrome above it, so the header slot no
+      longer repeats the title (it was the breadcrumb's string verbatim, one
+      row down, on fixed chrome that never scrolls away). That is a visual
+      economy, not a semantic one: the page still has a name, and with nothing
+      selected the detail column has no heading of its own to stand in for it.
+    -->
+    <h1 class="sr-only">{{ title }}</h1>
+
     <!-- Page header zone: rendered once (unlike #sidebar), full width above both columns -->
     <div v-if="$slots.header" class="shrink-0">
       <slot name="header" />

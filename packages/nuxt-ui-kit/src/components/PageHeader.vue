@@ -2,7 +2,7 @@
 // Shipped as source: the consumer's Vite compiles this SFC. All imports are
 // explicit — no reliance on the consumer's auto-import configuration.
 // i18n key contract: pageChrome.back (+ PageActionMenu/PageUtilityActions keys).
-import { computed, onBeforeUnmount, onMounted, provide, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref, useSlots } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter, type RouteLocationRaw } from 'vue-router'
 import UButton from '@nuxt/ui/components/Button.vue'
@@ -43,7 +43,12 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   /**
    * `default` = full-width top-of-page header with padding.
-   * `compact` = sits inside a detail panel / sidebar; smaller title + thinner divider.
+   * `compact` = sits inside a detail panel / sidebar; ONE row, and it means it —
+   *             smaller title, the subtitle beside it rather than under it, and
+   *             padding sized to the action buttons instead of to two text
+   *             lines. It used to differ from `default` only in title size and
+   *             still spent `py-4` on a stacked title/subtitle, which on a
+   *             split-pane view is 85px of chrome that never scrolls away.
    * `flush`   = no padding/border (caller wraps it).
    */
   density?: 'default' | 'compact' | 'flush'
@@ -61,6 +66,7 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 const router = useRouter()
+const slots = useSlots()
 
 // Measured content width for PageActions' collapse decision. null until the
 // first observation (treated as wide — the flex-wrap fallback covers it).
@@ -89,7 +95,7 @@ function onBack() {
 const wrapperClass = computed(() => {
   switch (props.density) {
     case 'compact':
-      return 'flex items-center gap-2 flex-wrap border-b border-default px-6 py-4'
+      return 'flex items-center gap-2 flex-wrap border-b border-default px-6 py-2.5'
     case 'flush':
       return 'flex items-center gap-2 flex-wrap'
     case 'default':
@@ -98,7 +104,25 @@ const wrapperClass = computed(() => {
   }
 })
 
-const titleClass = computed(() => props.density === 'compact' ? 'font-display text-lg font-semibold tracking-tight' : 'font-display text-2xl font-semibold tracking-tight')
+const titleClass = computed(() => props.density === 'compact' ? 'font-display text-base font-semibold tracking-tight' : 'font-display text-2xl font-semibold tracking-tight')
+
+/**
+ * Title and subtitle side by side, on `compact` only, and only when this
+ * component is the one rendering them.
+ *
+ * A `#title` slot carries its own layout — the CMS detail panels put an icon
+ * beside a two-line block — and a baseline-aligned flex row would re-align it
+ * against text it does not contain. Slot users keep the plain wrapper they
+ * were laid out against; the change is for the prop path, which is the one
+ * that was stacking.
+ */
+const inlineHeading = computed(() => props.density === 'compact' && !slots.title)
+const headingClass = computed(() => inlineHeading.value
+  ? 'flex min-w-0 flex-wrap items-baseline gap-x-2'
+  : 'min-w-0')
+const subtitleClass = computed(() => inlineHeading.value
+  ? 'text-sm text-muted min-w-0'
+  : 'text-sm text-muted mt-1')
 </script>
 
 <template>
@@ -113,12 +137,15 @@ const titleClass = computed(() => props.density === 'compact' ? 'font-display te
       @click="onBack"
     />
 
-    <div class="min-w-0">
+    <!-- Skipped entirely when there is nothing to head with: a compact band
+         may legitimately carry actions alone (the page title is already in the
+         breadcrumb), and an empty box here would still take the `gap-2`. -->
+    <div v-if="$slots.title || title || subtitle || loading" :class="headingClass">
       <slot name="title">
         <USkeleton v-if="loading" class="h-7 w-40" />
         <h1 v-else-if="title" :class="titleClass">{{ title }}</h1>
       </slot>
-      <p v-if="subtitle && !loading" class="text-sm text-muted mt-1">{{ subtitle }}</p>
+      <p v-if="subtitle && !loading" :class="subtitleClass">{{ subtitle }}</p>
     </div>
 
     <div v-if="$slots.badges" class="flex items-center gap-2">
