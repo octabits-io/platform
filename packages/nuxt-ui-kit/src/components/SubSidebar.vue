@@ -66,8 +66,13 @@ watch(
       row down, on fixed chrome that never scrolls away). That is a visual
       economy, not a semantic one: the page still has a name, and with nothing
       selected the detail column has no heading of its own to stand in for it.
+
+      `headerless` only: without it the rail draws its own visible heading, and
+      a second, invisible one for the same shell is noise. The settings layout
+      nests one of each, which is how that showed up — "Settings" announced
+      twice before "Places".
     -->
-    <h1 class="sr-only">{{ title }}</h1>
+    <h1 v-if="headerless" class="sr-only">{{ title }}</h1>
 
     <!-- Page header zone: rendered once (unlike #sidebar), full width above both columns -->
     <div v-if="$slots.header" class="shrink-0">

@@ -1,5 +1,9 @@
+// The ownership tests mount real components — `getCurrentInstance()` is what
+// identifies a registration's owner, and only a mounted component has one.
+// @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest';
-import { defineComponent, h } from 'vue';
+import { defineComponent, h, nextTick, onUnmounted } from 'vue';
+import { mount } from '@vue/test-utils';
 import { useHelpPanel } from './useHelpPanel.ts';
 
 const stubComponent = defineComponent({ render: () => h('div') });
@@ -69,5 +73,83 @@ describe('useHelpPanel', () => {
     const storage = memoryStorage({ 'app-help': 'true' });
     const panel = useHelpPanel({ storageKey: 'app-help', storage });
     expect(panel.isOpen.value).toBe(true);
+  });
+
+  describe('registration ownership', () => {
+    /**
+     * The navigation interleaving this guards: Vue runs the incoming
+     * component's setup() BEFORE the outgoing component's onUnmounted, so the
+     * calls arrive as register(new) → unregister(old). Deleting by key alone
+     * let the departing page remove its successor's registration.
+     */
+    function pageComponent(panel: ReturnType<typeof useHelpPanel>, key: string) {
+      return defineComponent({
+        setup() {
+          panel.register('detail', [action(key)]);
+          onUnmounted(() => panel.unregister('detail'));
+          return () => h('div');
+        },
+      });
+    }
+
+    it('keeps the incoming page when the outgoing page tears down after it', async () => {
+      const panel = useHelpPanel({ storage: memoryStorage() });
+      panel.setActiveTab('detail');
+
+      const outgoing = mount(pageComponent(panel, 'owners-help'));
+      expect(panel.currentActions.value.map((a) => a.key)).toEqual(['owners-help']);
+
+      // Incoming registers first…
+      const incoming = mount(pageComponent(panel, 'customers-help'));
+      // …then the outgoing one unmounts, as it does on a client-side route change.
+      outgoing.unmount();
+      await nextTick();
+
+      expect(panel.currentActions.value.map((a) => a.key)).toEqual(['customers-help']);
+      expect(panel.hasActions.value).toBe(true);
+
+      incoming.unmount();
+      await nextTick();
+      expect(panel.hasActions.value).toBe(false);
+    });
+
+    it('drops the registration when its owner unmounts with no successor', async () => {
+      const panel = useHelpPanel({ storage: memoryStorage() });
+      panel.setActiveTab('detail');
+
+      const page = mount(pageComponent(panel, 'owners-help'));
+      expect(panel.hasActions.value).toBe(true);
+
+      page.unmount();
+      await nextTick();
+      expect(panel.hasActions.value).toBe(false);
+    });
+
+    it("ignores a stale disposer once another component owns the tab", () => {
+      const panel = useHelpPanel({ storage: memoryStorage() });
+      panel.setActiveTab('detail');
+
+      const first = mount(defineComponent({
+        setup() {
+          const dispose = panel.register('detail', [action('first')]);
+          return { dispose };
+        },
+        render: () => h('div'),
+      }));
+      const dispose = (first.vm as unknown as { dispose: () => void }).dispose;
+
+      mount(pageComponent(panel, 'second'));
+      dispose();
+
+      expect(panel.currentActions.value.map((a) => a.key)).toEqual(['second']);
+    });
+
+    it('removes an unowned registration unconditionally', () => {
+      const panel = useHelpPanel({ storage: memoryStorage() });
+      panel.register('general', [action('faq')]);
+      panel.setActiveTab('general');
+      panel.unregister('general');
+      expect(panel.hasActions.value).toBe(false);
+    });
   });
 });

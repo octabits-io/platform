@@ -117,11 +117,21 @@ const titleClass = computed(() => props.density === 'compact' ? 'font-display te
  * that was stacking.
  */
 const inlineHeading = computed(() => props.density === 'compact' && !slots.title)
+/**
+ * No wrapping, and a subtitle that shrinks before anything else does.
+ *
+ * The wrapper is `flex-wrap`, so without `min-w-0` + `truncate` a long
+ * subtitle keeps its min-content width, wins the line, and pushes the action
+ * cluster onto a second row — a compact band that ends up TALLER than the
+ * stacked one it replaced (observed on the places page: 101px against 85).
+ * Truncating is the right degradation here: `compact` promises one row, and a
+ * subtitle long enough to truncate is help-panel material, not chrome.
+ */
 const headingClass = computed(() => inlineHeading.value
-  ? 'flex min-w-0 flex-wrap items-baseline gap-x-2'
+  ? 'flex min-w-0 items-baseline gap-x-2'
   : 'min-w-0')
 const subtitleClass = computed(() => inlineHeading.value
-  ? 'text-sm text-muted min-w-0'
+  ? 'text-sm text-muted min-w-0 truncate'
   : 'text-sm text-muted mt-1')
 </script>
 
