@@ -1,5 +1,31 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.17.1
+
+### Patch Changes
+
+- [`6c26780`](https://github.com/octabits-io/platform/commit/6c26780d8e9c07181da37275a1c9b791ef8155e4) - `PageHeader` `density="compact"`: a long inline subtitle now truncates instead of pushing the action cluster onto a second row.
+  
+  The wrapper is `flex-wrap`, so a subtitle without `min-w-0` + `truncate` kept its min-content width, won the line, and wrapped the actions below it — a "compact" band that came out taller (101px) than the stacked two-line version it replaced (85px). `compact` promises one row; a subtitle long enough to truncate belongs in a help panel, not in chrome.
+  
+  `SubSidebar`'s visually-hidden `<h1>` now renders only when `headerless`. Without it the rail draws its own visible heading, so a second invisible one for the same shell is noise — a nested settings layout announced "Settings" twice before the page's own name.
+
+- [`6c26780`](https://github.com/octabits-io/platform/commit/6c26780d8e9c07181da37275a1c9b791ef8155e4) - useHelpPanel: a registration now belongs to the component that made it
+  
+  Consumers key help registrations by *surface*, so several pages legitimately
+  share one tab value — an admin console where every flat page registers
+  `'detail'` is the motivating case. On a client-side navigation Vue runs the
+  incoming component's `setup()` before the outgoing one's `onUnmounted`, so the
+  calls arrive as register(new) → unregister(old). Removal was by key alone, so
+  the departing component deleted its successor's registration and the Help
+  trigger disappeared for the rest of the session — every arrival wiped by the
+  page it had just replaced.
+  
+  Removal is now owner-checked, and `register` returns a disposer that removes
+  only its own registration (a stale disposer is a no-op). `unregister(tab)` is
+  unchanged for existing callers; registrations made outside a component have no
+  owner and are still removed unconditionally.
+
 ## 0.17.0
 
 ### Minor Changes
