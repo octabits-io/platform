@@ -29,7 +29,7 @@ export type {
 // Declarative width-aware header actions (renderer: ./components/PageActions.vue;
 // AI trigger primitive: ./components/AiButton.vue)
 export { PAGE_HEADER_WIDTH, PAGE_ACTIONS_COLLAPSE_BELOW } from './components/pageActions.ts';
-export type { PageActionsItem } from './components/pageActions.ts';
+export type { PageActionsGroup, PageActionsItem } from './components/pageActions.ts';
 
 // Per-tab contextual help-panel registry (toggle: ./components/PageUtilityActions.vue)
 export { useHelpPanel, HELP_PANEL_KEY } from './composables/useHelpPanel.ts';

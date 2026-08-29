@@ -14,7 +14,16 @@ import PageActionMenu from './PageActionMenu.vue';
 // Package-name import (not ../composables): only src/components is packed, and
 // the dist-barrel Symbol instance must match the consumer's HELP_PANEL_KEY provider.
 import { HELP_PANEL_KEY } from '@octabits-io/nuxt-ui-kit';
-import { PAGE_ACTIONS_COLLAPSE_BELOW, PAGE_HEADER_WIDTH, type PageActionsItem } from './pageActions.ts';
+import UButton from '@nuxt/ui/components/Button.vue';
+import {
+  PAGE_ACTIONS_COLLAPSE_BELOW,
+  PAGE_HEADER_WIDTH,
+  foldInlineActions,
+  groupIsPrimary,
+  isInlineBound as isItemInlineBound,
+  resolveCollapseStages,
+  type PageActionsItem,
+} from './pageActions.ts';
 
 /**
  * Width-aware page-header action cluster: one declarative list drives both the
@@ -22,6 +31,12 @@ import { PAGE_ACTIONS_COLLAPSE_BELOW, PAGE_HEADER_WIDTH, type PageActionsItem } 
  * items inline (all labeled, one solid primary max); below `collapseBelow`
  * only 'always' items stay inline and everything else — 'auto' items, utility
  * items, and the Help trigger — moves into the ⋯ menu, keeping its label.
+ *
+ * Items sharing a `group` fold into ONE inline control (see `PageActionsGroup`):
+ * mutually exclusive answers to a single question stop competing for the bar as
+ * peers. This is the only rank between "inline button" and "buried in ⋯" —
+ * without it every neutral inline action is the same ghost weight, and a bar of
+ * six says nothing about which one an operator reaches for.
  *
  * The Help trigger is rendered automatically when a `HELP_PANEL_KEY` registry
  * with registered actions is provided (replaces `PageUtilityActions` on pages
@@ -35,6 +50,25 @@ const props = withDefaults(defineProps<{
   utilityItems?: PageActionsItem[]
   /** Header width (px) below which 'auto'/utility items collapse into the menu. */
   collapseBelow?: number
+  /**
+   * Header width (px) below which ONLY the utility region (utility items + the
+   * Help trigger) collapses into the menu, while every action stays inline.
+   *
+   * Exists because the fallback below `collapseBelow` is `flex-wrap`, and a bar
+   * that does not fit therefore WRAPS rather than collapsing — silently, into
+   * two or three rows, with the record's title stranded on a line of its own.
+   * Between `collapseBelow` and "actually fits" that was the only behaviour
+   * available, and it dropped nothing, so it chose the wrap point arbitrarily.
+   *
+   * A second threshold makes the loss ordered instead: utilities go first,
+   * because they are the only things in the bar that change nothing — then the
+   * 'auto' actions at `collapseBelow`, then the wrap. Set it per header from
+   * what that header's widest state actually needs.
+   *
+   * Defaults to `collapseBelow`, i.e. no separate stage and no change for any
+   * caller that does not ask for one.
+   */
+  utilityCollapseBelow?: number
   /** Render the built-in Help trigger (when a help registry with actions is
    *  provided). Disable in nested/panel headers where the page-level header
    *  already owns Help. */
@@ -42,6 +76,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   utilityItems: () => [],
   collapseBelow: PAGE_ACTIONS_COLLAPSE_BELOW,
+  utilityCollapseBelow: undefined,
   help: true,
 });
 
@@ -51,21 +86,24 @@ const headerWidth = inject(PAGE_HEADER_WIDTH, null);
 
 // null (no PageHeader provider / pre-measurement) counts as wide — the
 // flex-wrap fallback keeps an unexpectedly narrow first frame usable.
-const collapsed = computed(() => {
-  const width = headerWidth?.value;
-  return width != null && width < props.collapseBelow;
-});
+const stages = computed(() =>
+  resolveCollapseStages(headerWidth?.value ?? null, props.collapseBelow, props.utilityCollapseBelow),
+);
+const collapsed = computed(() => stages.value.collapsed);
+const utilitiesCollapsed = computed(() => stages.value.utilitiesCollapsed);
 
 const showHelp = computed(() => props.help && Boolean(helpPanel?.hasActions.value));
 
 const actionItems = computed(() => props.items.filter(item => (item.kind ?? 'action') !== 'ai'));
 const aiItems = computed(() => props.items.filter(item => item.kind === 'ai'));
 
-const isInlineBound = (item: PageActionsItem) =>
-  (item.visibility ?? 'auto') === 'always'
-  || ((item.visibility ?? 'auto') === 'auto' && !collapsed.value);
+const isInlineBound = (item: PageActionsItem) => isItemInlineBound(item, collapsed.value);
 
-const inlineItems = computed(() => actionItems.value.filter(isInlineBound));
+const inlineEntries = computed(() => foldInlineActions(actionItems.value, collapsed.value));
+
+function toGroupMenuItem(item: PageActionsItem): DropdownMenuItem {
+  return { ...toMenuItem(item), description: item.description };
+}
 
 // AI cluster: one inline item renders as its own verb-labeled AiButton; several
 // share a labeled "AI ∨" dropdown (icons + descriptions per row).
@@ -81,7 +119,7 @@ const aiDropdownItems = computed<DropdownMenuItem[]>(() =>
   })),
 );
 
-const inlineUtilityItems = computed(() => collapsed.value ? [] : props.utilityItems);
+const inlineUtilityItems = computed(() => utilitiesCollapsed.value ? [] : props.utilityItems);
 
 // Descriptions render only in the dedicated AI dropdown (which has wrap/width
 // styling) — the compact ⋯ overflow stays label-only.
@@ -107,7 +145,7 @@ const menuGroups = computed<DropdownMenuItem[][]>(() => {
   const sections = new Map<string, PageActionsItem[]>();
   for (const item of actionItems.value) {
     if ((item.visibility ?? 'auto') !== 'menu') continue;
-    const section = item.section ?? 'default';
+    const section = item.section ?? item.group?.id ?? 'default';
     if (!sections.has(section)) sections.set(section, []);
     sections.get(section)!.push(item);
   }
@@ -119,7 +157,7 @@ const menuGroups = computed<DropdownMenuItem[][]>(() => {
     || ((item.visibility ?? 'auto') === 'auto' && collapsed.value),
   );
 
-  const utilityGroup: DropdownMenuItem[] = collapsed.value
+  const utilityGroup: DropdownMenuItem[] = utilitiesCollapsed.value
     ? [
         ...props.utilityItems.map(toMenuItem),
         ...(showHelp.value && helpPanel
@@ -137,25 +175,49 @@ const menuGroups = computed<DropdownMenuItem[][]>(() => {
 });
 
 const hasUtilityRegion = computed(() =>
-  inlineUtilityItems.value.length > 0 || (showHelp.value && !collapsed.value),
+  inlineUtilityItems.value.length > 0 || (showHelp.value && !utilitiesCollapsed.value),
 );
 </script>
 
 <template>
-  <PageAction
-    v-for="item in inlineItems"
-    :key="item.key"
-    :icon="item.icon"
-    :label="item.label"
-    show-label
-    :tone="item.tone ?? 'neutral'"
-    :loading="item.loading"
-    :disabled="item.disabled"
-    :disabled-reason="item.disabledReason"
-    :to="item.to"
-    :target="item.target"
-    @click="item.onSelect?.()"
-  />
+  <template v-for="entry in inlineEntries" :key="entry.type === 'group' ? entry.group.id : entry.item.key">
+    <PageAction
+      v-if="entry.type === 'item'"
+      :icon="entry.item.icon"
+      :label="entry.item.label"
+      show-label
+      :tone="entry.item.tone ?? 'neutral'"
+      :loading="entry.item.loading"
+      :disabled="entry.item.disabled"
+      :disabled-reason="entry.item.disabledReason"
+      :to="entry.item.to"
+      :target="entry.item.target"
+      @click="entry.item.onSelect?.()"
+    />
+    <!-- A decision group: one question, its answers inside. Outline rather
+         than ghost — it is a decision, and the ghost tools beside it are not.
+         Solid when it carries the state's primary. -->
+    <UDropdownMenu
+      v-else
+      :items="[entry.items.map(toGroupMenuItem)]"
+      :content="{ align: 'end' }"
+      :ui="{
+        content: 'w-64',
+        item: 'gap-2.5 p-2',
+        itemLabel: 'font-medium text-highlighted',
+        itemDescription: 'mt-0.5 whitespace-normal text-xs/4',
+      }"
+    >
+      <UButton
+        :icon="entry.group.icon ?? entry.items[0]!.icon"
+        :label="entry.group.label"
+        size="md"
+        :color="groupIsPrimary(entry.items) ? 'primary' : 'neutral'"
+        :variant="groupIsPrimary(entry.items) ? 'solid' : 'outline'"
+        trailing-icon="i-lucide-chevron-down"
+      />
+    </UDropdownMenu>
+  </template>
   <!-- AI cluster: soft-primary sparkles = "AI acts on data". One item → its
        verb label; several → the shared labeled dropdown. `size="md"` matches
        PageAction — AiButton keeps its `sm` default for in-page triggers. -->
@@ -203,7 +265,7 @@ const hasUtilityRegion = computed(() =>
       @click="item.onSelect?.()"
     />
     <PageAction
-      v-if="showHelp && helpPanel"
+      v-if="showHelp && !utilitiesCollapsed && helpPanel"
       icon="i-lucide-circle-help"
       :label="t('pageChrome.help')"
       show-label
