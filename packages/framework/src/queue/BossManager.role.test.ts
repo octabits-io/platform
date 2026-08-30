@@ -112,7 +112,13 @@ describe('createBossManager — role', () => {
     const full = optionsFor('full');
     const producer = optionsFor('producer');
 
-    const { supervise: _s, schedule: _c, migrate: _m, ...rest } = producer;
-    expect(rest).toEqual(full);
+    const { supervise: _s, schedule: _c, migrate: _m, useListenNotify: _l, ...rest } = producer;
+    const { useListenNotify: _fl, ...fullRest } = full;
+    expect(rest).toEqual(fullRest);
+  });
+
+  it('the full role listens for NOTIFY wakes; the producer role does not (it runs no workers)', () => {
+    expect(optionsFor('full').useListenNotify).toBe(true);
+    expect(optionsFor('producer').useListenNotify).toBe(false);
   });
 });

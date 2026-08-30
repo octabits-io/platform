@@ -125,11 +125,13 @@ export interface DefineQueueOptions<
     createSystemScope: QueueScopeFactory<TServices>;
     logger: Logger;
   }) => JobHandler<TPayload>;
-  /** Config overrides with sensible defaults (retryLimit 3, retryDelay 10, expireInSeconds 60) */
+  /** Config overrides with sensible defaults (retryLimit 3, retryDelay 10, expireInSeconds 60, notify false) */
   config?: {
     retryLimit?: number;
     retryDelay?: number;
     expireInSeconds?: number;
+    /** Wake workers via LISTEN/NOTIFY on enqueue — see {@link QueueDomainConfig.notify} */
+    notify?: boolean;
   };
   /**
    * Extract a partition key from a payload. Used to bind the DLQ scope
@@ -224,6 +226,7 @@ export function defineQueue<
     retryLimit,
     retryDelay: options.config?.retryDelay ?? 10,
     expireInSeconds: options.config?.expireInSeconds ?? 60,
+    ...(options.config?.notify != null && { notify: options.config.notify }),
   };
 
   function createEnqueuer(deps: { boss: PgBoss }) {

@@ -113,7 +113,7 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
   config: QueueDomainConfig<TPayload>
 ): QueueDomain<TPayload> {
   const { boss } = deps;
-  const { name, dlq, schema, retryLimit = 3, retryDelay = 10, expireInSeconds = 60 } = config;
+  const { name, dlq, schema, retryLimit = 3, retryDelay = 10, expireInSeconds = 60, notify = false } = config;
 
   let workerStarted = false;
 
@@ -157,6 +157,7 @@ export function createQueueDomain<TPayload extends BaseJobPayload>(
         retryDelay,
         expireInSeconds,
         deadLetter: dlq,
+        notify,
       });
       queueCreated = true;
     })().finally(() => {

@@ -68,6 +68,11 @@ const PRODUCER_OPTIONS = {
   supervise: false,
   schedule: false,
   migrate: false,
+  // A producer runs no workers, so nothing here would act on a NOTIFY — skip
+  // the dedicated LISTEN connection. The NOTIFY itself is still *emitted* by a
+  // producer's sends (it is decided per queue, see `notify` in
+  // `QueueDomainConfig`); only the listening half is a consumer concern.
+  useListenNotify: false,
 } as const satisfies Partial<ConstructorOptions>;
 
 export interface BossManager {
@@ -116,12 +121,26 @@ export function createBossManager(config: BossManagerConfig): BossManager {
     // flags PRODUCER_OPTIONS names and nothing else.
     maintenanceIntervalSeconds,
     monitorIntervalSeconds,
+    // Wake workers on a NOTIFY instead of waiting out their poll interval.
+    // Doubly opt-in in pg-boss: this instance flag AND `notify: true` on the
+    // queue (a `QueueDomainConfig` option). Polling stays on as the correctness
+    // floor; when the listener cannot be established (PgBouncer transaction
+    // pooling, a backend without LISTEN) pg-boss emits a `warning` and keeps
+    // polling only. Needs a session-pinned connection — hand pg-boss the
+    // direct database URL, never the pooler.
+    useListenNotify: true,
     ...(role === 'producer' ? PRODUCER_OPTIONS : {}),
   });
 
   // Log pg-boss events
   boss.on('error', (error: Error) => {
     logger.error('pg-boss error', error);
+  });
+  // pg-boss degrades silently on a `warning` — most importantly when the
+  // LISTEN/NOTIFY listener cannot be established and it falls back to polling
+  // only. Without this line that fallback is invisible in production.
+  boss.on('warning', (warning: { type?: string; message?: string }) => {
+    logger.warn(`pg-boss warning: ${warning.message ?? 'unknown'}`, { type: warning.type });
   });
 
   async function start(): Promise<void> {

@@ -110,6 +110,15 @@ export interface QueueDomainConfig<TPayload extends BaseJobPayload> {
   retryDelay?: number;
   /** Job expiration time in seconds (default: 60) */
   expireInSeconds?: number;
+  /**
+   * Emit a Postgres NOTIFY when a job lands on this queue so workers fetch it
+   * immediately instead of waiting out their poll interval (default: false).
+   * The listening half is enabled on the pg-boss instance by `createBossManager`
+   * (role `'full'`); polling continues underneath as the correctness floor.
+   * Turn on for latency-sensitive chains — a workflow whose steps each pay a
+   * poll interval — and leave off for bulk queues.
+   */
+  notify?: boolean;
 }
 
 // ============================================================================
