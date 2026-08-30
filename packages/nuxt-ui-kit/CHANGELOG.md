@@ -1,5 +1,19 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.17.2
+
+### Patch Changes
+
+- [`2692f4e`](https://github.com/octabits-io/platform/commit/2692f4e525f30976afe368d74a29e4eab76c7ae2) - PageActions: don't draw the utility separator when nothing precedes it
+  
+  The vertical rule before the utility cluster was rendered whenever a utility
+  region existed, without checking that anything had been rendered to its left.
+  A header whose only content is the Help trigger — a record route that declares
+  no actions of its own — therefore drew a rule dividing Help from nothing.
+  
+  It is now gated on there being leading content: inline actions, the AI cluster,
+  or a non-empty overflow menu.
+
 ## 0.17.1
 
 ### Patch Changes
