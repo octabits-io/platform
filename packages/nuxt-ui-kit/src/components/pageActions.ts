@@ -193,3 +193,46 @@ export function resolveCollapseStages(
     utilitiesCollapsed: collapsed || width < (utilityCollapseBelow ?? collapseBelow),
   };
 }
+
+/**
+ * The overflow menu's ACTION groups, in render order — everything above the
+ * utility group, which the component builds itself (it needs i18n and the help
+ * registry).
+ *
+ * The order is the whole point, and it is a convention the type cannot express:
+ * destructive rows are the last-declared menu section, so anything appended
+ * after the sections lands under "Delete". AI items used to, which read as an
+ * afterthought to the deletion rather than as a thing you might do to the
+ * record. They belong with the other collapsed actions instead.
+ *
+ * Groups render separated, and empty ones are dropped by the caller.
+ */
+export function buildMenuActionGroups(
+  actionItems: PageActionsItem[],
+  aiItems: PageActionsItem[],
+  collapsed: boolean,
+): PageActionsItem[][] {
+  const visibilityOf = (item: PageActionsItem) => item.visibility ?? 'auto';
+
+  // 'auto' actions the current width pushed out of the bar.
+  const collapsedAutos = collapsed
+    ? actionItems.filter(item => visibilityOf(item) === 'auto')
+    : [];
+
+  // Menu-only items, grouped by section in first-appearance order — so a
+  // caller's declaration order decides, and 'destructive' stays last by
+  // being declared last.
+  const sections = new Map<string, PageActionsItem[]>();
+  for (const item of actionItems) {
+    if (visibilityOf(item) !== 'menu') continue;
+    const section = item.section ?? item.group?.id ?? 'default';
+    if (!sections.has(section)) sections.set(section, []);
+    sections.get(section)!.push(item);
+  }
+
+  const aiGroup = aiItems.filter(item =>
+    visibilityOf(item) === 'menu' || (visibilityOf(item) === 'auto' && collapsed),
+  );
+
+  return [collapsedAutos, aiGroup, ...sections.values()].filter(group => group.length > 0);
+}

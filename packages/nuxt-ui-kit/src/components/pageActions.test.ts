@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildMenuActionGroups,
   foldInlineActions,
   groupIsPrimary,
   isInlineBound,
@@ -156,3 +157,53 @@ describe('resolveCollapseStages', () => {
     }
   });
 });
+
+describe('buildMenuActionGroups', () => {
+  const item = (over: Partial<PageActionsItem>): PageActionsItem =>
+    ({ key: over.key ?? 'k', icon: 'i', label: over.label ?? 'l', ...over });
+
+  const keys = (groups: PageActionsItem[][]) => groups.map(g => g.map(i => i.key));
+
+  it('keeps an AI row above the destructive section', () => {
+    // The regression this exists for: an AI item appended AFTER the sections
+    // rendered under "Delete", where a "Generate page content" row reads as an
+    // afterthought to the deletion.
+    const actions = [
+      item({ key: 'export', visibility: 'menu' }),
+      item({ key: 'delete', visibility: 'menu', section: 'destructive', color: 'error' }),
+    ];
+    const ai = [item({ key: 'generate', kind: 'ai' })];
+
+    expect(keys(buildMenuActionGroups(actions, ai, true)))
+      .toEqual([['generate'], ['export'], ['delete']]);
+  });
+
+  it('sits with the other collapsed actions, not behind them', () => {
+    const actions = [item({ key: 'edit' }), item({ key: 'delete', visibility: 'menu' })];
+    const ai = [item({ key: 'generate', kind: 'ai' })];
+
+    // 'edit' collapses out of the bar; the AI row is its own group beside it.
+    expect(keys(buildMenuActionGroups(actions, ai, true)))
+      .toEqual([['edit'], ['generate'], ['delete']]);
+  });
+
+  it('leaves inline-bound items out of the menu entirely', () => {
+    const actions = [item({ key: 'publish', visibility: 'always' }), item({ key: 'edit' })];
+    const ai = [item({ key: 'generate', kind: 'ai', visibility: 'always' })];
+
+    // Wide: nothing collapses. Narrow: 'always' items still render inline, so
+    // the menu holds only 'edit'.
+    expect(keys(buildMenuActionGroups(actions, ai, false))).toEqual([]);
+    expect(keys(buildMenuActionGroups(actions, ai, true))).toEqual([['edit']]);
+  });
+
+  it('orders menu sections by first appearance, so the caller decides', () => {
+    const actions = [
+      item({ key: 'a', visibility: 'menu', section: 'one' }),
+      item({ key: 'b', visibility: 'menu', section: 'two' }),
+      item({ key: 'c', visibility: 'menu', section: 'one' }),
+    ];
+    expect(keys(buildMenuActionGroups(actions, [], false)))
+      .toEqual([['a', 'c'], ['b']]);
+  });
+})

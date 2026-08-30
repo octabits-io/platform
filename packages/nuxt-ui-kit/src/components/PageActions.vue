@@ -21,6 +21,7 @@ import {
   foldInlineActions,
   groupIsPrimary,
   isInlineBound as isItemInlineBound,
+  buildMenuActionGroups,
   resolveCollapseStages,
   type PageActionsItem,
 } from './pageActions.ts';
@@ -137,26 +138,6 @@ function toMenuItem(item: PageActionsItem): DropdownMenuItem {
 }
 
 const menuGroups = computed<DropdownMenuItem[][]>(() => {
-  const collapsedAutos = collapsed.value
-    ? actionItems.value.filter(item => (item.visibility ?? 'auto') === 'auto')
-    : [];
-
-  // Menu-only items grouped by section, in first-appearance order.
-  const sections = new Map<string, PageActionsItem[]>();
-  for (const item of actionItems.value) {
-    if ((item.visibility ?? 'auto') !== 'menu') continue;
-    const section = item.section ?? item.group?.id ?? 'default';
-    if (!sections.has(section)) sections.set(section, []);
-    sections.get(section)!.push(item);
-  }
-
-  // AI items bound to the menu (explicit 'menu', or 'auto' while collapsed)
-  // form their own group between the action sections and the utilities.
-  const aiGroup = aiItems.value.filter(item =>
-    (item.visibility ?? 'auto') === 'menu'
-    || ((item.visibility ?? 'auto') === 'auto' && collapsed.value),
-  );
-
   const utilityGroup: DropdownMenuItem[] = utilitiesCollapsed.value
     ? [
         ...props.utilityItems.map(toMenuItem),
@@ -166,10 +147,11 @@ const menuGroups = computed<DropdownMenuItem[][]>(() => {
       ]
     : [];
 
+  // Action groups (incl. their ORDER — see buildMenuActionGroups) are pure and
+  // live in the module; the utilities need i18n and the help registry.
   return [
-    collapsedAutos.map(toMenuItem),
-    ...[...sections.values()].map(group => group.map(toMenuItem)),
-    aiGroup.map(toMenuItem),
+    ...buildMenuActionGroups(actionItems.value, aiItems.value, collapsed.value)
+      .map(group => group.map(toMenuItem)),
     utilityGroup,
   ].filter(group => group.length > 0);
 });
