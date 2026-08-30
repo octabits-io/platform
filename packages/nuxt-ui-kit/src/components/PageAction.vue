@@ -7,6 +7,13 @@ import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import type { ButtonProps } from '@nuxt/ui'
 
+// Attrs are bound onto the BUTTON explicitly, never inherited by the root. The
+// blocked branch's root is the tooltip, whose trigger is `as-child` — an
+// inherited `@click` therefore landed on the hover span, and the disabled button
+// beneath it is `pointer-events-none`, so every click on it reached the span and
+// fired the parent's handler. A button that looks disabled must be disabled.
+defineOptions({ inheritAttrs: false })
+
 type Tone = 'primary' | 'neutral' | 'destructive'
 
 /**
@@ -97,7 +104,7 @@ if (import.meta.dev && !props.label) {
          is the hover target and the button opts out of pointer events. -->
     <span v-if="isBlocked" class="inline-flex">
       <UButton
-        v-bind="buttonProps"
+        v-bind="{ ...buttonProps, ...$attrs }"
         class="pointer-events-none"
         :aria-label="tooltipText"
         :label="!isIconOnly && showLabel ? label : undefined"
@@ -107,13 +114,13 @@ if (import.meta.dev && !props.label) {
     </span>
     <UButton
       v-else
-      v-bind="buttonProps"
+      v-bind="{ ...buttonProps, ...$attrs }"
       :aria-label="label"
     />
   </UTooltip>
   <UButton
     v-else
-    v-bind="buttonProps"
+    v-bind="{ ...buttonProps, ...$attrs }"
     :label="showLabel ? label : undefined"
   >
     <slot />
