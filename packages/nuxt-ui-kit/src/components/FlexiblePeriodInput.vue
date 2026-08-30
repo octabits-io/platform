@@ -199,6 +199,11 @@ watch(
          drop to their own line (the nights input gains a compact label, since
          its placeholder vanishes once a value is set). The inner
          DateRangeInput additionally stacks its two dates below 320px. -->
+    <!-- Widths: a date is a fixed-length value, so the window must not
+         stretch across a wide row — DateRangeInput caps each date field at
+         14rem, and 30rem here is that pair plus arrow and gaps, so nights and
+         the clear button sit right next to the window instead of at the far
+         edge of the form. -->
     <div class="flex flex-col gap-2 @lg:flex-row @lg:items-start">
       <DateRangeInput
         v-model="innerPeriod"
@@ -208,10 +213,10 @@ watch(
         :icon="icon"
         :start-label="startAriaLabel"
         :end-label="endAriaLabel"
-        class="w-full @lg:flex-1"
+        class="w-full @lg:flex-1 @lg:max-w-[30rem]"
       />
       <div class="flex items-end gap-2 @lg:shrink-0">
-        <div class="flex w-full flex-col gap-1 @lg:w-28">
+        <div class="flex w-full flex-col gap-1 @lg:w-32">
           <span class="text-xs text-muted @lg:hidden" aria-hidden="true">{{ t('flexPeriod.nightsLabel') }}</span>
           <UInputNumber
             v-model="nightsValue"
@@ -225,14 +230,21 @@ watch(
             class="w-full"
           />
         </div>
+        <!-- Always in the layout, only *visible* once something is set: if it
+             mounted on demand, the first "+" on nights would insert it beside
+             the input, shift the input left by one button, and leave the X
+             exactly under the pointer — the next click cleared the field.
+             `invisible` (visibility: hidden) keeps its space and also removes it
+             from the tab order and the accessibility tree. -->
         <UButton
-          v-if="clearable && hasAnyValue"
+          v-if="clearable"
           icon="i-lucide-x"
           color="neutral"
           variant="ghost"
           :size="size"
           :disabled="disabled"
           :aria-label="t('flexPeriod.clear')"
+          :class="{ invisible: !hasAnyValue }"
           @click="clearAll"
         />
       </div>

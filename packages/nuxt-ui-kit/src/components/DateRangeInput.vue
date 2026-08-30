@@ -520,9 +520,13 @@ const timeHintParts = computed(() =>
          below. Own-width queries keep the behavior correct inside modals,
          narrow panels, and next to the assistant dock alike. When stacked,
          the arrow disappears and each input gets a compact label instead
-         (the popover titles), so the two identical inputs stay tellable. -->
+         (the popover titles), so the two identical inputs stay tellable.
+         Side by side, each date field grows only to 14rem: a date is a
+         fixed-length value, and two fields stretched across a wide form row
+         read as empty text areas. The pair stays left-aligned with the
+         remaining width unused. -->
     <div class="flex flex-col gap-2 @xs:flex-row @xs:items-center">
-      <div class="flex w-full min-w-0 flex-col gap-1 @xs:flex-1">
+      <div class="flex w-full min-w-0 flex-col gap-1 @xs:flex-1 @xs:max-w-56">
         <span class="text-xs text-muted @xs:hidden" aria-hidden="true">{{ startPopoverTitle }}</span>
         <UInputDate
           v-model="startDate"
@@ -577,7 +581,7 @@ const timeHintParts = computed(() =>
 
       <span class="hidden shrink-0 text-muted @xs:inline" aria-hidden="true">→</span>
 
-      <div class="flex w-full min-w-0 flex-col gap-1 @xs:flex-1">
+      <div class="flex w-full min-w-0 flex-col gap-1 @xs:flex-1 @xs:max-w-56">
         <span class="text-xs text-muted @xs:hidden" aria-hidden="true">{{ endPopoverTitle }}</span>
         <UInputDate
           v-model="endDate"
