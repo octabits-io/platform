@@ -177,6 +177,21 @@ const menuGroups = computed<DropdownMenuItem[][]>(() => {
 const hasUtilityRegion = computed(() =>
   inlineUtilityItems.value.length > 0 || (showHelp.value && !utilitiesCollapsed.value),
 );
+
+/**
+ * Is there anything to the LEFT of the utility region for the separator to
+ * separate it from? Everything the template renders before it, in order:
+ * the inline actions, the AI cluster, and the overflow menu (which draws
+ * nothing when its group list is empty).
+ *
+ * Without this the rule is drawn against the start of the cluster. A record
+ * route that declares no actions — only the help registry — renders a bar
+ * whose entire content is a vertical line and the Help button beside it, the
+ * line dividing Help from nothing.
+ */
+const hasLeadingContent = computed(() =>
+  inlineEntries.value.length > 0 || inlineAiItems.value.length > 0 || menuGroups.value.length > 0,
+);
 </script>
 
 <template>
@@ -251,7 +266,7 @@ const hasUtilityRegion = computed(() =>
   </UDropdownMenu>
   <PageActionMenu :items="menuGroups" />
   <template v-if="hasUtilityRegion">
-    <USeparator orientation="vertical" class="h-5 mx-1" />
+    <USeparator v-if="hasLeadingContent" orientation="vertical" class="h-5 mx-1" />
     <PageAction
       v-for="item in inlineUtilityItems"
       :key="item.key"
