@@ -42,7 +42,11 @@ boot with those keys when `NODE_ENV=production`.
 
 Tables are created at startup with idempotent `CREATE TABLE IF NOT EXISTS` DDL
 (see [`src/db/ddl.ts`](./src/db/ddl.ts)). A real service would own migrations via
-`@octabits-io/framework/drizzle/migrate` instead.
+`@octabits-io/framework/drizzle/migrate` instead. Columns added to an existing
+table need their own `ALTER TABLE … ADD COLUMN IF NOT EXISTS` line beside the
+`CREATE`: `CREATE TABLE IF NOT EXISTS` is a no-op on a database that already
+booted once, so without it the DDL silently drifts from `schema.ts` on every
+developer machine but a fresh one.
 
 ## Routes
 
@@ -55,12 +59,14 @@ Tables are created at startup with idempotent `CREATE TABLE IF NOT EXISTS` DDL
 | GET | `/api/contacts/search?email=` | Exact-match lookup via the blind index |
 | GET | `/api/contacts/:id` | Read one |
 | PUT | `/api/contacts/:id` | Update (re-encrypts + re-indexes on email change) |
+| — | *(contact fields)* | `wishStart`/`wishEnd`/`wishNights` — the travel wish behind the kit's `FlexiblePeriodInput`; `''` on the wire clears the (nullable) column |
 | DELETE | `/api/contacts/:id` | **RBAC-guarded** — `x-demo-role: admin` required |
 | POST | `/api/contacts/:id/welcome` | Enqueue a welcome email, idempotent per contact |
 | GET | `/api/notes` | List (`createBaseCrudService`) |
 | POST | `/api/notes` | Create |
 | GET | `/api/notes/:id` | Read one — missing → `note_not_found` → 404 |
 | PUT | `/api/notes/:id` | Update |
+| — | *(note fields)* | `publicTitle`/`publicBody` — `LocaleMap<string>` jsonb columns, the shape the kit's `LocaleInput`/`LocaleTextarea` edit |
 | DELETE | `/api/notes/:id` | Delete |
 | POST | `/api/files` | Upload (`multipart/form-data`, field `file`) |
 | GET | `/api/files` | List blobs |
@@ -131,7 +137,7 @@ saw nothing but preflight failures. A browser is the only client that tests CORS
 | `./drizzle/factory` | [`main.ts`](./src/main.ts) — `createDrizzle(schema, { pool })` | ✅ |
 | `./drizzle/db` | `withDbErrorHandling`, `normalizePaginationLimit` in the contacts service | ✅ |
 | `./drizzle/scope` | [`db/schema.ts`](./src/db/schema.ts) — `scopedConfigColumns`, `bytea` | ✅ |
-| `./drizzle/crud` | [`services/notes.ts`](./src/services/notes.ts) — `createBaseCrudService` drives the whole entity | ✅ |
+| `./drizzle/crud` | [`services/notes.ts`](./src/services/notes.ts) — `createBaseCrudService` drives the whole entity, including the two `LocaleMap<string>` jsonb columns (the factory maps columns to fields; a per-locale map needs no seam of its own) | ✅ |
 | `./drizzle/config` | [`services/settings.ts`](./src/services/settings.ts) — unscoped `createScopedConfigService` | ✅ |
 | `./drizzle/idempotency` | `POST /api/contacts/:id/welcome` — `begin()` / `commit()` | ✅ |
 | `./server` | [`app.ts`](./src/app.ts) — `buildSwaggerOptions`; [`main.ts`](./src/main.ts) — `runServer` + graceful shutdown (both survived the framework swap **untouched**: the run tail only ever needed a structural `.listen(port)`); [`config.ts`](./src/config.ts) — `getEnv*`, `parseCsv`, `assertNotInProduction`; `errorResponses`/`successResponses` on every route; [`http.ts`](./src/http.ts) — `createErrorMapper` behind this app's `errorJson`; [`app.test.ts`](./src/app.test.ts) runs on `…/server/testing`'s `testRequest` | ✅ |

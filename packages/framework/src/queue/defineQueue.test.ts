@@ -112,6 +112,40 @@ describe('defineQueue — definition wiring', () => {
       expect.objectContaining({ retryLimit: 7, retryDelay: 42, expireInSeconds: 120 }),
     );
   });
+
+  it('leaves notify out of the resolved config when unset, so the domain default decides', async () => {
+    // The conditional spread is load-bearing: an explicit `notify: undefined`
+    // in the config would shadow createQueueDomain's own default.
+    const def = defineTestQueue({ config: { retryLimit: 7 } });
+
+    expect('notify' in def.config).toBe(false);
+
+    const boss = createMockBoss();
+    const { enqueue } = def.createEnqueuer({ boss: boss as unknown as PgBoss });
+    await enqueue(validPayload);
+
+    expect(boss.createQueue).toHaveBeenNthCalledWith(
+      2,
+      'email',
+      expect.objectContaining({ notify: false }),
+    );
+  });
+
+  it('forwards config.notify to the underlying queue domain', async () => {
+    const boss = createMockBoss();
+    const def = defineTestQueue({ config: { notify: true } });
+
+    expect(def.config).toMatchObject({ notify: true });
+
+    const { enqueue } = def.createEnqueuer({ boss: boss as unknown as PgBoss });
+    await enqueue(validPayload);
+
+    expect(boss.createQueue).toHaveBeenNthCalledWith(
+      2,
+      'email',
+      expect.objectContaining({ notify: true }),
+    );
+  });
 });
 
 // ===========================================================================

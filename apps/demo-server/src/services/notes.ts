@@ -14,7 +14,7 @@
  */
 import { desc } from 'drizzle-orm';
 import { createBaseCrudService } from '@octabits-io/framework/drizzle/crud';
-import type { DateProvider } from '@octabits-io/framework/utils';
+import type { DateProvider, LocaleMap } from '@octabits-io/framework/utils';
 import type { AppDatabase } from '@octabits-io/framework/drizzle/factory';
 import { notes, type Schema } from '../db/schema.ts';
 
@@ -22,6 +22,14 @@ export interface Note {
   id: string;
   title: string;
   body: string;
+  /**
+   * The customer-facing version of the note, one entry per content locale.
+   * Kept as a map all the way to the browser — the kit's locale-field editors
+   * bind a `LocaleMap<string>` directly, so resolving it server-side would
+   * throw away exactly the shape the editor needs.
+   */
+  publicTitle: LocaleMap<string>;
+  publicBody: LocaleMap<string>;
   createdAt: string;
   updatedAt: string;
 }
@@ -42,6 +50,8 @@ export function createNotesService({ db, dateProvider }: NotesServiceDeps) {
       id: row.id,
       title: row.title,
       body: row.body,
+      publicTitle: row.publicTitle,
+      publicBody: row.publicBody,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     }),

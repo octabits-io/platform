@@ -647,3 +647,76 @@ describe('exported schemas', () => {
     expect(SCHEMA_BASE_JOB_PAYLOAD.safeParse({ anything: 1, else: 'x' }).success).toBe(true);
   });
 });
+
+// ===========================================================================
+// createQueueDomain — notify (LISTEN/NOTIFY wake-ups)
+// ===========================================================================
+
+/**
+ * `notify` is a *queue* property in pg-boss v12, not a send option: the NOTIFY
+ * fires because the queue row says so, and the instance-level
+ * `useListenNotify` (see `BossManager.role.test.ts`) decides whether anything
+ * is listening. Both halves are invisible at runtime when they break — the
+ * jobs still run, just a poll interval late — so the wiring is pinned here.
+ */
+describe('createQueueDomain — notify', () => {
+  let boss: MockBoss;
+
+  beforeEach(() => {
+    boss = createMockBoss();
+  });
+
+  function domainWithNotify(notify: boolean | undefined) {
+    return createQueueDomain<TestJob>(
+      { boss: boss as unknown as PgBoss },
+      {
+        name: 'email',
+        dlq: 'email-dlq',
+        schema: SCHEMA_TEST_JOB,
+        ...(notify != null && { notify }),
+      }
+    );
+  }
+
+  it('defaults to off — polling stays the correctness floor', async () => {
+    await domainWithNotify(undefined).enqueue(validPayload);
+
+    expect(boss.createQueue).toHaveBeenNthCalledWith(
+      2,
+      'email',
+      expect.objectContaining({ notify: false })
+    );
+  });
+
+  it('passes notify: true to createQueue AND the updateQueue sync', async () => {
+    await domainWithNotify(true).enqueue(validPayload);
+
+    expect(boss.createQueue).toHaveBeenNthCalledWith(
+      2,
+      'email',
+      expect.objectContaining({ notify: true })
+    );
+    // The sync is the half that matters on an existing deployment: v12's
+    // createQueue is ON CONFLICT DO NOTHING, so a queue that predates the flag
+    // only ever picks it up through updateQueue.
+    expect(boss.updateQueue).toHaveBeenNthCalledWith(
+      2,
+      'email',
+      expect.objectContaining({ notify: true })
+    );
+  });
+
+  it('never notifies on the DLQ, and keeps notify out of the send options', async () => {
+    await domainWithNotify(true).enqueue(validPayload);
+
+    // A dead letter is a landing pad for a human, not a latency path.
+    expect(boss.createQueue).toHaveBeenNthCalledWith(1, 'email-dlq', { retryLimit: 0 });
+    // notify belongs to the queue row; sending it per job would be a silent
+    // no-op that reads like a working feature.
+    expect(boss.send).toHaveBeenCalledWith(
+      'email',
+      validPayload,
+      expect.not.objectContaining({ notify: expect.anything() })
+    );
+  });
+});

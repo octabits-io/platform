@@ -19,10 +19,20 @@ import type { IoC } from '@octabits-io/framework/ioc';
 import { errorJson } from '../http.ts';
 import type { DemoServices } from '../container.ts';
 
+/**
+ * A per-locale string map — the wire shape of `LocaleMap<string>`. Keys are
+ * BCP-47 tags; the server stores whatever the client sends rather than
+ * validating against a locale list, because the supported content locales are
+ * an app-configuration concern and this demo keeps them in the SPA.
+ */
+const SCHEMA_LOCALE_MAP = z.record(z.string(), z.string());
+
 const SCHEMA_NOTE = z.object({
   id: z.uuid(),
   title: z.string(),
   body: z.string(),
+  publicTitle: SCHEMA_LOCALE_MAP,
+  publicBody: SCHEMA_LOCALE_MAP,
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -30,6 +40,8 @@ const SCHEMA_NOTE = z.object({
 const SCHEMA_CREATE_NOTE = z.object({
   title: z.string().min(1).max(200),
   body: z.string().max(10_000),
+  publicTitle: SCHEMA_LOCALE_MAP.default({}),
+  publicBody: SCHEMA_LOCALE_MAP.default({}),
 });
 
 const SCHEMA_ID_PARAM = z.object({ id: z.uuid() });

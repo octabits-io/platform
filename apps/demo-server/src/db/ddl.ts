@@ -23,6 +23,9 @@ const APP_DDL = `
     name text NOT NULL,
     email_encrypted bytea NOT NULL,
     email_index bytea NOT NULL,
+    wish_start date,
+    wish_end date,
+    wish_nights integer,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   );
@@ -32,9 +35,21 @@ const APP_DDL = `
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     title text NOT NULL,
     body text NOT NULL,
+    public_title jsonb NOT NULL DEFAULT '{}'::jsonb,
+    public_body jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   );
+
+  -- Additive columns for databases created before they existed. CREATE TABLE
+  -- IF NOT EXISTS is a no-op on an existing table, so a column added to the
+  -- block above never reaches a dev database that already booted once — the
+  -- one way this file can silently drift from schema.ts.
+  ALTER TABLE contacts ADD COLUMN IF NOT EXISTS wish_start date;
+  ALTER TABLE contacts ADD COLUMN IF NOT EXISTS wish_end date;
+  ALTER TABLE contacts ADD COLUMN IF NOT EXISTS wish_nights integer;
+  ALTER TABLE notes ADD COLUMN IF NOT EXISTS public_title jsonb NOT NULL DEFAULT '{}'::jsonb;
+  ALTER TABLE notes ADD COLUMN IF NOT EXISTS public_body jsonb NOT NULL DEFAULT '{}'::jsonb;
 
   CREATE TABLE IF NOT EXISTS settings (
     key text NOT NULL,

@@ -104,7 +104,15 @@ const wrapperClass = computed(() => {
   }
 })
 
-const titleClass = computed(() => props.density === 'compact' ? 'font-display text-base font-semibold tracking-tight' : 'font-display text-2xl font-semibold tracking-tight')
+/**
+ * `truncate` on the compact title for the same reason the subtitle has it: the
+ * band is one row, and a title long enough to wrap makes it two — which is the
+ * height the compact density exists to avoid. `min-w-0` is what lets it happen
+ * at all inside the flex heading.
+ */
+const titleClass = computed(() => props.density === 'compact'
+  ? 'min-w-0 truncate font-display text-base font-semibold tracking-tight'
+  : 'font-display text-2xl font-semibold tracking-tight')
 
 /**
  * Title and subtitle side by side, on `compact` only, and only when this
@@ -126,9 +134,17 @@ const inlineHeading = computed(() => props.density === 'compact' && !slots.title
  * stacked one it replaced (observed on the places page: 101px against 85).
  * Truncating is the right degradation here: `compact` promises one row, and a
  * subtitle long enough to truncate is help-panel material, not chrome.
+ *
+ * `flex-1` is the other half of that promise, and truncation alone does not
+ * give it: a wrap container places items by their *hypothetical* size, which
+ * for `truncate` (white-space: nowrap) is still the full text width — so the
+ * heading was allowed to claim the line and the actions wrapped BEFORE the
+ * subtitle was ever asked to shrink. `flex: 1 1 0%` makes the heading's
+ * hypothetical size zero: it can never push a sibling onto a second row, and
+ * it grows into whatever the action bar leaves.
  */
 const headingClass = computed(() => inlineHeading.value
-  ? 'flex min-w-0 items-baseline gap-x-2'
+  ? 'flex min-w-0 flex-1 items-baseline gap-x-2'
   : 'min-w-0')
 const subtitleClass = computed(() => inlineHeading.value
   ? 'text-sm text-muted min-w-0 truncate'

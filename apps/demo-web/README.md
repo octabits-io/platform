@@ -93,10 +93,10 @@ end-session endpoint that does not exist here. And the full OIDC redirect flow
 | `/` | Nothing — the guard's policy hook redirects to `/dashboard` (or `/login`). | `createAuthGuard.afterAuthenticated` |
 | `/login` | Public route. "Sign in" re-seeds the bypass session and honours `?redirect=`. | `seedAuthBypassSession` |
 | `/dashboard` | Readiness probe, live pg-boss queue counts, settings summary, session chip. | `hc` client, session store |
-| `/contacts` | Server-paginated table; create + edit modals; blind-index email search; per-row welcome-email and delete. | `usePagination`, `useConfirm`, `useDirtyTracking`, `ConfirmDialog.vue` |
-| `/notes` | List/detail: filter rail + note editor. Creation-date filter (single day or range) is client-side over the loaded list. | `SubSidebar.vue`, `DateInput.vue`, `DateRangeInput.vue`, `PeriodDisplay.vue`, `useDirtyTracking` |
+| `/contacts` | Server-paginated table; **select a row and the header acts on it**; create + edit modals with a travel wish; blind-index email search; per-row welcome-email and delete; help rail. | `PageHeader.vue` (`default`), `PageActions.vue` (AI cluster + destructive menu section), `FlexiblePeriodInput.vue`, `useHelpPanel`, `usePagination`, `useConfirm`, `useDirtyTracking`, `ConfirmDialog.vue` |
+| `/notes` | List/detail: filter rail + note editor with a per-locale customer-facing version. Creation-date filter (single day or range) is client-side over the loaded list. | `PageHeader.vue` (`compact` + `PageUtilityActions`), `PageActions.vue`, `SubSidebar.vue`, `DateInput.vue` (`size`/`clearable`), `DateRangeInput.vue`, `PeriodDisplay.vue`, `LocaleInput.vue`, `LocaleTextarea.vue`, `TranslationBadge.vue`, `useHelpPanel`, `useDirtyTracking` |
 | `/files` | Upload (multipart through `hc`'s `form` input), list with size/content-type, download links. | `hc` client, `resolveApiBaseUrl` |
-| `/settings` | Dirty-tracked settings form + the demo-role switch. Pick **viewer** and save to watch the server's 403 surface through the kit's error messenger. | `useDirtyTracking`, `createApiErrorMessenger` |
+| `/settings` | Dirty-tracked settings form; the demo role is a **decision group** in the header ("Act as"). Switch to **viewer** and save to watch the server's 403 surface through the kit's error messenger. | `PageHeader.vue`, `PageActions.vue` (`PageActionsGroup`), `useDirtyTracking`, `createApiErrorMessenger` |
 
 The flow worth following is the demo server's own: set **Welcome email subject**
 on `/settings`, then hit **Send welcome email** on a contact in `/contacts` and
@@ -119,6 +119,10 @@ app/composables/useApiCall.ts     call() — hc Response -> the { data, error } 
 app/composables/useApiError.ts    createApiErrorMessenger bound to vue-i18n
 app/composables/useDateFormat.ts  createDateFormatter bound to vue-i18n
 app/components/App*.ts   one-line re-exports registering the kit's SFCs
+app/lib/contentLocales.ts         the LocaleFieldSource (content locales ≠ UI language)
+app/app.vue                       provideLocaleFieldContext, once at the root
+app/components/AppHelpPanel.vue   renders useHelpPanel's registry — the half the kit does not ship
+app/components/{Notes,Contacts}Help.vue  the registered help content, with reactive props
 ```
 
 **Plain vue-i18n, not `@nuxtjs/i18n`.** The kit's seams only need a
@@ -164,15 +168,32 @@ routing/lazy-loading/SEO machinery would be weight without a job. `createI18n` +
 | `./ai` — `useAiCardState` | `AiContactBrief.vue` — idle/active/failed chip over the progress store | ✅ |
 | `./ai` — `createWorkflowRegistry` | [`lib/aiWorkflows.ts`](./app/lib/aiWorkflows.ts) — app-owned definition shape; labels the modal title | ✅ |
 | `components/AiResultReviewCard.vue` | [`AppAiResultReviewCard.ts`](./app/components/AppAiResultReviewCard.ts) re-export in `AiContactBrief.vue` — review-then-apply; "apply" is a domain write (creates a note via `POST /api/notes`) plus `markApplied` | ✅ verified in-browser |
+| `components/PageHeader.vue` | `/contacts` + `/settings` (`default`, as the panel's own header, with `UDashboardSidebarToggle` in `#title`); `/notes` detail pane (`compact` — one row, truncating title/subtitle) | ✅ verified in-browser |
+| `components/PageActions.vue` (+ `PageAction`, `PageActionMenu`, `AiButton`) | All three pages. `/contacts` carries the AI cluster (`kind: 'ai'` → `AiButton`), `disabledReason` on every selection-bound action, and the destructive row in its own menu section; `/notes` uses `:help="false"` so `PageUtilityActions` renders Help instead | ✅ verified in-browser |
+| `components/PageUtilityActions.vue` | `/notes` — PageHeader's default `#utility`, the *other* way to render the Help trigger. Pass `:utility="false"` wherever `PageActions` owns Help, or both render one (finding #11) | ✅ verified in-browser |
+| `PageActionsGroup` (decision group) | `/settings` — "Act as" folds admin/viewer into one control; the active role is a disabled row, not a missing one | ✅ verified in-browser |
+| `useHelpPanel` / `HELP_PANEL_KEY` | `/contacts` + `/notes` provide the registry; [`AppHelpPanel.vue`](./app/components/AppHelpPanel.vue) renders it. Registration is owner-scoped and `setActiveTab` runs *after* `register` (see the comment there) | ✅ verified in-browser |
+| `components/FlexiblePeriodInput.vue` | `/contacts` create + edit modals — the travel wish (window + nights), round-tripping to `contacts.wish_*` | ✅ verified in-browser |
+| `components/LocaleInput.vue`, `LocaleTextarea.vue`, `LocaleTab.vue` | `/notes` editor — `publicTitle` / `publicBody` as `LocaleMap<string>`; the textarea opts into `register-override` so `de-formal` appears as an inheriting override tab | ✅ verified in-browser |
+| `components/TranslationBadge.vue` | `/notes` list rows + detail header; the status is computed app-side from the two public fields (the kit ships the badge and the type, not the counting) | ✅ verified in-browser |
+| `./locale` — `provideLocaleFieldContext`, `useLocaleField(Context)`, `pruneLocaleMap` | [`app.vue`](./app/app.vue) provides the context from [`lib/contentLocales.ts`](./app/lib/contentLocales.ts); `pruneLocaleMap` densifies each map at the API boundary | ✅ |
+| `./locale` — `useTranslate` seam, `createLocaleDisplay`, `useLocaleTabs` | — | ❌ `useTranslate` needs a translation backend (omitted on purpose: without it the sparkle button never renders, which is what a deployment with no backend should get). `createLocaleDisplay`/`useLocaleTabs` are the resolve/tab primitives the two field editors already use internally |
 
 The server side of the seam is [`apps/demo-server/src/routes/ai.ts`](../demo-server/src/routes/ai.ts)
 (`octaflow` + the `ai/test` mock model — no API key involved); the
 route serializes flow's `WorkflowWithSteps` into exactly the kit's
 `AiWorkflowData` shape, so the whole transport contract is those two files.
 
-**Typechecked:** with `AiResultReviewCard.vue` adopted, **every** kit SFC is now
-imported here and covered by `nuxt typecheck`. The other five were verified
-earlier — each probed with a deliberate type error, all five caught.
+**Typechecked:** every kit SFC is now reached by `nuxt typecheck` — directly
+(the `App*.ts` re-exports) or through a component that imports it
+(`PageActions.vue` pulls in `PageAction`/`PageActionMenu`/`AiButton`,
+`PageHeader.vue` pulls in `PageUtilityActions`, the locale editors pull in
+`LocaleTab`). That was **not** true until 2026-08-31: the whole
+`PageHeader`/`PageActions` family, `FlexiblePeriodInput` and the locale-field
+components had existed since 2026-07-15 without a single consumer in this repo,
+which is why six of the nine kit commits before that date were fixes to exactly
+those files. Six of the earlier SFCs were probed with a deliberate type error;
+all six were caught.
 
 ## Findings
 
@@ -473,6 +494,68 @@ consumer starting today does not meet them — but they are the shape of the
 failure to expect when composing a large Hono app, and the reason
 [`@octabits-io/demo-server/client`](../demo-server/src/client.ts) instantiates
 `hc<App>` **once** (Hono's documented mitigation) instead of at each import.
+
+### 11. Two Help buttons: `PageHeader`'s `#utility` and `PageActions` both render one (2026-08-31)
+
+`PageHeader` renders `PageUtilityActions` as the fallback of its `#utility`
+slot whenever `utility` is true (the default), and `PageUtilityActions` renders
+a Help trigger as soon as a `HELP_PANEL_KEY` registry with actions is provided.
+`PageActions` renders its *own* Help trigger under the same condition. Put
+`PageActions` in `#actions` without thinking about `#utility` and the header
+shows Help twice — inline from the utility cluster and again from the actions
+cluster (or, once utilities collapse, inline *and* in the ⋯ menu).
+
+The kit documents the answer on `PageHeader` — "prefer driving all of the above
+declaratively with `PageActions` … pass `:utility="false"`" — and both
+wirings are legitimate, so this app now demonstrates each one:
+
+- `/contacts`, `/settings`: `PageHeader :utility="false"`, `PageActions` owns
+  Help (and collapses it into ⋯ with the rest of the utilities).
+- `/notes`: `PageActions :help="false"`, `PageHeader`'s `PageUtilityActions`
+  owns Help.
+
+Not a bug, but it is only visible in a browser: nothing about it fails to
+compile, and each component alone behaves exactly as documented.
+
+### 12. `density="compact"` still wrapped to two rows (fixed — kit was edited)
+
+The compact band promises one row. In the `/notes` detail pane (~600px) it was
+reliably two: title and subtitle on the first, the whole action bar on the
+second — the exact failure the kit's earlier "truncate the compact subtitle"
+fix was written to prevent.
+
+Truncation was the wrong lever on its own. The header wrapper is `flex-wrap`,
+and a wrap container places items by their **hypothetical** size — for a
+`truncate`d line (`white-space: nowrap`) that is still the *full* text width.
+So the heading claimed the row and the actions wrapped **before** the subtitle
+was ever asked to shrink; `min-w-0` never got a chance, because shrinking
+happens after line breaking, not before it.
+
+Fixed in the kit: the compact heading is now `flex: 1 1 0%` (hypothetical size
+zero — it cannot push a sibling onto another row) and the compact title
+truncates like the subtitle. Changeset:
+`.changeset/compact-header-single-row.md`.
+
+Worth keeping in mind on the app side too: truncation is a degradation, not a
+layout. A subtitle carrying two timestamps in a 600px pane leaves the record's
+own name clipped to `Roun…` — this page moved the detail into the help panel
+and kept the subtitle to one fact.
+
+### 13. `pruneLocaleMap` returned the sparse type (fixed — kit was edited)
+
+`LocaleMap<string>` is `{ [locale: string]: string | undefined }`, and
+`pruneLocaleMap` — whose entire job is dropping the empty leaves — returned it.
+Every call site that fed an API therefore had to cast: the route body infers
+`Record<string, string>` from `z.record(z.string(), z.string())`, which rejects
+`string | undefined`, i.e. exactly the thing a pruned map cannot contain. The
+kit now returns `Record<string, string>`; assigning back into a
+`LocaleMap<string>` stays legal, so no caller breaks.
+
+The sparse/dense split is real and worth keeping straight when wiring these
+fields: the **editor** state is sparse (clearing a register-variant tab deletes
+its key so the value falls through to the base locale — a form schema that
+demanded a string per locale would flag that intent as invalid), and the
+**wire** payload is dense (`pruneLocaleMap` at the boundary, nowhere else).
 
 ### AI wiring gotcha: `@` in vue-i18n messages
 

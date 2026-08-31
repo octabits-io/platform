@@ -28,8 +28,24 @@ export interface Contact {
   id: string;
   name: string;
   email: string;
+  /**
+   * The contact's travel wish, in the shape the kit's `FlexiblePeriodInput`
+   * binds: an ISO window (`''` = unset, never null — `Period` has no null) plus
+   * the desired stay length in nights. The column is nullable; `''`/`null` is
+   * the boundary this service converts at, so the browser never has to.
+   */
+  wishStart: string;
+  wishEnd: string;
+  wishNights: number | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** What a contact's wish looks like on the way in. `''` clears the column. */
+export interface ContactWish {
+  wishStart?: string;
+  wishEnd?: string;
+  wishNights?: number | null;
 }
 
 export interface ContactNotFoundError extends OctError {
@@ -56,6 +72,9 @@ interface ContactRow {
   id: string;
   name: string;
   emailEncrypted: Buffer;
+  wishStart: string | null;
+  wishEnd: string | null;
+  wishNights: number | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -81,6 +100,9 @@ export function createContactsService({ db, pii, blindIndex, dateProvider }: Con
       // A NOT NULL ciphertext column can only decrypt to null if the row was
       // written with an empty string — treat that as an empty address.
       email: email.value ?? '',
+      wishStart: row.wishStart ?? '',
+      wishEnd: row.wishEnd ?? '',
+      wishNights: row.wishNights,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     });
@@ -111,9 +133,30 @@ export function createContactsService({ db, pii, blindIndex, dateProvider }: Con
     id: contacts.id,
     name: contacts.name,
     emailEncrypted: contacts.emailEncrypted,
+    wishStart: contacts.wishStart,
+    wishEnd: contacts.wishEnd,
+    wishNights: contacts.wishNights,
     createdAt: contacts.createdAt,
     updatedAt: contacts.updatedAt,
   };
+
+  /**
+   * `''` means "no date" on the wire and `NULL` in the column — an empty
+   * string is not a date, and Postgres would reject it as one.
+   */
+  const toDateColumn = (value: string | undefined): string | null | undefined =>
+    value === undefined ? undefined : value === '' ? null : value;
+
+  /** The wish columns an incoming payload actually touches. */
+  function wishColumns(params: ContactWish): Partial<typeof contacts.$inferInsert> {
+    const changes: Partial<typeof contacts.$inferInsert> = {};
+    const start = toDateColumn(params.wishStart);
+    const end = toDateColumn(params.wishEnd);
+    if (start !== undefined) changes.wishStart = start;
+    if (end !== undefined) changes.wishEnd = end;
+    if (params.wishNights !== undefined) changes.wishNights = params.wishNights;
+    return changes;
+  }
 
   async function list(params: {
     page: number;
@@ -160,14 +203,16 @@ export function createContactsService({ db, pii, blindIndex, dateProvider }: Con
     });
   }
 
-  async function create(params: { name: string; email: string }): Promise<Result<Contact, ContactWriteError>> {
+  async function create(
+    params: { name: string; email: string } & ContactWish,
+  ): Promise<Result<Contact, ContactWriteError>> {
     const encrypted = await encryptEmail(params.email);
     if (!encrypted.ok) return encrypted;
 
     return withDbErrorHandling(async () => {
       const [row] = await db
         .insert(contacts)
-        .values({ name: params.name, ...encrypted.value })
+        .values({ name: params.name, ...encrypted.value, ...wishColumns(params) })
         .returning(SELECT_COLUMNS);
       if (!row) return err(cryptoError('Insert returned no row'));
       return toContact(row);
@@ -176,9 +221,12 @@ export function createContactsService({ db, pii, blindIndex, dateProvider }: Con
 
   async function update(
     id: string,
-    params: { name?: string; email?: string },
+    params: { name?: string; email?: string } & ContactWish,
   ): Promise<Result<Contact, ContactByIdError>> {
-    const changes: Partial<typeof contacts.$inferInsert> = { updatedAt: dateProvider.now() };
+    const changes: Partial<typeof contacts.$inferInsert> = {
+      updatedAt: dateProvider.now(),
+      ...wishColumns(params),
+    };
     if (params.name !== undefined) changes.name = params.name;
     if (params.email !== undefined) {
       const encrypted = await encryptEmail(params.email);

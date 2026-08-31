@@ -16,7 +16,18 @@
  * root* column-set (a workspace/tenant/organization row), not a generic
  * timestamp mixin — using it here would misrepresent what it is for.
  */
-import { pgTable, primaryKey, text, timestamp, uuid, index } from 'drizzle-orm/pg-core';
+import {
+  date,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
+import type { LocaleMap } from '@octabits-io/framework/utils';
 import { bytea, scopedConfigColumns } from '@octabits-io/framework/drizzle/scope';
 import { eventOutboxColumns } from '@octabits-io/framework/drizzle/event-outbox';
 import { idempotencyKeyColumns } from '@octabits-io/framework/drizzle/idempotency';
@@ -39,17 +50,36 @@ export const contacts = pgTable(
     name: text('name').notNull(),
     emailEncrypted: bytea('email_encrypted').notNull(),
     emailIndex: bytea('email_index').notNull(),
+    // The travel wish this contact is shopping for: a window they could travel
+    // in (earliest arrival → latest departure) plus the stay length they want
+    // inside it. Nullable as a set — a contact without a wish is the norm.
+    // `mode: 'string'` keeps these as the ISO `YYYY-MM-DD` the kit's `Period`
+    // speaks, so no date object ever enters the transport.
+    wishStart: date('wish_start', { mode: 'string' }),
+    wishEnd: date('wish_end', { mode: 'string' }),
+    wishNights: integer('wish_nights'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index('contacts_email_index_idx').on(t.emailIndex)],
 );
 
-/** A plain, non-PII table — the one `createBaseCrudService` drives end to end. */
+/**
+ * A plain, non-PII table — the one `createBaseCrudService` drives end to end.
+ *
+ * `title`/`body` are the internal note. `publicTitle`/`publicBody` are the
+ * customer-facing version of it, per content locale — a `LocaleMap<string>`
+ * stored as jsonb, which is the shape the kit's `LocaleInput`/`LocaleTextarea`
+ * edit and `resolveLocale` reads. Defaulting to `{}` (rather than allowing
+ * NULL) keeps every read a map: a note with no translations differs from one
+ * with an empty English string, and neither is null.
+ */
 export const notes = pgTable('notes', {
   id: uuid('id').primaryKey().defaultRandom(),
   title: text('title').notNull(),
   body: text('body').notNull(),
+  publicTitle: jsonb('public_title').$type<LocaleMap<string>>().notNull().default({}),
+  publicBody: jsonb('public_body').$type<LocaleMap<string>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });

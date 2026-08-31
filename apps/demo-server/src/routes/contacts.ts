@@ -29,10 +29,21 @@ import type { DemoScopeMiddleware } from '../request-scope.ts';
 import { hasPermission } from '../rbac.ts';
 import { welcomeEmailQueue } from '../queues/welcome-email.ts';
 
+/**
+ * ISO `YYYY-MM-DD`, or `''` for "not set" — the kit's `Period` vocabulary,
+ * carried verbatim so the SPA can bind a response field straight into
+ * `FlexiblePeriodInput` without a null dance. `z.iso.date()` alone would
+ * reject the empty string.
+ */
+const SCHEMA_WISH_DATE = z.union([z.iso.date(), z.literal('')]);
+
 const SCHEMA_CONTACT = z.object({
   id: z.uuid(),
   name: z.string(),
   email: z.email(),
+  wishStart: SCHEMA_WISH_DATE,
+  wishEnd: SCHEMA_WISH_DATE,
+  wishNights: z.number().int().nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -44,14 +55,23 @@ const SCHEMA_CONTACT_LIST = z.object({
   pageSize: z.number().int(),
 });
 
+/** The wish is optional on every write, and independently clearable. */
+const SCHEMA_WISH_INPUT = z.object({
+  wishStart: SCHEMA_WISH_DATE.optional(),
+  wishEnd: SCHEMA_WISH_DATE.optional(),
+  wishNights: z.number().int().min(1).max(365).nullable().optional(),
+});
+
 const SCHEMA_CREATE_CONTACT = z.object({
   name: z.string().min(1).max(200),
   email: z.email(),
+  ...SCHEMA_WISH_INPUT.shape,
 });
 
 const SCHEMA_UPDATE_CONTACT = z.object({
   name: z.string().min(1).max(200).optional(),
   email: z.email().optional(),
+  ...SCHEMA_WISH_INPUT.shape,
 });
 
 const SCHEMA_ID_PARAM = z.object({ id: z.uuid() });
