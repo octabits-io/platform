@@ -56,7 +56,15 @@ API's port.
 | --- | --- |
 | Dev server | `pnpm --filter @octabits-io/demo-web dev` |
 | Typecheck (incl. the kit's SFCs) | `pnpm --filter @octabits-io/demo-web typecheck` |
+| Unit tests (app-owned logic) | `pnpm --filter @octabits-io/demo-web test` |
 | Production build | `pnpm --filter @octabits-io/demo-web build` |
+
+The test suite is deliberately small — being a real consumer is this app's
+job, and `nuxt typecheck` plus a browser pass is what proves it. Vitest covers
+the two pieces of app-owned logic neither can: the **i18n merge** (whose
+failure mode is a raw key path rendering in the UI) and the
+**translation-status rules** (whose failure mode is a badge lying about
+completeness).
 
 `NUXT_PUBLIC_API_BASE` overrides the API URL; unset, the kit's
 `resolveApiBaseUrl` falls back to `http://localhost:3101` in dev.
@@ -120,6 +128,7 @@ app/composables/useApiError.ts    createApiErrorMessenger bound to vue-i18n
 app/composables/useDateFormat.ts  createDateFormatter bound to vue-i18n
 app/components/App*.ts   one-line re-exports registering the kit's SFCs
 app/lib/contentLocales.ts         the LocaleFieldSource (content locales ≠ UI language)
+app/lib/translationStatus.ts      what counts as a translatable leaf (app schema, not kit)
 app/app.vue                       provideLocaleFieldContext, once at the root
 app/components/AppHelpPanel.vue   renders useHelpPanel's registry — the half the kit does not ship
 app/components/{Notes,Contacts}Help.vue  the registered help content, with reactive props

@@ -3,10 +3,11 @@
   "version": "0.0.27",
   "private": true,
   "type": "module",
-  "description": "Contact-desk demo SPA — living documentation for @octabits-io/nuxt-ui-kit and the first in-repo consumer that typechecks the kit's .vue SFCs",
+  "description": "Contact-desk demo SPA \u2014 living documentation for @octabits-io/nuxt-ui-kit and the first in-repo consumer that typechecks the kit's .vue SFCs",
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt build",
+    "test": "vitest run",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "typecheck": "nuxt typecheck"
@@ -29,6 +30,7 @@
   "devDependencies": {
     "@octabits-io/demo-server": "workspace:*",
     "typescript": "^6.0.3",
+    "vitest": "^4.1.11",
     "vue-tsc": "^3.3.11"
   }
 }

@@ -10,9 +10,10 @@ import {
   type PageActionsItem,
 } from '@octabits-io/nuxt-ui-kit'
 import type { Period } from '@octabits-io/nuxt-ui-kit/dates'
-import { pruneLocaleMap, type TranslationStatus } from '@octabits-io/nuxt-ui-kit/locale'
+import { pruneLocaleMap } from '@octabits-io/nuxt-ui-kit/locale'
 import NotesHelp from '~/components/NotesHelp.vue'
-import { CONTENT_LOCALES, TRANSLATABLE_LOCALES } from '~/lib/contentLocales'
+import { translationStatusOf } from '~/lib/translationStatus'
+import { CONTENT_LOCALES } from '~/lib/contentLocales'
 import { useApi } from '~/composables/useApi'
 import { call } from '~/composables/useApiCall'
 import { useApiError } from '~/composables/useApiError'
@@ -114,29 +115,8 @@ const filteredNotes = computed(() => {
 
 // --- Translation completeness ---------------------------------------------
 
-/**
- * The `TranslationStatus` behind `TranslationBadge`. The kit ships the badge
- * and the type, not the counting — what counts as a translatable leaf is the
- * app's schema, and here it is the two public fields.
- *
- * `undefined` (not "complete") when the note has no public text at all: a note
- * nobody has written a customer-facing version of has nothing to translate,
- * and a green check on it would claim otherwise. `de-formal` is not counted —
- * see `TRANSLATABLE_LOCALES`.
- */
-function statusOf(note: Note): TranslationStatus | undefined {
-  const fields = [note.publicTitle, note.publicBody].filter(
-    field => Object.values(field ?? {}).some(value => (value ?? '').trim().length > 0),
-  )
-  if (!fields.length) return undefined
-
-  const missing: Record<string, number> = {}
-  for (const locale of TRANSLATABLE_LOCALES) {
-    const gaps = fields.filter(field => !field[locale]?.trim()).length
-    if (gaps > 0) missing[locale] = gaps
-  }
-  return { complete: Object.keys(missing).length === 0, missing }
-}
+/** See `~/lib/translationStatus` — the rules live there so they can be tested. */
+const statusOf = (note: Note) => translationStatusOf([note.publicTitle, note.publicBody])
 
 // --- Selection (drives SubSidebar's mobile auto-close via `?s=`) -----------
 
