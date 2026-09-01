@@ -22,8 +22,12 @@ import type { ObjectStorageService } from '@octabits-io/framework/storage';
 import type { BossManager } from '@octabits-io/framework/queue';
 import type { TypedCaptchaService } from '@octabits-io/framework/captcha';
 import { createNoopCaptchaService } from '@octabits-io/framework/captcha';
-import { createDateProvider } from '@octabits-io/framework/utils';
+import { createDateProvider, createLruCacheService } from '@octabits-io/framework/utils';
 import type { DateProvider } from '@octabits-io/framework/utils';
+import { createScopedConfigCache } from '@octabits-io/framework/drizzle/config';
+import type { ScopedConfigCache } from '@octabits-io/framework/drizzle/config';
+import { createBroadcastChannel } from '@octabits-io/framework/drizzle/broadcast';
+import type { BroadcastChannel } from '@octabits-io/framework/drizzle/broadcast';
 import type { BlindIndexService, PiiEncryptionService } from '@octabits-io/framework/pii';
 import { createBlindIndexService, createPiiEncryptionService, identityToRecipient } from '@octabits-io/framework/pii';
 import type { EventHub, EventPublisher } from '@octabits-io/framework/events';
@@ -34,7 +38,7 @@ import type { Schema } from './db/schema.ts';
 import { eventOutbox, idempotencyKey } from './db/schema.ts';
 import { createContactsService, type ContactsService } from './services/contacts.ts';
 import { createNotesService, type NotesService } from './services/notes.ts';
-import { createSettingsService, type SettingsService } from './services/settings.ts';
+import { createSettingsService, SETTINGS_KEYS, type SettingsMap, type SettingsService } from './services/settings.ts';
 import { createDemoMailService, type DemoMailService } from './services/mail.ts';
 import type { AppConfig } from './config.ts';
 
@@ -52,6 +56,8 @@ export interface DemoServices {
   contactsService: ContactsService;
   notesService: NotesService;
   settingsService: SettingsService;
+  settingsCache: ScopedConfigCache<SettingsMap>;
+  settingsBroadcast: BroadcastChannel<SettingsChangedMessage>;
   mailService: DemoMailService;
   idempotency: IdempotencyService;
   eventOutboxStore: DrizzleEventOutboxStore;
@@ -111,9 +117,43 @@ export async function buildContainer(deps: BuildContainerDeps): Promise<IoC<Demo
   // work and invalidates only on writes made through that same instance. A
   // process-wide singleton would therefore serve stale config after *another*
   // process wrote — so each resolve gets a fresh instance with an empty cache.
+  // The cross-scope cache the Transient services share. A 60s TTL is the
+  // module's own recommendation and the correctness backstop the broadcast
+  // below only shortens: a lost NOTIFY costs staleness, never correctness.
+  container.register(
+    'settingsCache',
+    (c) =>
+      createScopedConfigCache<SettingsMap>({
+        cache: createLruCacheService({ dateProvider: c.resolve('dateProvider') }).createCache<
+          string,
+          unknown
+        >({ maxSize: 64, ttlMs: 60_000 }),
+        cacheableKeys: SETTINGS_KEYS,
+      }),
+    single,
+  );
+  // Cache-invalidation hints between processes — `…/drizzle/broadcast`. NOT an
+  // event: no envelope, no outbox, no replay. A hint that misses a restarting
+  // process is fine, which is exactly why it is a different module from
+  // `./events` (whose durable lane guarantees the opposite).
+  container.register(
+    'settingsBroadcast',
+    (c) =>
+      createBroadcastChannel<SettingsChangedMessage>({
+        channel: SETTINGS_BROADCAST_CHANNEL,
+        schema: SCHEMA_SETTINGS_CHANGED,
+        logger: c.resolve('logger').child({ component: 'settings-broadcast' }),
+      }),
+    single,
+  );
   container.register(
     'settingsService',
-    (c) => createSettingsService({ db: c.resolve('db'), logger: c.resolve('logger') }),
+    (c) =>
+      createSettingsService({
+        db: c.resolve('db'),
+        logger: c.resolve('logger'),
+        cache: c.resolve('settingsCache'),
+      }),
     ServiceLifetime.Transient,
   );
   container.register(
@@ -171,6 +211,17 @@ export async function buildContainer(deps: BuildContainerDeps): Promise<IoC<Demo
 
 /** The one NOTIFY channel this app uses (store send side + listener in main.ts). */
 export const EVENT_CHANNEL = 'demo_events';
+
+/** Broadcast channel for settings-cache invalidation hints. */
+export const SETTINGS_BROADCAST_CHANNEL = 'demo_settings_changed';
+
+/**
+ * The payload is an identifier, not the value: a broadcast is a hint to
+ * re-read, and shipping the new settings would make the channel a (lossy)
+ * replication mechanism.
+ */
+export const SCHEMA_SETTINGS_CHANGED = z.object({ writtenBy: z.string().min(1) });
+export type SettingsChangedMessage = z.infer<typeof SCHEMA_SETTINGS_CHANGED>;
 
 /** The single scope every demo event lives in (single-tenant deployment path). */
 export const DEMO_EVENT_SCOPE = 'demo';

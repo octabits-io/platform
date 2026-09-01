@@ -14,9 +14,15 @@
  * `cipher` is left unwired: nothing here is a secret. It is the seam you would
  * pass `…/pii`'s encrypt/decrypt through (base64 in, base64 out) to encrypt a
  * key at rest — the config module never imports pii itself.
+ *
+ * The optional `cache` is the module's cross-scope cache seam. It is what makes
+ * the read path cheap across requests — and what needs invalidating when
+ * ANOTHER process writes, which is the job `…/drizzle/broadcast` does in
+ * `main.ts`.
  */
 import { z } from 'zod';
 import { createScopedConfigService } from '@octabits-io/framework/drizzle/config';
+import type { ScopedConfigCache } from '@octabits-io/framework/drizzle/config';
 import type { AppDatabase } from '@octabits-io/framework/drizzle/factory';
 import type { Logger } from '@octabits-io/framework/logger';
 import { settings, type Schema } from '../db/schema.ts';
@@ -42,16 +48,22 @@ export const SETTINGS_KEYS = ['supportEmail', 'welcomeSubject'] as const;
 export interface SettingsServiceDeps {
   db: AppDatabase<Schema>;
   logger: Logger;
+  /** Cross-scope cache; omit for a process that should always read through. */
+  cache?: ScopedConfigCache<SettingsMap>;
 }
 
-export function createSettingsService({ db, logger }: SettingsServiceDeps) {
+export function createSettingsService({ db, logger, cache }: SettingsServiceDeps) {
   return createScopedConfigService<SettingsMap>({
     db,
     table: settings,
     schema: SCHEMA_SETTINGS_VALUE,
     keys: SETTINGS_KEYS,
     logger,
+    ...(cache && { cache, cacheableKeys: SETTINGS_KEYS }),
   });
 }
+
+/** The scope value an unscoped config service reads and writes under. */
+export const SETTINGS_SCOPE_VALUE = '';
 
 export type SettingsService = ReturnType<typeof createSettingsService>;

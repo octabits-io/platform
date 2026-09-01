@@ -58,6 +58,15 @@ export function createSettingsRoutes(scopeMiddleware: DemoScopeMiddleware) {
           const settings = scope.resolve('settingsService');
           const written = await settings.writeConfig(c.req.valid('json'));
           if (!written.ok) return errorJson(c, written.error);
+
+          // Tell the other processes to drop their cached settings. Fire and
+          // forget on purpose: `publish` swallows database failures, because a
+          // lost hint only costs staleness until the cache TTL expires — and
+          // failing this write's response over a *hint* would be worse.
+          void scope
+            .resolve('settingsBroadcast')
+            .publish(scope.resolve('db'), { writtenBy: 'settings-route' });
+
           const config = await settings.readAll();
           return c.json(config as z.infer<typeof SCHEMA_SETTINGS>);
         },

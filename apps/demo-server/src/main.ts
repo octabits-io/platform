@@ -25,6 +25,7 @@ import { runDemoBackfills } from './db/backfills.ts';
 import { createPgNotifyListener } from '@octabits-io/framework/events/postgres';
 import { createEventRelay } from '@octabits-io/framework/events';
 import { EVENT_CHANNEL } from './container.ts';
+import { SETTINGS_SCOPE_VALUE } from './services/settings.ts';
 import { buildContainer, createSystemScopeFactory } from './container.ts';
 import { welcomeEmailQueue } from './queues/welcome-email.ts';
 import { createAiRuntime } from './ai/runtime.ts';
@@ -107,6 +108,22 @@ await runServer({
     });
     await eventRelay.start();
 
+    // Cache-invalidation hints (`…/drizzle/broadcast`). One more LISTEN
+    // connection, same direct-connection requirement as the event listener —
+    // and the same channel a `PUT /api/settings` publishes on. Losing a hint is
+    // survivable by contract; the cache TTL is the backstop.
+    const settingsCache = container.resolve('settingsCache');
+    const settingsSubscription = await container.resolve('settingsBroadcast').subscribe({
+      connectionString: config.database.url,
+      onMessage: (message) => {
+        settingsCache.invalidate(SETTINGS_SCOPE_VALUE);
+        logger.info('Settings cache invalidated by broadcast', { writtenBy: message.writtenBy });
+      },
+      // At-most-once: anything broadcast while the connection was down is gone,
+      // so flush whatever the channel invalidates rather than trusting the gap.
+      onReconnect: () => settingsCache.invalidate(SETTINGS_SCOPE_VALUE),
+    });
+
     const ai = createAiRuntime({
       pool,
       boss: boss.getBoss(),
@@ -138,6 +155,7 @@ await runServer({
         logger.info('demo-server listening', { port, url: config.publicBaseUrl }),
       stop: async () => {
         await server.stop();
+        await settingsSubscription.stop();
         await eventRelay.stop();
         await ai.stop();
         await dlq.stop();
