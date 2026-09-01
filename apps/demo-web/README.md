@@ -105,7 +105,7 @@ watch the server log print the rendered mail with your subject.
 ### Where the kit is wired
 
 ```
-app/lib/i18n.ts          plain vue-i18n instance (no @nuxtjs/i18n — see below)
+app/lib/i18n.ts          plain vue-i18n instance (no @nuxtjs/i18n — see below), deep-merging the kit's `kitMessagesEn`
 app/lib/oidc.ts          createUserManagerFactory
 app/lib/bypass.ts        seedAuthBypassSession
 app/plugins/01.i18n.ts   installs vue-i18n
@@ -148,6 +148,7 @@ routing/lazy-loading/SEO machinery would be weight without a job. `createI18n` +
 | `useDirtyTracking` | `/settings`, `/contacts` edit, `/notes` editor (incl. `getDirtyFields()`) | ✅ |
 | `usePagination` | `/contacts` | ⚠️ partial — see findings |
 | `./zod` `setupZodLocaleSync` | `app/plugins/02.zod-locale.ts` | ✅ |
+| `./i18n` — `kitMessagesEn` / `KitMessages` | [`lib/i18n.ts`](./app/lib/i18n.ts) deep-merges it under this app's own messages, so `en.json` carries only app copy plus the handful of deliberate overrides (`errors.forbidden` names the role switch). The kit's `auth.*` fragment is what [`plugins/10.oidc.client.ts`](./app/plugins/10.oidc.client.ts) puts in the session toasts | ✅ |
 | `./dates` `createDateFormatter` | `app/composables/useDateFormat.ts` — all date rendering | ✅ |
 | `./dates` `Period` / `calculateDays` / `shiftIso` | via `DateRangeInput` + `PeriodDisplay` | ✅ (indirect) |
 | `components/ConfirmDialog.vue` | `app/components/AppConfirmDialog.ts` | ✅ |
@@ -569,6 +570,33 @@ fields: the **editor** state is sparse (clearing a register-variant tab deletes
 its key so the value falls through to the base locale — a form schema that
 demanded a string per locale would flag that intent as invalid), and the
 **wire** payload is dense (`pruneLocaleMap` at the boundary, nowhere else).
+
+### 14. The kit ships its own message fragment — this app was hand-copying it (2026-08-31)
+
+`@octabits-io/nuxt-ui-kit/i18n` exports `kitMessagesEn`: every key the KIT
+asks for, in English, as a deep-mergeable object. This app did not use it. It
+maintained its own copies of `errors.*`, `period.*`, `dateRange.*`,
+`ai.review.*`, `localeField.*` — and, on the day the page-chrome components
+were adopted, gained hand-written `pageChrome.*`, `dateInput.*` and
+`flexPeriod.*` blocks too. Two lists of the same keys, and the drift is silent:
+vue-i18n renders a missing path as its own text, so a key the kit renames
+shows up as `pageChrome.moreActions` in a menu.
+
+Two halves to the fix:
+
+- **kit**: `KitMessages` only covered four namespaces while claiming to be
+  "the reference for the full key set". It now covers every namespace the
+  components read, and a kit test derives the required set from the component
+  sources so it cannot drift again.
+- **this app**: [`lib/i18n.ts`](./app/lib/i18n.ts) deep-merges `kitMessagesEn`
+  under `en.json`, and the duplicated blocks are gone. A **deep** merge, not a
+  spread: app and kit both contribute to `errors.*` (this app overrides
+  `forbidden` to name the role switch, the kit supplies `unique_violation`) and
+  to `ai.*` (the kit's review card, this app's brief). A shallow merge drops
+  whichever half loses the collision, silently.
+
+`app/lib/i18n.test.ts` pins all of it, including that every `t('…')` key in
+this app's source resolves against the merged messages.
 
 ### AI wiring gotcha: `@` in vue-i18n messages
 

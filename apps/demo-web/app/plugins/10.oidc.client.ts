@@ -28,8 +28,13 @@ export default defineNuxtPlugin((nuxtApp) => {
     notify: (notice) => {
       const expired = notice.kind === 'session-expired'
       nuxtApp.runWithContext(() => {
+        // The kit's own `auth.*` fragment (`@octabits-io/nuxt-ui-kit/i18n`,
+        // merged in `~/lib/i18n`) carries this copy — the app supplies none.
         useToast().add({
-          title: i18n.global.t(expired ? 'session.expired' : 'session.renewFailed'),
+          title: i18n.global.t(expired ? 'auth.sessionExpiredTitle' : 'auth.sessionRenewFailedTitle'),
+          description: i18n.global.t(
+            expired ? 'auth.sessionExpiredDescription' : 'auth.sessionRenewFailedDescription',
+          ),
           color: expired ? 'error' : 'warning',
         })
       })

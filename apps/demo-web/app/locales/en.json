@@ -29,10 +29,6 @@
     "logout": "Sign out",
     "events": "Live events"
   },
-  "session": {
-    "expired": "Your session has ended. Please sign in again.",
-    "renewFailed": "Could not refresh your session — retrying."
-  },
   "login": {
     "title": "Sign in",
     "description": "This demo has no identity provider. Signing in seeds a fake OIDC session in localStorage via the kit's dev bypass.",
@@ -124,13 +120,6 @@
     }
   },
   "ai": {
-    "review": {
-      "title": "AI suggestion",
-      "description": "Review the generated result before applying it.",
-      "currentValue": "Current",
-      "apply": "Apply",
-      "dismiss": "Dismiss"
-    },
     "workflows": {
       "contactBrief": "Contact brief"
     },
@@ -253,34 +242,6 @@
     "saveHint": "Save from the header — the page keeps a single primary action.",
     "subtitle": "Scoped config — validated, encrypted, cached"
   },
-  "period": {
-    "travel": {
-      "tooltip": "Check-in → check-out",
-      "nights": "{n} night | {n} nights"
-    },
-    "booking": {
-      "tooltip": "First → last day covered",
-      "days": "{n} day | {n} days"
-    }
-  },
-  "dateRange": {
-    "checkIn": "From",
-    "checkOut": "To",
-    "atTime": "{date} at {time}",
-    "nextDay": "(next day)",
-    "checking": "Checking availability…",
-    "availabilityOk": "Available",
-    "availabilityConflict": "Not available",
-    "availabilityPartial": "Partially available",
-    "errors": {
-      "bothRequired": "Pick both a start and an end date.",
-      "endAfterStart": "The end date must not be before the start date.",
-      "minDays": "Pick at least {n} days.",
-      "maxDays": "Pick at most {n} days.",
-      "blockedDate": "{date} is not selectable.",
-      "blockedRange": "The range covers blocked dates: {dates}"
-    }
-  },
   "errors": {
     "internal_server_error": "Something went wrong. Please try again.",
     "validation_error": "Please check the highlighted fields.",
@@ -321,37 +282,6 @@
       "reconnecting": "Reconnecting",
       "degraded": "Degraded",
       "stopped": "Stopped"
-    }
-  },
-  "pageChrome": {
-    "back": "Back",
-    "help": "Help",
-    "moreActions": "More actions",
-    "ai": "AI"
-  },
-  "dateInput": {
-    "clear": "Clear date"
-  },
-  "flexPeriod": {
-    "earliestStart": "Earliest arrival",
-    "latestEnd": "Latest departure",
-    "nightsLabel": "Nights",
-    "clear": "Clear the travel wish",
-    "windowSpan": "Window: {nights}",
-    "flexibility": "Flexibility: {nights}",
-    "example": "For example {start} → {end}",
-    "errors": {
-      "minNights": "Stay at least {n} nights.",
-      "maxNights": "Stay at most {n} nights.",
-      "nightsExceedWindow": "{nights} do not fit a window of {window}."
-    }
-  },
-  "localeField": {
-    "inheritsBaseLocale": "Empty — inherits the base language",
-    "translate": "Translate with AI",
-    "translationStatus": {
-      "complete": "Translated into every language",
-      "missing": "Missing translations — {details}"
     }
   }
 }
