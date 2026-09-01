@@ -6,6 +6,7 @@ import {
   sanitizeObjectKey,
   createGenericHandler,
   createExpressHandler,
+  createNitroHandler,
   createWebResponse,
   DEFAULT_CACHE_CONTROL,
 } from './postgres-handler';
@@ -281,6 +282,98 @@ describe('ObjectStorageService.postgres.handler', () => {
 
       expect(secondResponse.statusCode).toBe(304);
       expect(secondResponse.body).toBe('');
+    });
+  });
+
+  describe('createNitroHandler', () => {
+    /** Minimal Nitro-shaped event: `context.params` in, `node.res` out. */
+    const makeEvent = (params: Record<string, string>, headers: Record<string, string> = {}) => {
+      const set: Record<string, string | number> = {};
+      let statusCode = 0;
+      let ended = false;
+      const event = {
+        context: { params },
+        node: {
+          req: { headers },
+          res: {
+            get statusCode() { return statusCode; },
+            set statusCode(code: number) { statusCode = code; },
+            setHeader(name: string, value: string | number) { set[name] = value; },
+            end() { ended = true; },
+          },
+        },
+      };
+      return { event, headers: set, get statusCode() { return statusCode; }, get ended() { return ended; } };
+    };
+
+    beforeEach(() => {
+      upload({
+        namespace: NAMESPACE,
+        key: 'nitro/file.txt',
+        body: Buffer.from('nitro blob'),
+        metadata: { 'content-type': 'text/plain' },
+      });
+    });
+
+    test('serves the object with nosniff, content headers and cache-control', async () => {
+      const handler = createNitroHandler(fileServer, NAMESPACE, { contentDisposition: 'attachment' });
+      const ctx = makeEvent({ key: 'nitro/file.txt' });
+
+      const body = await handler(ctx.event);
+
+      expect(ctx.statusCode).toBe(200);
+      expect(body.toString()).toBe('nitro blob');
+      // Upload metadata is user-controlled — the sniff guard is not optional.
+      expect(ctx.headers['X-Content-Type-Options']).toBe('nosniff');
+      expect(ctx.headers['Content-Type']).toBe('text/plain');
+      expect(ctx.headers['Content-Disposition']).toBe('attachment');
+      expect(ctx.headers['Content-Length']).toBe('nitro blob'.length);
+      expect(ctx.headers['Cache-Control']).toBe(DEFAULT_CACHE_CONTROL);
+    });
+
+    test('reads the key from the catch-all param, and lets an explicit key win', async () => {
+      const handler = createNitroHandler(fileServer, NAMESPACE);
+
+      const splat = makeEvent({ '0': 'nitro/file.txt' });
+      expect((await handler(splat.event)).toString()).toBe('nitro blob');
+
+      const explicit = makeEvent({ key: 'does-not-exist' });
+      expect((await handler(explicit.event, 'nitro/file.txt')).toString()).toBe('nitro blob');
+    });
+
+    test('answers 400 when no key can be resolved', async () => {
+      const handler = createNitroHandler(fileServer, NAMESPACE);
+      const ctx = makeEvent({});
+
+      const body = await handler(ctx.event);
+
+      expect(ctx.statusCode).toBe(400);
+      expect(body).toBe('Missing key parameter');
+      expect(ctx.headers['X-Content-Type-Options']).toBe('nosniff');
+    });
+
+    test('maps a miss to the error status with a text body', async () => {
+      const handler = createNitroHandler(fileServer, NAMESPACE);
+      const ctx = makeEvent({ key: 'nitro/missing.txt' });
+
+      const body = await handler(ctx.event);
+
+      expect(ctx.statusCode).toBe(404);
+      expect(typeof body).toBe('string');
+    });
+
+    test('answers 304 with an empty body on a matching If-None-Match', async () => {
+      const handler = createNitroHandler(fileServer, NAMESPACE);
+      const first = makeEvent({ key: 'nitro/file.txt' });
+      await handler(first.event);
+      const etag = String(first.headers['ETag']);
+
+      const revalidate = makeEvent({ key: 'nitro/file.txt' }, { 'if-none-match': etag });
+      const body = await handler(revalidate.event);
+
+      expect(revalidate.statusCode).toBe(304);
+      expect(revalidate.ended).toBe(true);
+      expect(body).toBe('');
     });
   });
 

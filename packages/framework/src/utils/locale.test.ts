@@ -5,6 +5,7 @@ import {
   anyLocaleValue,
   baseLocaleOf,
   isLocaleMap,
+  missingLocalesInUse,
   isLocaleMapComplete,
   localeFallbackChain,
   matchLocaleTag,
@@ -443,5 +444,33 @@ describe('resolveLocaleOrAny', () => {
   it('returns undefined for null and empty maps', () => {
     expect(resolveLocaleOrAny(null, 'de')).toBeUndefined();
     expect(resolveLocaleOrAny({}, 'de')).toBeUndefined();
+  });
+});
+
+describe('missingLocalesInUse', () => {
+  const SUPPORTED = ['en', 'de', 'fr'] as const;
+
+  it('reports nothing for a map nobody has filled in yet', () => {
+    // "In use" is the whole point: an untouched field is not an incomplete
+    // translation, and reporting it would mark every empty record as missing.
+    expect(missingLocalesInUse({}, SUPPORTED)).toEqual([]);
+    expect(missingLocalesInUse({ en: '', de: '' }, SUPPORTED)).toEqual([]);
+    expect(missingLocalesInUse(null, SUPPORTED)).toEqual([]);
+    expect(missingLocalesInUse(undefined, SUPPORTED)).toEqual([]);
+  });
+
+  it('lists the supported locales a used map does not cover', () => {
+    expect(missingLocalesInUse({ en: 'Hello' }, SUPPORTED)).toEqual(['de', 'fr']);
+    expect(missingLocalesInUse({ en: 'Hello', de: 'Hallo', fr: 'Bonjour' }, SUPPORTED)).toEqual([]);
+  });
+
+  it('counts a base-locale value as covering its variant', () => {
+    // `de-formal` inherits `de`, so a filled base is not a gap.
+    expect(missingLocalesInUse({ en: 'Hello', de: 'Hallo' }, ['en', 'de', 'de-formal'])).toEqual([]);
+  });
+
+  it('treats empty string and null as absent, but keeps falsy non-strings', () => {
+    expect(missingLocalesInUse({ en: 'Hello', de: '', fr: null }, SUPPORTED)).toEqual(['de', 'fr']);
+    expect(missingLocalesInUse({ en: 0, de: false, fr: 0 }, SUPPORTED)).toEqual([]);
   });
 });

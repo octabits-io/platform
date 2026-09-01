@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { slugify } from './slugify.ts';
+import { isUrlFriendly, slugify } from './slugify.ts';
 
 describe('slugify', () => {
   it('should trim whitespace and lowercase', () => {
@@ -36,5 +36,29 @@ describe('slugify', () => {
 
   it('should handle empty string', () => {
     expect(slugify('')).toBe('');
+  });
+});
+
+describe('isUrlFriendly', () => {
+  it('accepts what slugify produces', () => {
+    for (const input of ['Hello World', 'Grüße aus München', 'a  b---c']) {
+      expect(isUrlFriendly(slugify(input))).toBe(true);
+    }
+  });
+
+  it('rejects the shapes a slug must never take', () => {
+    expect(isUrlFriendly('Hello World')).toBe(false); // spaces
+    expect(isUrlFriendly('héllo')).toBe(false); // unescaped diacritic
+    expect(isUrlFriendly('a/b')).toBe(false); // path separator
+    expect(isUrlFriendly('a.b')).toBe(false); // dot
+    expect(isUrlFriendly('')).toBe(false); // a slug of nothing is not a slug
+  });
+
+  it('is a URL-safety check, not a slug-shape check — case and underscores pass', () => {
+    // Worth knowing before using it as a validator: it answers "can this ride
+    // in a path segment unescaped?", so `Hello_World` is fine even though
+    // `slugify` would never produce it.
+    expect(isUrlFriendly('Hello')).toBe(true);
+    expect(isUrlFriendly('Hello_World-2')).toBe(true);
   });
 });

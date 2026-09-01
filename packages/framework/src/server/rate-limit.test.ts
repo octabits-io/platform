@@ -3,7 +3,7 @@
  * sweep never losing live windows, plus the IPv4-CIDR/exact-IP skip matcher.
  */
 import { describe, expect, it } from 'vitest';
-import { createCidrMatcher, createFixedWindowLimiter } from './rate-limit';
+import { createCidrMatcher, createFixedWindowLimiter, timingSafeStringEqual } from './rate-limit';
 
 describe('createFixedWindowLimiter', () => {
   it('counts hits within one window and reports remaining', () => {
@@ -95,5 +95,32 @@ describe('createCidrMatcher', () => {
     expect(() => createCidrMatcher(['10.0.0.'])).toThrow(/Invalid skipCidrs entry/);
     expect(() => createCidrMatcher(['10.0.0.0/33'])).toThrow(/Invalid skipCidrs entry/);
     expect(() => createCidrMatcher(['fd00::/8'])).toThrow(/Invalid skipCidrs entry/); // IPv6 CIDR unsupported
+  });
+});
+
+/**
+ * The comparison behind bypass-token checks. `timingSafeEqual` throws on
+ * mismatched lengths, so the length guard is not an optimisation — without it
+ * a short guess crashes the request instead of being rejected.
+ */
+describe('timingSafeStringEqual', () => {
+  it('matches identical strings', () => {
+    expect(timingSafeStringEqual('s3cret-token', 's3cret-token')).toBe(true);
+    expect(timingSafeStringEqual('', '')).toBe(true);
+  });
+
+  it('rejects same-length differences', () => {
+    expect(timingSafeStringEqual('s3cret-token', 's3cret-tokeN')).toBe(false);
+  });
+
+  it('rejects different lengths without throwing', () => {
+    expect(timingSafeStringEqual('s3cret', 's3cret-token')).toBe(false);
+    expect(timingSafeStringEqual('', 'x')).toBe(false);
+  });
+
+  it('compares bytes, not code units — multi-byte input is handled', () => {
+    expect(timingSafeStringEqual('tökén', 'tökén')).toBe(true);
+    // Same character count, different bytes.
+    expect(timingSafeStringEqual('tökén', 'token')).toBe(false);
   });
 });

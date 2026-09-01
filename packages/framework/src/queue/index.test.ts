@@ -10,6 +10,9 @@ import {
   SCHEMA_SCOPED_JOB_PAYLOAD,
   SCHEMA_BASE_JOB_PAYLOAD,
 } from './index.ts';
+// Not re-exported from the module barrel: `ensureQueueSynced` is @internal,
+// shared between the queue domain and defineQueue's DLQ handler.
+import { ensureQueueSynced } from './createQueueDomain.ts';
 
 // ---------------------------------------------------------------------------
 // Test payload + schema
@@ -718,5 +721,53 @@ describe('createQueueDomain — notify', () => {
       validPayload,
       expect.not.objectContaining({ notify: expect.anything() })
     );
+  });
+});
+
+// ===========================================================================
+// ensureQueueSynced — the shared ensure step
+// ===========================================================================
+
+/**
+ * Producers (the queue domain) and dedicated DLQ consumers both ensure queues
+ * through this, so its two rules are load-bearing in both: create-then-sync
+ * (v12's createQueue never updates an existing queue), and the null handling —
+ * `updateQueue` takes `null` as "clear this setting", `createQueue`'s type does
+ * not accept it at all, and on a queue that does not exist yet the two mean the
+ * same thing.
+ */
+describe('ensureQueueSynced', () => {
+  let boss: MockBoss;
+
+  beforeEach(() => {
+    boss = createMockBoss();
+  });
+
+  it('creates the queue and then syncs the same settings', async () => {
+    await ensureQueueSynced(boss as unknown as PgBoss, 'email', { retryLimit: 3, deadLetter: 'email-dlq' });
+
+    expect(boss.createQueue).toHaveBeenCalledWith('email', { retryLimit: 3, deadLetter: 'email-dlq' });
+    expect(boss.updateQueue).toHaveBeenCalledWith('email', { retryLimit: 3, deadLetter: 'email-dlq' });
+    expect(boss.createQueue.mock.invocationCallOrder[0]!).toBeLessThan(
+      boss.updateQueue.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('drops nulls on the way to createQueue but keeps them for the sync', async () => {
+    await ensureQueueSynced(boss as unknown as PgBoss, 'email', { retryLimit: 3, deadLetter: null });
+
+    // "clear it" and "never set it" are the same thing on a queue that does not
+    // exist yet — and createQueue's type rejects the null outright.
+    expect(boss.createQueue).toHaveBeenCalledWith('email', { retryLimit: 3 });
+    // The clear still has to be applied for real on an existing queue.
+    expect(boss.updateQueue).toHaveBeenCalledWith('email', { retryLimit: 3, deadLetter: null });
+  });
+
+  it('skips updateQueue when there is nothing to sync (it asserts non-empty options)', async () => {
+    await ensureQueueSynced(boss as unknown as PgBoss, 'email');
+    await ensureQueueSynced(boss as unknown as PgBoss, 'email', {});
+
+    expect(boss.createQueue).toHaveBeenCalledTimes(2);
+    expect(boss.updateQueue).not.toHaveBeenCalled();
   });
 });

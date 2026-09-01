@@ -4,6 +4,7 @@ import {
   MAX_INBOUND_ATTACHMENT_BYTES,
   fileExtension,
   screenInboundAttachment,
+  normalizeMimeType,
 } from './inboundAttachmentPolicy';
 
 const ok = (over: Partial<Parameters<typeof screenInboundAttachment>[0]> = {}) => ({
@@ -136,5 +137,26 @@ describe('screenInboundAttachment', () => {
       { blockedExtensions: new Set(['foo']), blockedMimeTypes: new Set() },
     );
     expect(allowed.blocked).toBe(false);
+  });
+});
+
+/**
+ * The MIME normaliser every allow-list check runs through. Declared content
+ * types are attacker-controlled, so the parameters (`; charset=…`, a boundary,
+ * padding) and the casing must all be stripped before a comparison — otherwise
+ * `TEXT/HTML; charset=utf-8` slips past a list containing `text/html`.
+ */
+describe('normalizeMimeType', () => {
+  it('drops parameters and lowercases', () => {
+    expect(normalizeMimeType('text/plain; charset=UTF-8')).toBe('text/plain');
+    expect(normalizeMimeType('TEXT/HTML')).toBe('text/html');
+    expect(normalizeMimeType('  application/PDF  ')).toBe('application/pdf');
+    expect(normalizeMimeType('multipart/mixed; boundary=--x; charset=utf-8')).toBe('multipart/mixed');
+  });
+
+  it('returns an empty string for empty or parameter-only input', () => {
+    expect(normalizeMimeType('')).toBe('');
+    expect(normalizeMimeType('   ')).toBe('');
+    expect(normalizeMimeType('; charset=utf-8')).toBe('');
   });
 });

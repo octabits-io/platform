@@ -29,7 +29,12 @@ import { testRequest } from '../server/testing.ts';
 import type { TestableApp } from '../server/testing.ts';
 import { registerErrorHandler } from './errors.ts';
 import { testableHonoApp } from './testing.ts';
-import { buildFlowWorkflowSchema, createFlowWorkflowRoutes, type FlowEngineReader } from './flow.ts';
+import {
+  buildFlowListQuerySchema,
+  buildFlowWorkflowSchema,
+  createFlowWorkflowRoutes,
+  type FlowEngineReader,
+} from './flow.ts';
 
 const silentLogger: Logger = {
   debug: () => {}, info: () => {}, warn: () => {}, error: () => {},
@@ -426,5 +431,47 @@ describe('flow workflow view — schema/shape equivalence', () => {
     // assertion.
     const view = parsed.success ? parsed.data : undefined;
     expect(view === undefined || typeof view.id === 'number').toBe(true);
+  });
+});
+
+/**
+ * The list query contract, on its own — exported so an OpenAPI layer can
+ * declare exactly what the factory accepts. The cap is the point: `limit` is
+ * caller-supplied and reaches a store query, so an uncapped one is an
+ * unbounded read of somebody else's database.
+ */
+describe('buildFlowListQuerySchema', () => {
+  it('defaults limit to 20 and caps it at 50', () => {
+    const schema = buildFlowListQuerySchema();
+
+    expect(schema.parse({})).toEqual({ limit: 20 });
+    expect(schema.parse({ limit: '50' })).toEqual({ limit: 50 });
+    expect(schema.safeParse({ limit: '51' }).success).toBe(false);
+  });
+
+  it('honours consumer-supplied max and default', () => {
+    const schema = buildFlowListQuerySchema({ max: 5, default: 2 });
+
+    expect(schema.parse({})).toEqual({ limit: 2 });
+    expect(schema.safeParse({ limit: '6' }).success).toBe(false);
+  });
+
+  it('coerces the query-string limit and rejects non-positive integers', () => {
+    const schema = buildFlowListQuerySchema();
+
+    // Query values arrive as strings; a float or a zero must not slip through.
+    expect(schema.parse({ limit: '7' }).limit).toBe(7);
+    expect(schema.safeParse({ limit: '0' }).success).toBe(false);
+    expect(schema.safeParse({ limit: '-1' }).success).toBe(false);
+    expect(schema.safeParse({ limit: '1.5' }).success).toBe(false);
+  });
+
+  it('keeps the optional filters optional but non-empty when present', () => {
+    const schema = buildFlowListQuerySchema();
+
+    expect(schema.parse({ entityRef: 'contact:1', type: 'contact-brief', status: 'running' }))
+      .toMatchObject({ entityRef: 'contact:1', type: 'contact-brief', status: 'running' });
+    expect(schema.safeParse({ entityRef: '' }).success).toBe(false);
+    expect(schema.safeParse({ status: 'not-a-status' }).success).toBe(false);
   });
 });

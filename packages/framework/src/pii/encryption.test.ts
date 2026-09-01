@@ -1,6 +1,6 @@
 import { assert, expect, test, beforeAll } from 'vitest';
 import * as age from './typage/index.js';
-import { decryptSymmetric, encryptSymmetric, generateSymmetricKey, encryptHybrid, decryptHybrid, encryptHybridBytes, decryptHybridBytes } from './encryption.ts';
+import { decryptSymmetric, encryptSymmetric, generateSymmetricKey, encryptHybrid, decryptHybrid, encryptHybridBytes, decryptHybridBytes, isAgeFormat } from './encryption.ts';
 
 
 test('symetric_enc', () => {
@@ -148,4 +148,22 @@ test('age_enc_bytes - >16 MiB payload round-trips and chunk 256 does not reuse t
   assert(dec.ok);
   expect(dec.value.length).toBe(payload.length);
   expect(dec.value.equals(Buffer.from(payload))).toBe(true);
+});
+
+/**
+ * The discriminator that decides which decrypt path a stored ciphertext takes.
+ * A false positive here reads an AES blob as an age file (and fails); a false
+ * negative reads an age file as AES (and fails) — both surface as "cannot
+ * decrypt" on data that is perfectly intact, so the boundary cases matter.
+ */
+test('isAgeFormat recognises the age header and nothing else', () => {
+  expect(isAgeFormat(Buffer.from('age-encryption.org/v1\n...'))).toBe(true);
+  expect(isAgeFormat(Buffer.from('age'))).toBe(true);
+  // Too short to carry the header.
+  expect(isAgeFormat(Buffer.from('ag'))).toBe(false);
+  expect(isAgeFormat(Buffer.alloc(0))).toBe(false);
+  // A symmetric ciphertext (random IV first) must not be mistaken for one.
+  expect(isAgeFormat(encryptSymmetric('secret', generateSymmetricKey()).ok
+    ? (encryptSymmetric('secret', generateSymmetricKey()) as { ok: true; value: Buffer }).value
+    : Buffer.alloc(0))).toBe(false);
 });

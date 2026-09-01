@@ -13,6 +13,7 @@ import {
   createEventPublisher,
   createEventRelay,
   decodeEventNotification,
+  isEnvelopePermitted,
   encodeEventPointer,
   encodeInlineEvent,
   type EventEnvelope,
@@ -365,5 +366,55 @@ describe('relay', () => {
 
     const deliveredSeqs = seen.mock.calls.map(([env]) => (env as EventEnvelope).seq);
     expect(deliveredSeqs).toContain(2);
+  });
+});
+
+// ===========================================================================
+// isEnvelopePermitted — the fail-closed filter, on its own
+// ===========================================================================
+
+/**
+ * The hub tests above prove fan-out honours this; these pin the predicate
+ * itself, because it is exported for consumers that filter outside a hub
+ * (a replay pass, a second transport) and because every one of its branches
+ * is a way to deliver an event to someone who should not see it.
+ */
+describe('isEnvelopePermitted', () => {
+  const subscriber = (over: Partial<Parameters<typeof isEnvelopePermitted>[1]> = {}) => ({
+    subscriberId: 'u1',
+    ...over,
+  });
+
+  it('permits an envelope with no audience', () => {
+    expect(isEnvelopePermitted(envelope(), subscriber())).toBe(true);
+  });
+
+  it('filters by the audience user list', () => {
+    const targeted = envelope({ audience: { users: ['u2'] } });
+    expect(isEnvelopePermitted(targeted, subscriber({ subscriberId: 'u1' }))).toBe(false);
+    expect(isEnvelopePermitted(targeted, subscriber({ subscriberId: 'u2' }))).toBe(true);
+  });
+
+  it('fails CLOSED on a permission demand when the subscriber brought no authorize predicate', () => {
+    // The load-bearing branch: a subscriber that cannot answer "may I see
+    // this?" must not be treated as allowed.
+    const guarded = envelope({ audience: { permission: { orders: ['read'] } } });
+    expect(isEnvelopePermitted(guarded, subscriber())).toBe(false);
+  });
+
+  it('defers to authorize whenever one is present — including for an unguarded envelope', () => {
+    const authorize = vi.fn().mockReturnValue(false);
+    // No permission demand, but the predicate still decides: a subscriber may
+    // narrow its own feed beyond what the envelope asks for.
+    expect(isEnvelopePermitted(envelope(), subscriber({ authorize }))).toBe(false);
+    expect(authorize).toHaveBeenCalledOnce();
+  });
+
+  it('checks the user list BEFORE authorize, so a targeted envelope cannot be authorized around', () => {
+    const authorize = vi.fn().mockReturnValue(true);
+    const targeted = envelope({ audience: { users: ['u2'] } });
+
+    expect(isEnvelopePermitted(targeted, subscriber({ subscriberId: 'u1', authorize }))).toBe(false);
+    expect(authorize).not.toHaveBeenCalled();
   });
 });

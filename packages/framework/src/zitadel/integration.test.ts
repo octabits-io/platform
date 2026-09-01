@@ -36,6 +36,9 @@ let postgres: StartedPostgreSqlContainer;
 let zitadel: StartedTestContainer;
 let client: ZitadelManagementClient;
 let patDir: string;
+/** Kept at module scope so the lifecycle suite can make raw calls the client does not model. */
+let issuerUrl: string;
+let pat: string;
 
 beforeAll(async () => {
   network = await new Network().start();
@@ -95,12 +98,12 @@ beforeAll(async () => {
     .withStartupTimeout(150_000)
     .start();
 
-  const pat = readFileSync(join(patDir, 'admin-sa.pat'), 'utf8').trim();
+  pat = readFileSync(join(patDir, 'admin-sa.pat'), 'utf8').trim();
   if (!pat) throw new Error('Zitadel did not write a service-account PAT');
 
   // Reach the instance via the sslip.io domain so the Host header's hostname
   // matches the configured ExternalDomain — otherwise Zitadel 404s the instance.
-  const issuerUrl = `http://${EXTERNAL_DOMAIN}:${zitadel.getMappedPort(8080)}`;
+  issuerUrl = `http://${EXTERNAL_DOMAIN}:${zitadel.getMappedPort(8080)}`;
   client = createZitadelManagementClient({ issuerUrl, pat });
 
   // `/debug/ready` flips to 200 before Zitadel's internal REST→gRPC gateway
@@ -190,6 +193,124 @@ describe('Zitadel management client against a real instance', () => {
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
+    expect(gone).toBe(true);
+  });
+});
+
+/**
+ * The user-lifecycle calls and the instance-wide grant index, against the real
+ * instance.
+ *
+ * The unit tests mock `fetch`, so they prove the client sends what it means to
+ * send — they cannot prove Zitadel accepts it. These do: that
+ * `/v2/users/{id}/deactivate` exists and moves the state, that a second
+ * deactivate really answers FAILED_PRECONDITION (the wording the classifier
+ * must NOT read as success), that a second delete really answers "not found",
+ * and that the org-scoped grant search accepts the paging body the index sends.
+ */
+describe('Zitadel user lifecycle against a real instance', () => {
+  const orgName = `Lifecycle QA ${Date.now()}`;
+  let orgId: string;
+  let userId: string;
+
+  /** Create a human user directly — `inviteUserToOrg` also wants a project. */
+  async function createHumanUser(email: string): Promise<string> {
+    const response = await fetch(`${issuerUrl}/v2/users/human`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${pat}`,
+        'content-type': 'application/json',
+        'x-zitadel-orgid': orgId,
+      },
+      body: JSON.stringify({
+        email: { email, isVerified: true },
+        profile: { givenName: 'Life', familyName: 'Cycle', displayName: 'Life Cycle' },
+        organization: { org: { id: orgId } },
+      }),
+    });
+    if (!response.ok) throw new Error(`create user failed: ${response.status} ${await response.text()}`);
+    return ((await response.json()) as { userId: string }).userId;
+  }
+
+  /** Zitadel is event-sourced: the read projection lags a write. */
+  async function waitForState(expected: string): Promise<string> {
+    let last = '';
+    for (let i = 0; i < 20; i++) {
+      const user = await client.getUserById(userId);
+      if (user.ok) {
+        last = user.value.state;
+        if (last.includes(expected)) return last;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    return last;
+  }
+
+  beforeAll(async () => {
+    const org = await client.createOrganization({ name: orgName });
+    if (!org.ok) throw new Error(`org create failed: ${org.error.message}`);
+    orgId = org.value.id;
+    userId = await createHumanUser(`lifecycle+${Date.now()}@example.com`);
+  }, 60_000);
+
+  afterAll(async () => {
+    await client.deleteOrganization(orgId);
+  });
+
+  it('maps the created human user as type "human"', async () => {
+    const user = await client.getUserById(userId);
+
+    expect(user.ok).toBe(true);
+    // The discriminator a stale-account sweep depends on — a machine account
+    // holds no grant by design and must never look like an abandoned human.
+    if (user.ok) expect(user.value.type).toBe('human');
+  });
+
+  it('deactivates the user (state really moves) and refuses a second deactivate', async () => {
+    const deactivated = await client.deactivateUser(userId);
+    expect(deactivated.ok).toBe(true);
+    expect(await waitForState('INACTIVE')).toContain('INACTIVE');
+
+    // The documented non-idempotency: Zitadel answers FAILED_PRECONDITION, and
+    // the client deliberately surfaces it rather than swallowing it as success.
+    const again = await client.deactivateUser(userId);
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.error.key).toBe('api_error');
+  });
+
+  it('reactivates the user', async () => {
+    const reactivated = await client.reactivateUser(userId);
+
+    expect(reactivated.ok).toBe(true);
+    expect(await waitForState('ACTIVE')).toContain('ACTIVE');
+  });
+
+  it('lists every user grant on the instance, reporting no unreachable orgs', async () => {
+    // This instance has no project grants, so the value is the wire shape:
+    // a real Zitadel accepting the paged `_search` body the index sends, for
+    // every org it enumerated.
+    const grants = await client.listAllUserGrants();
+
+    expect(grants.ok).toBe(true);
+    if (!grants.ok) return;
+    expect(grants.value.failedOrgIds).toEqual([]);
+    expect(Array.isArray(grants.value.grants)).toBe(true);
+  });
+
+  it('deletes the user, and reports a second delete as not_found (real wording)', async () => {
+    const deleted = await client.deleteUser(userId);
+    expect(deleted.ok).toBe(true);
+
+    let gone = false;
+    for (let i = 0; i < 20; i++) {
+      const again = await client.deleteUser(userId);
+      if (!again.ok && again.error.key === 'not_found') {
+        gone = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    // A caller sweeping stale accounts reports "already gone" off this key.
     expect(gone).toBe(true);
   });
 });

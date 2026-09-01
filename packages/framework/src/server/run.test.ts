@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { Logger } from '../logger/index.ts';
-import { runServer, type ListenableApp } from './run';
+import { registerGracefulShutdown, runServer, type ListenableApp } from './run';
 
 const silentLogger: Logger = {
   debug: () => {}, info: () => {}, warn: () => {}, error: () => {},
@@ -164,5 +164,80 @@ describe('runServer', () => {
     expect(error).toHaveBeenCalledWith('Failed to start server', expect.any(Error));
     expect(exit).not.toHaveBeenCalled();
     exit.mockRestore();
+  });
+});
+
+/**
+ * Signal handling: the tail of `main()` in every service. Each test uses its
+ * own signal name and removes its listener, so the suite never leaves a handler
+ * that would exit the test runner on a later signal.
+ */
+describe('registerGracefulShutdown', () => {
+  /** Run one shutdown cycle on an isolated signal, with process.exit stubbed. */
+  async function shutdownOn(
+    signal: NodeJS.Signals,
+    options: { stop: (signal: string) => Promise<void>; timeoutMs?: number },
+  ) {
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCodes.push(code ?? 0);
+      return undefined as never;
+    }) as never);
+    const exitCodes: number[] = [];
+
+    // An earlier test in this file leaves a runServer-installed handler on its
+    // own signal; clear first so a stale listener cannot double-fire this one.
+    process.removeAllListeners(signal);
+    registerGracefulShutdown({
+      logger: silentLogger,
+      stop: options.stop,
+      signals: [signal],
+      ...(options.timeoutMs != null && { timeoutMs: options.timeoutMs }),
+    });
+
+    process.emit(signal);
+    // Let the async shutdown body run to completion.
+    await vi.waitFor(() => expect(exitCodes.length).toBeGreaterThan(0));
+
+    process.removeAllListeners(signal);
+    exit.mockRestore();
+    return exitCodes;
+  }
+
+  it('runs stop and exits 0 on the signal', async () => {
+    const stop = vi.fn().mockResolvedValue(undefined);
+
+    const codes = await shutdownOn('SIGCONT', { stop });
+
+    expect(stop).toHaveBeenCalledWith('SIGCONT');
+    expect(codes).toEqual([0]);
+  });
+
+  it('exits 1 when stop rejects, rather than leaving the process up', async () => {
+    const codes = await shutdownOn('SIGHUP', { stop: () => Promise.reject(new Error('drain failed')) });
+
+    expect(codes).toEqual([1]);
+  });
+
+  it('forces exit 1 when stop outlives the timeout', async () => {
+    // The watchdog is the reason a wedged connection pool cannot hold a
+    // rolling deploy open forever.
+    const codes = await shutdownOn('SIGWINCH', { stop: () => new Promise(() => {}), timeoutMs: 10 });
+
+    expect(codes).toEqual([1]);
+  });
+
+  it('registers every requested signal', async () => {
+    process.removeAllListeners('SIGCONT');
+    process.removeAllListeners('SIGWINCH');
+    registerGracefulShutdown({
+      logger: silentLogger,
+      stop: async () => {},
+      signals: ['SIGCONT', 'SIGWINCH'],
+    });
+
+    expect(process.listenerCount('SIGCONT')).toBe(1);
+    expect(process.listenerCount('SIGWINCH')).toBe(1);
+    process.removeAllListeners('SIGCONT');
+    process.removeAllListeners('SIGWINCH');
   });
 });
