@@ -6,7 +6,9 @@ domain-agnostic foundation on top of [`pg-boss`](https://github.com/timgit/pg-bo
 - **`createBossManager`** — a lifecycle + monitoring facade over a single shared
   pg-boss instance (`start` / `stop` / `getJobById` / `getQueues` /
   `getQueueStats` / `cancelJob`). The logger is injected by the caller;
-  maintenance/monitor intervals are configurable.
+  maintenance/monitor intervals, the process `role` (`'full'` vs send-only
+  `'producer'`), and pg-boss's index-bloat rebuilds (`reindex`,
+  `reindexIntervalSeconds`) are configurable.
 - **`createQueueDomain`** — a generic queue/worker/DLQ trio with Zod-validated
   payloads. Creates the dead-letter queue first, then the main queue with a
   `deadLetter` reference, and validates payloads on both enqueue and dequeue.

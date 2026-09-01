@@ -23,6 +23,8 @@ vi.mock('pg-boss', async (importOriginal) => {
 
 const { createBossManager } = await import('./BossManager.ts');
 
+type BossManagerConfig = Parameters<typeof createBossManager>[0];
+
 const logger = {
   debug: vi.fn(),
   info: vi.fn(),
@@ -31,13 +33,17 @@ const logger = {
   child: vi.fn(),
 };
 
-function optionsFor(role?: 'full' | 'producer'): ConstructorOptions {
+function optionsWith(config: Partial<BossManagerConfig> = {}): ConstructorOptions {
   createBossManager({
     connectionString: 'postgres://user:pass@localhost:5432/db',
     logger,
-    ...(role ? { role } : {}),
+    ...config,
   });
   return constructorOptions.at(-1)!;
+}
+
+function optionsFor(role?: 'full' | 'producer'): ConstructorOptions {
+  return optionsWith(role ? { role } : {});
 }
 
 describe('createBossManager — producer start failure', () => {
@@ -120,5 +126,49 @@ describe('createBossManager — role', () => {
   it('the full role listens for NOTIFY wakes; the producer role does not (it runs no workers)', () => {
     expect(optionsFor('full').useListenNotify).toBe(true);
     expect(optionsFor('producer').useListenNotify).toBe(false);
+  });
+});
+
+describe('createBossManager — reindex', () => {
+  beforeEach(() => {
+    constructorOptions.length = 0;
+  });
+
+  it('says nothing by default, so pg-boss keeps its own reindex defaults', () => {
+    // Asserted as absence, not `=== true`: pg-boss owns the default (rebuild
+    // bloated indexes since 12.29), and a manager that says nothing must keep
+    // inheriting whatever that default becomes.
+    expect('reindex' in optionsWith()).toBe(false);
+    expect('reindexIntervalSeconds' in optionsWith()).toBe(false);
+  });
+
+  it('passes an explicit opt-out through', () => {
+    expect(optionsWith({ reindex: false }).reindex).toBe(false);
+  });
+
+  it('passes a threshold object and the interval through', () => {
+    const options = optionsWith({
+      reindex: { minPages: 512, minSizeRatio: 8 },
+      reindexIntervalSeconds: 3600,
+    });
+
+    expect(options.reindex).toEqual({ minPages: 512, minSizeRatio: 8 });
+    expect(options.reindexIntervalSeconds).toBe(3600);
+  });
+
+  it('never spreads an undefined key — pg-boss reads these with `in`', () => {
+    // `reindex: undefined` is not "unset" to pg-boss: its config assert sees
+    // the key, finds a non-boolean/non-object value and throws. Constructing
+    // with the key explicitly undefined must therefore still be a clean start.
+    const options = optionsWith({ reindex: undefined, reindexIntervalSeconds: undefined });
+
+    expect('reindex' in options).toBe(false);
+    expect('reindexIntervalSeconds' in options).toBe(false);
+  });
+
+  it('applies to the producer role too, where pg-boss simply never acts on it', () => {
+    // A producer supervises nothing, so the flag is inert — but the two roles
+    // must still differ in exactly the PRODUCER_OPTIONS flags and nothing else.
+    expect(optionsWith({ role: 'producer', reindex: false }).reindex).toBe(false);
   });
 });

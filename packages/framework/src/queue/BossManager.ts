@@ -40,6 +40,28 @@ export interface BossManagerConfig {
    * background machinery that start brings up with it.
    */
   role?: 'full' | 'producer';
+  /**
+   * Index-bloat rebuilds during maintenance (pg-boss >= 12.29). Omitted by
+   * default, which keeps pg-boss's own default: rebuild an index that fails a
+   * density check with `REINDEX INDEX CONCURRENTLY`.
+   *
+   * Pass `false` to switch rebuilds off — bloat *detection* and the
+   * `index_bloat` warning are unaffected, so an operator can still run the
+   * statements from `getReindexCommands()` in a window they choose — or an
+   * options object to tune the thresholds.
+   *
+   * Only a `role: 'full'` process ever acts on this: a producer supervises
+   * nothing. Note that every non-producer process is a candidate, not just the
+   * one running workers — pg-boss coordinates the pass cluster-wide through
+   * `version.reindex_on`, so the interval is shared, but any full-role process
+   * may be the one that performs it.
+   */
+  reindex?: ConstructorOptions['reindex'];
+  /**
+   * How often the index-bloat check runs, in seconds (pg-boss default: 86400).
+   * Must be >= 1 second and at most 24 hours.
+   */
+  reindexIntervalSeconds?: number;
 }
 
 /**
@@ -111,6 +133,8 @@ export function createBossManager(config: BossManagerConfig): BossManager {
     maintenanceIntervalSeconds = 60,
     monitorIntervalSeconds = 60,
     role = 'full',
+    reindex,
+    reindexIntervalSeconds,
   } = config;
 
   const boss = new PgBoss({
@@ -129,6 +153,12 @@ export function createBossManager(config: BossManagerConfig): BossManager {
     // polling only. Needs a session-pinned connection — hand pg-boss the
     // direct database URL, never the pooler.
     useListenNotify: true,
+    // Spread conditionally, never as `reindex: undefined`: pg-boss validates
+    // these two with `'key' in config`, so an explicitly-undefined key is not
+    // the same as an absent one — it fails the config assert instead of
+    // falling back to the default.
+    ...(reindex !== undefined ? { reindex } : {}),
+    ...(reindexIntervalSeconds !== undefined ? { reindexIntervalSeconds } : {}),
     ...(role === 'producer' ? PRODUCER_OPTIONS : {}),
   });
 
