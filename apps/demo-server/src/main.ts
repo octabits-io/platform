@@ -21,6 +21,7 @@ import { createPostgresObjectStorageService } from '@octabits-io/framework/stora
 import { loadConfig } from './config.ts';
 import { schema } from './db/schema.ts';
 import { ensureSchema } from './db/ddl.ts';
+import { runDemoBackfills } from './db/backfills.ts';
 import { createPgNotifyListener } from '@octabits-io/framework/events/postgres';
 import { createEventRelay } from '@octabits-io/framework/events';
 import { EVENT_CHANNEL } from './container.ts';
@@ -54,6 +55,11 @@ await runServer({
     await ensureSchema(pool, logger);
 
     const db = createDrizzle(schema, { pool });
+
+    // Data backfills run after the DDL and before anything serves: the shapes
+    // exist, and no request can observe a half-migrated row. Already-completed
+    // backfills cost one primary-key lookup each.
+    await runDemoBackfills(db, logger.child({ component: 'backfill' }));
 
     const storage = createPostgresObjectStorageService({
       pool,
