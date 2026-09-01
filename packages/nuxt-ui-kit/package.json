@@ -1,7 +1,7 @@
 {
   "name": "@octabits-io/nuxt-ui-kit",
   "version": "0.18.0",
-  "description": "Frontend kit for Nuxt/Vue admin SPAs: OIDC session harness (oidc-client-ts), API-client seams (base URL + OIDC bearer), auth/org store cores, and a route-guard builder \u2014 factory-style seams the app wires into its own plugins, stores, and middleware",
+  "description": "Frontend kit for Nuxt/Vue admin SPAs: OIDC session harness (oidc-client-ts), API-client seams (base URL + OIDC bearer), auth/org store cores, and a route-guard builder — factory-style seams the app wires into its own plugins, stores, and middleware",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -81,6 +81,7 @@
   },
   "devDependencies": {
     "@octabits-io/framework": "workspace:^",
+    "@vitejs/plugin-vue": "^6.0.8",
     "@vue/test-utils": "^2.4.6",
     "date-fns": "^4.4.0",
     "happy-dom": "^15.11.7",

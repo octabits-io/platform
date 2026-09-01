@@ -5,6 +5,7 @@ import {
   groupIsPrimary,
   isInlineBound,
   resolveCollapseStages,
+  PAGE_ACTIONS_COLLAPSE_BELOW,
   type PageActionsGroup,
   type PageActionsItem,
 } from './pageActions.ts';
@@ -31,6 +32,22 @@ const item = (over: Partial<PageActionsItem> & { key: string }): PageActionsItem
 
 const keysOf = (entries: ReturnType<typeof foldInlineActions>) =>
   entries.map((entry) => (entry.type === 'group' ? `${entry.group.id}[${entry.items.map((i) => i.key).join(',')}]` : entry.item.key));
+
+describe('PAGE_ACTIONS_COLLAPSE_BELOW', () => {
+  it('is the default `collapseBelow`, so an unconfigured bar collapses at the documented width', () => {
+    // Consumers tune this per header; the default is what every bar that does
+    // not gets, and `resolveCollapseStages` is where it lands.
+    expect(PAGE_ACTIONS_COLLAPSE_BELOW).toBe(640);
+    expect(resolveCollapseStages(639, PAGE_ACTIONS_COLLAPSE_BELOW)).toEqual({
+      collapsed: true,
+      utilitiesCollapsed: true,
+    });
+    expect(resolveCollapseStages(640, PAGE_ACTIONS_COLLAPSE_BELOW)).toEqual({
+      collapsed: false,
+      utilitiesCollapsed: false,
+    });
+  });
+});
 
 describe('isInlineBound', () => {
   it("keeps 'always' inline at every width and drops 'menu' at every width", () => {
