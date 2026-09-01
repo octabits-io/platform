@@ -79,6 +79,17 @@ const emit = defineEmits<{
   'update:modelValue': [value: Period]
   'change': [payload: { period: Period; isValid: boolean }]
   'availability': [status: AvailabilityStatus]
+  /**
+   * The month a popover calendar is showing, as the ISO date of its first day.
+   * Fires when a popover opens and on every month/year navigation inside it.
+   *
+   * `blockedDates` is a prop, so the parent has to have fetched a window
+   * before the calendar can grey anything out — and a calendar pages anywhere.
+   * Beyond whatever the parent fetched, a blocked day renders as free, which
+   * is the one wrong answer this input can give. Listen to this to widen the
+   * fetch to the month actually on screen.
+   */
+  'visible-month': [monthIso: string]
 }>()
 
 const { t, locale } = useI18n()
@@ -93,8 +104,27 @@ const endPopoverOpen = ref(false)
 // the live span preview/count; cleared when both popovers close.
 const hoveredDay = ref<string | null>(null)
 watch([startPopoverOpen, endPopoverOpen], ([s, e]) => {
-  if (!s && !e) hoveredDay.value = null
+  if (!s && !e) {
+    hoveredDay.value = null
+    return
+  }
+  // A calendar opens on its own date, else the other endpoint's, else today
+  // (mirrors the `:placeholder` bindings below). UCalendar only emits
+  // `update:placeholder` on navigation, so announce the opening month here.
+  const opensOn = s
+    ? props.modelValue.start || displayEnd.value
+    : displayEnd.value || props.modelValue.start
+  emit('visible-month', monthIsoOf(opensOn || todayIso))
 })
+
+/** ISO date of the first day of the month `iso` falls in. */
+function monthIsoOf(iso: string): string {
+  return `${iso.slice(0, 7)}-01`
+}
+
+function onPlaceholderChange(v: DateValue) {
+  emit('visible-month', monthIsoOf(v.toString()))
+}
 
 const startPopoverTitle = computed(() => props.startLabel || t('dateRange.checkIn'))
 const endPopoverTitle = computed(() => props.endLabel || t('dateRange.checkOut'))
@@ -239,6 +269,23 @@ function isEndDateSoftBlocked(date: DateValue): boolean {
   return softBlockedSet.value.has(iso) && !blockedSet.value.has(iso)
 }
 
+// --- Past days ---
+//
+// Marked, never disabled: a period that already happened is a legitimate
+// thing to record (a stay booked over the phone last week, a past occupancy
+// being backfilled), and `blockedDates` only ever covers the window the
+// parent fetched, so a hard block here would be a guess. Dimming is enough to
+// stop the far more common mistake — reading September 2026 as September 2027
+// while paging, and picking a day that is already gone.
+const todayIso = format(new Date(), 'yyyy-MM-dd')
+
+function isPastDay(date: DateValue): boolean {
+  return date.toString() < todayIso
+}
+
+/** True once the whole period is over — not merely started (an ongoing stay). */
+const periodIsPast = computed(() => !!props.modelValue.end && props.modelValue.end < todayIso)
+
 // --- Range preview (anchor + live span) shown inside the calendar popovers ---
 //
 // Each single-date calendar only knows its own date, so the *other* endpoint
@@ -293,7 +340,12 @@ function dayPillClass(date: DateValue, side: CalendarSide): string {
   const own = side === 'end' ? displayEnd.value : props.modelValue.start
   if (iso === own) return ''
   const role = dayRole(iso, anchorFor(side), targetFor(side))
-  return role ? `${PILL_BASE} ${dayRoleClasses[role]}` : ''
+  if (role) return `${PILL_BASE} ${dayRoleClasses[role]}`
+  // Spent days, dimmed. Skipped on hard-blocked cells, whose error styling
+  // sits on the cell trigger around this span and should stay the loud one.
+  const blocked = side === 'end' ? isEndDateDisabled(date) : isDateDisabled(date)
+  if (!blocked && isPastDay(date)) return 'text-dimmed'
+  return ''
 }
 
 // Live "N nights/days" label for the popover header — only while both the
@@ -565,6 +617,7 @@ const timeHintParts = computed(() =>
                     :ui="calendarUi"
                     class="p-2"
                     @update:model-value="onStartCalendarSelect"
+                    @update:placeholder="onPlaceholderChange"
                   >
                     <template #day="{ day }">
                       <span :class="dayPillClass(day, 'start')" @pointerenter="hoveredDay = day.toString()">
@@ -620,6 +673,7 @@ const timeHintParts = computed(() =>
                     :ui="calendarUi"
                     class="p-2"
                     @update:model-value="onEndCalendarSelect"
+                    @update:placeholder="onPlaceholderChange"
                   >
                     <template #day="{ day }">
                       <span :class="dayPillClass(day, 'end')" @pointerenter="hoveredDay = day.toString()">
@@ -641,6 +695,14 @@ const timeHintParts = computed(() =>
 
     <p v-if="showTimeHint && timeHintParts.length" class="text-xs text-muted">
       {{ timeHintParts.join(' • ') }}
+    </p>
+
+    <!-- Not an error — recording a stay that already happened is normal. It
+         is stated because the same input is one keystroke away from the year
+         the operator meant. -->
+    <p v-if="periodIsPast" class="flex items-center gap-1.5 text-xs text-muted">
+      <UIcon name="i-lucide-history" class="shrink-0" />
+      <span>{{ t('dateRange.pastPeriod') }}</span>
     </p>
 
     <p v-if="errorMessage" class="text-sm text-error">
