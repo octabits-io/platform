@@ -146,8 +146,15 @@ const inlineHeading = computed(() => props.density === 'compact' && !slots.title
 const headingClass = computed(() => inlineHeading.value
   ? 'flex min-w-0 flex-1 items-baseline gap-x-2'
   : 'min-w-0')
+/**
+ * `basis-0 grow`: the subtitle claims NO width of its own and only fills what
+ * the title leaves. Sharing the shrink proportionally (the plain `truncate`
+ * this had) meant a long subtitle and a short title shrank together, and in a
+ * ~350px detail pane the record's own name was clipped to a letter or two
+ * while its timestamp still read in full — the wrong half survived.
+ */
 const subtitleClass = computed(() => inlineHeading.value
-  ? 'text-sm text-muted min-w-0 truncate'
+  ? 'text-sm text-muted min-w-0 grow basis-0 truncate'
   : 'text-sm text-muted mt-1')
 </script>
 

@@ -536,6 +536,14 @@ zero — it cannot push a sibling onto another row) and the compact title
 truncates like the subtitle. Changeset:
 `.changeset/compact-header-single-row.md`.
 
+A second browser pass found the follow-on: with title and subtitle both merely
+truncating, they shrink *proportionally*, so a 350px pane clipped the note's
+title to `F` while its timestamp still read `Saved Aug 31, 20…`. The subtitle
+now takes only what the title leaves (`basis-0 grow`). Worth knowing when you
+verify this yourself: Tailwind generates utilities from what it has scanned, so
+a NEW class in the kit's source needs the consumer's dev server restarted
+before it appears — the first attempt looked like the fix had no effect.
+
 Worth keeping in mind on the app side too: truncation is a degradation, not a
 layout. A subtitle carrying two timestamps in a 600px pane leaves the record's
 own name clipped to `Roun…` — this page moved the detail into the help panel

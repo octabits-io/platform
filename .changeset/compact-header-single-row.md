@@ -18,5 +18,10 @@ bar leaves. The compact title truncates too, for the same reason the subtitle
 does — a title long enough to wrap makes the band the exact height `compact`
 exists to avoid.
 
+The subtitle now also yields before the title does (`basis-0 grow` instead of
+sharing the shrink): with both merely truncating, a ~350px detail pane clipped
+the record's own name to a letter or two while its timestamp still read in
+full — the wrong half survived. It now takes only the width the title leaves.
+
 Only `density="compact"` is affected; `default` and `flush` are unchanged, as
 are compact headers that fill the `#title` slot themselves.
