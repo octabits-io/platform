@@ -143,9 +143,27 @@ const inlineHeading = computed(() => props.density === 'compact' && !slots.title
  * hypothetical size zero: it can never push a sibling onto a second row, and
  * it grows into whatever the action bar leaves.
  */
-const headingClass = computed(() => inlineHeading.value
-  ? 'flex min-w-0 flex-1 items-baseline gap-x-2'
-  : 'min-w-0')
+const headingClass = computed(() => {
+  if (inlineHeading.value) return 'flex min-w-0 flex-1 items-baseline gap-x-2'
+  /**
+   * `flex-1` on the slot path too, on `compact` — the promise is ONE row, and a
+   * slot heading is exactly where the promise was being broken.
+   *
+   * The reasoning above applies whoever renders the heading: a wrap container
+   * places items by their HYPOTHETICAL size, so a heading with `basis: auto`
+   * claims its full content width and pushes the action cluster onto a second
+   * row before it is ever asked to shrink. Measured on the listing record
+   * header (a title + key in the `#title` slot, three badges, five actions):
+   * 93px against the 53px the density exists to deliver.
+   *
+   * Slot content must therefore be shrinkable — `min-w-0` + `truncate` on the
+   * text inside it, which the record identity components already carry. What
+   * stays untouched is the baseline-aligned row: a slot brings its own layout
+   * (an icon beside a two-line block) and re-aligning it against text it does
+   * not contain is the change this deliberately does not make.
+   */
+  return props.density === 'compact' ? 'min-w-0 flex-1' : 'min-w-0'
+})
 /**
  * `basis-0 grow`: the subtitle claims NO width of its own and only fills what
  * the title leaves. Sharing the shrink proportionally (the plain `truncate`
