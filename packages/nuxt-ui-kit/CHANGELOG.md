@@ -1,5 +1,76 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.19.0
+
+### Minor Changes
+
+- [`dc0a478`](https://github.com/octabits-io/platform/commit/dc0a478da81071e4d01eae75ad6430f944acea8b) - feat(kit): DateRangeInput reports the month on screen, and marks days that are gone
+  
+  `blockedDates` is a prop, so a parent can only ever have fetched a finite
+  window — but the calendar pages anywhere, and past the fetched edge a blocked
+  day renders as free. `DateRangeInput` now emits `visible-month` (the ISO first
+  day of the month) when a popover opens and on every navigation inside it, so
+  the parent can widen its fetch to what is actually being looked at.
+  
+  Days before today are dimmed (`text-dimmed`) in both popovers, and a period
+  that lies entirely in the past says so under the inputs
+  (`dateRange.pastPeriod`, added to `kitMessagesEn`). Neither disables anything:
+  recording a stay that already happened is ordinary work — misreading which
+  year you are paging through is the mistake worth catching.
+
+- [`51e47af`](https://github.com/octabits-io/platform/commit/51e47afe0b28a7011e1ece51aea0ef09b397aa61) - `./i18n`: `KitMessages` now covers every namespace the kit actually reads.
+  
+  The fragment documented itself as "the reference for the full key set" while
+  carrying four of them — `errors`, `auth`, `localeField`, `pageChrome`. The
+  components' own contracts (`dateInput.clear`, `dateRange.*`, `flexPeriod.*`,
+  `period.*`, `ai.review.*`) were missing, so a consumer that merged
+  `kitMessagesEn` and trusted the type still had to discover those keys by
+  watching a raw key path render in a date picker. All of them ship now, with
+  English defaults, and a test derives the required set from the component
+  sources so the type cannot drift from the components again.
+  
+  **Type-level breaking for apps that build their own locales:** `KitMessages`
+  is exhaustive by design (that is what makes it a checklist), so a
+  `const de: KitMessages = { … }` object now fails to compile until the new
+  namespaces are translated. Spreading `kitMessagesEn` as a base is unaffected,
+  and no runtime behaviour changes.
+
+### Patch Changes
+
+- [`5acce36`](https://github.com/octabits-io/platform/commit/5acce362976cb7f5bb3ba25bcb205dcb2e8b3111) - `PageHeader`: make `density="compact"` actually hold one row.
+  
+  Truncating the subtitle (0.9.3) was only half the fix. A `flex-wrap` container
+  places its items by their *hypothetical* size, and for a `truncate`d line
+  (`white-space: nowrap`) that is still the full text width — so the heading was
+  allowed to claim the row and the action cluster wrapped onto a second one
+  *before* the subtitle was ever asked to shrink. The band that promises one row
+  still became two whenever the subtitle was long and the pane narrow (observed
+  in a ~600px detail pane in `apps/demo-web`).
+  
+  The heading is now `flex: 1 1 0%`, whose hypothetical size is zero: it can
+  never push a sibling onto another row, and it grows into whatever the action
+  bar leaves. The compact title truncates too, for the same reason the subtitle
+  does — a title long enough to wrap makes the band the exact height `compact`
+  exists to avoid.
+  
+  The subtitle now also yields before the title does (`basis-0 grow` instead of
+  sharing the shrink): with both merely truncating, a ~350px detail pane clipped
+  the record's own name to a letter or two while its timestamp still read in
+  full — the wrong half survived. It now takes only the width the title leaves.
+  
+  Only `density="compact"` is affected; `default` and `flush` are unchanged, as
+  are compact headers that fill the `#title` slot themselves.
+
+- [`5acce36`](https://github.com/octabits-io/platform/commit/5acce362976cb7f5bb3ba25bcb205dcb2e8b3111) - `pruneLocaleMap` now returns a dense `Record<string, string>` instead of
+  `LocaleMap<string>`.
+  
+  Emptiness is exactly what the function removes, so the sparse return type made
+  every caller cast: an API whose request body is `Record<string, string>` — the
+  shape a validator normally infers for a per-locale map — rejects values typed
+  `string | undefined`, which is the one thing a pruned map is guaranteed not to
+  contain. Assigning the result back into a `LocaleMap<string>` stays legal, so
+  existing callers keep compiling.
+
 ## 0.18.0
 
 ### Minor Changes
