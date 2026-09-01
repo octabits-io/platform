@@ -456,7 +456,6 @@ const columns = computed<TableColumn<Contact>[]>(() => [
       <AppPageHeader
         :title="t('contacts.title')"
         :subtitle="headerSubtitle"
-        :utility="false"
         class="min-h-16 shrink-0 border-b border-default px-4 py-2 sm:px-6"
       >
         <template #title>
@@ -478,9 +477,14 @@ const columns = computed<TableColumn<Contact>[]>(() => [
         </template>
 
         <template #actions>
+          <!-- `:help="false"`: this header keeps Help in PageHeader's own
+               `#utility` cluster (`PageUtilityActions`), the fixed one. It fits
+               a full-width page header, where there is always room — the
+               width-aware alternative is demoed on `/notes`. -->
           <AppPageActions
             :items="headerActions"
             :utility-items="headerUtilities"
+            :help="false"
             :collapse-below="1100"
             :utility-collapse-below="1280"
           />

@@ -506,13 +506,18 @@ shows Help twice — inline from the utility cluster and again from the actions
 cluster (or, once utilities collapse, inline *and* in the ⋯ menu).
 
 The kit documents the answer on `PageHeader` — "prefer driving all of the above
-declaratively with `PageActions` … pass `:utility="false"`" — and both
-wirings are legitimate, so this app now demonstrates each one:
+declaratively with `PageActions` … pass `:utility="false"`" — and both wirings
+are legitimate, so this app demonstrates each one. **Which one belongs where is
+not a coin flip**, and the browser said so: `PageUtilityActions` has no width
+awareness, so its Help button never collapses.
 
-- `/contacts`, `/settings`: `PageHeader :utility="false"`, `PageActions` owns
-  Help (and collapses it into ⋯ with the rest of the utilities).
-- `/notes`: `PageActions :help="false"`, `PageHeader`'s `PageUtilityActions`
-  owns Help.
+- `/notes` (compact band in a ~350px detail pane): `PageHeader :utility="false"`
+  — `PageActions` owns Help, and folds it into ⋯ with the other utilities when
+  the pane is narrow. With the other wiring the fixed Help button ate the room
+  and the note's title truncated to a single letter.
+- `/contacts`, `/settings` (full-width page headers): `PageActions :help="false"`
+  — `PageHeader`'s own `#utility` cluster owns Help. There is always room, and
+  a Help trigger that never moves is the better one.
 
 Not a bug, but it is only visible in a browser: nothing about it fails to
 compile, and each component alone behaves exactly as documented.

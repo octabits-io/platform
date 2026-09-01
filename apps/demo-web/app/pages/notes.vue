@@ -466,15 +466,19 @@ help.setActiveTab('notes')
         <div class="flex h-full min-w-0">
           <div class="flex min-w-0 flex-1 flex-col">
             <!-- The compact band: one row, actions right, Help last.
-                 `:help="false"` on PageActions hands the Help trigger back to
-                 PageHeader's own `#utility` cluster (PageUtilityActions) — the
-                 other of the two ways the kit renders it. -->
+                 `:utility="false"` hands Help to PageActions, which is the
+                 width-aware one: in a ~350px detail pane the Help button and
+                 the utility items fold into ⋯ so the note's title keeps the
+                 room. `PageUtilityActions` (PageHeader's own `#utility`
+                 default, demoed on `/contacts`) is the fixed cluster — right
+                 for a full-width page header, wrong for a cramped band. -->
             <AppPageHeader
               v-if="selectedNote || creatingNew"
               density="compact"
               :title="headerTitle"
               :subtitle="headerSubtitle"
               back
+              :utility="false"
             >
               <template #badges>
                 <AppTranslationBadge v-if="selectedNote" :status="statusOf(selectedNote)" />
@@ -483,7 +487,6 @@ help.setActiveTab('notes')
                 <AppPageActions
                   :items="editorActions"
                   :utility-items="editorUtilities"
-                  :help="false"
                   :collapse-below="760"
                   :utility-collapse-below="900"
                 />
