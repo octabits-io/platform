@@ -1,5 +1,94 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.20.0
+
+### Minor Changes
+
+- [`ef94c3e`](https://github.com/octabits-io/platform/commit/ef94c3e6b478eac76d7b5d1e4ab9173de750bad0) - Split the AI-UX layer into a framework-free core and Vue bindings.
+  
+  `@octabits-io/nuxt-ui-kit/ai/core` is new: the workflow poller, the
+  cross-page progress store, the card state machine, the active-workflow probe,
+  the rehydrate-and-trigger guard, the pausable interval, and the typed workflow
+  registry — with no import from Vue, from the rest of the kit, or from any
+  vendor (lint-enforced). Each state machine is an observable (`get()` +
+  `subscribe()`) plus actions; derived values are pure functions. That is the
+  shape React's `useSyncExternalStore` consumes and the shape a Vue `shallowRef`
+  mirrors in three lines, so a second framework adapter is a thin file.
+  
+  The existing composables on `./ai` keep their signatures and behaviour and are
+  now those thin files: `useAiWorkflow`, `useAiWorkflowGuard`,
+  `createAiProgressCore`, `useAiCardState`, `useActiveAiWorkflowProbe`. Two
+  small changes at the edges: the refs they return are read-only computeds
+  (nothing was writing to them), and each exposes its core object (`poller`,
+  `store`) for hosts that drive it from a push channel. `./ai` re-exports the
+  core, so nothing needs a new import path.
+
+- [`a29b501`](https://github.com/octabits-io/platform/commit/a29b5010fe78f44f2b137a99e38c040e373ba6da) - `PageHeader`: a `headingMinWidth` prop for compact record headers whose title
+  is content, not chrome.
+  
+  The compact heading is `flex: 1 1 0%`, so its hypothetical width is zero and
+  the action cluster never wraps — the heading takes whatever the buttons leave.
+  In a 508px split pane with two labeled actions that was 148px, and a CMS
+  page's 78-character title rendered one word per line, 297px tall.
+  `headingMinWidth` (px) sets the heading's flex-basis instead, so once the
+  floor plus the cluster no longer fit, the cluster wraps under the heading and
+  the heading fills the first row. Unset keeps today's behaviour exactly.
+  
+  The action cluster is also `justify-end` now, so when it wraps internally the
+  overflow row keeps the cluster's right edge.
+
+- [`8cc3970`](https://github.com/octabits-io/platform/commit/8cc3970c1d1719927603ce104364504b5bf63e1d) - Add `@octabits-io/framework/proposal` — the reviewable-outcome contract — and a
+  generic `ProposalReviewCard.vue` in the kit that renders it.
+  
+  A workflow outcome expressed as a **set of operations against data that already
+  exists**, rather than a value the caller must interpret. `current` is mandatory
+  on anything that replaces something, and is captured on the server at emit
+  time, so the diff is a stored, auditable artifact rather than something a
+  review surface reconstructs by re-reading the entity in a browser.
+  
+  Four operations, derived from a survey of real multi-step AI workflows rather
+  than guessed:
+  
+  - **`update`** — field values on an existing entity, optionally across a second
+    axis (`variant`) such as locale, addressed by a structured `path` that
+    reaches leaves inside nested documents and arrays.
+  - **`create`** — new rows, including whole trees. A create declares a `ref`
+    that other operations anchor to, so a child can name a parent that does not
+    exist yet; `existing` marks a create the producer believes is really a link
+    to something the host already has.
+  - **`delete`** — removal, carrying what is being removed.
+  - **`reorder`** — ordered collections, able to place pending creates among
+    existing members.
+  
+  Supporting pieces: `validateProposal`, `orderOperations`, `resolveDecision`,
+  `danglingAfterDecision`, `derivedFrom`, `guard` (drift digest), `skipped[]`,
+  optional `display` metadata, and zod schemas for both directions of the wire.
+  
+  The module depends on nothing but zod, imports no other framework module, and
+  no other module imports it (lint-enforced as a leaf), so browsers can import it
+  and it can be lifted into its own package later without touching anything else.
+  It is deliberately **not** part of octaflow: a proposal is defined against a
+  step's output schema, never its execution trace, so any engine can emit one.
+  
+  The kit's `ProposalReviewCard.vue` renders every operation kind, defaults to
+  accepting, and emits a `ProposalDecision`; it needs framework `>=0.36.0` (the
+  peer range moves accordingly) and ships its `ai.review.*` messages in
+  `kitMessagesEn`.
+
+### Patch Changes
+
+- [`e2038e4`](https://github.com/octabits-io/platform/commit/e2038e42e4f08eab3672eb14d5d8414be36241e7) - `./ai`: two fixes found by driving the review loop in a browser.
+  
+  - `useAiWorkflowGuard` rehydrating an already-terminal run now attaches the
+    poll function without polling (`poller.attach`), so `refresh()` re-reads
+    the run on demand — an apply's `appliedAt` reaches the surface without a
+    page reload. Before, `refresh()` was silently a no-op for a run that was
+    finished when the page mounted.
+  - The workflow poller fires `onCompleted`/`onFailed`/`onCancelled` on the
+    transition into a terminal status only. Re-reading a run that was already
+    terminal no longer re-fires the callback (which surfaced as a duplicate
+    "ready" toast after every apply).
+
 ## 0.19.1
 
 ### Patch Changes

@@ -1,5 +1,78 @@
 # @octabits-io/framework
 
+## 0.36.0
+
+### Minor Changes
+
+- [`57a42c6`](https://github.com/octabits-io/platform/commit/57a42c6230ef41bc4126762709f1ae7fbd7948b0) - Agents as principals, on the ledger.
+  
+  `./proposal`: `Principal` (`{ kind, id, label?, onBehalfOf?, authorizationId? }`)
+  on `provenance` and on `applied` — who acted, for whom, under which grant; a
+  `reversibility` class per operation (`reversible` | `compensable` |
+  `irreversible`), honoured by `invertOperations` (irreversible operations are
+  named, not undone) and summarised by `reversibilityOf`. Still zod-only.
+  
+  `./drizzle/agent-ledger` (new): the append-only record of what agents did,
+  under whose grant, and how to undo it. `agentLedgerColumns` +
+  `createDrizzleAgentLedgerStore` (record / get / findByWorkflow(s) /
+  listByActor / markReverted) + an in-memory twin. Deliberately the audit and
+  undo log, not event sourcing. Record types are structural duplicates of the
+  proposal contract's, so the contract stays a leaf.
+
+- [`5ca2234`](https://github.com/octabits-io/platform/commit/5ca2234e755a805b7f68c6b288be988f777adb05) - Embedded-database (PGlite) support through structural seams — no new peer dependency:
+  
+  - `./queue`: `createBossManager` takes **either** `connectionString` **or** a pg-boss `db` adapter (`fromPglite(pglite)`, `fromDrizzle(…)`, …) plus an optional `backend` profile, so pg-boss can run on an embedded database or a shared connection instead of its own pool.
+  - `./events/pglite` (new subpath): `createPgliteNotifyListener({ pglite, channel })` — the `EventNotificationListener` for an in-process PGlite instance. Structural on the instance; imports nothing from `@electric-sql/pglite`.
+  - `./drizzle/broadcast`: `subscribe` accepts a ready `listener` as the alternative to `connectionString`.
+  - `./storage/postgres` (**breaking**): the config field `pool: Pool` is now `db: Pool | SqlExecutor` — a `pg` Pool still works; any host that can run parameterized SQL and a transaction (PGlite, an RLS-scoped connection) implements the exported `SqlExecutor` seam directly (same shape as octaflow's). `poolExecutor`/`toExecutor` are exported. `getObjectData` now normalizes `bytea` to a `Buffer` whatever the driver returns.
+  - `./drizzle/scope`: the `bytea` column type normalizes driver values to `Buffer` (PGlite returns a plain `Uint8Array`).
+
+- [`9e521d8`](https://github.com/octabits-io/platform/commit/9e521d8315ea9f55d53f0c656fb5af282c1069f1) - `./proposal`: the apply-side helpers — `driftDigest`/`stableStringify` (the
+  guard a producer stores and a host recomputes), `detectDrift` (which accepted
+  updates would overwrite something other than what the reviewer saw), and
+  `invertOperations` (the operations that undo an application, derived from the
+  resolved operations and the ids the host assigned to creates — revert as a
+  second proposal, computed from the audit row). Still zod-only. `docs/proposal.md`
+  gains "The recipe", pointing at the demo server as the reference host.
+
+- [`8cc3970`](https://github.com/octabits-io/platform/commit/8cc3970c1d1719927603ce104364504b5bf63e1d) - Add `@octabits-io/framework/proposal` — the reviewable-outcome contract — and a
+  generic `ProposalReviewCard.vue` in the kit that renders it.
+  
+  A workflow outcome expressed as a **set of operations against data that already
+  exists**, rather than a value the caller must interpret. `current` is mandatory
+  on anything that replaces something, and is captured on the server at emit
+  time, so the diff is a stored, auditable artifact rather than something a
+  review surface reconstructs by re-reading the entity in a browser.
+  
+  Four operations, derived from a survey of real multi-step AI workflows rather
+  than guessed:
+  
+  - **`update`** — field values on an existing entity, optionally across a second
+    axis (`variant`) such as locale, addressed by a structured `path` that
+    reaches leaves inside nested documents and arrays.
+  - **`create`** — new rows, including whole trees. A create declares a `ref`
+    that other operations anchor to, so a child can name a parent that does not
+    exist yet; `existing` marks a create the producer believes is really a link
+    to something the host already has.
+  - **`delete`** — removal, carrying what is being removed.
+  - **`reorder`** — ordered collections, able to place pending creates among
+    existing members.
+  
+  Supporting pieces: `validateProposal`, `orderOperations`, `resolveDecision`,
+  `danglingAfterDecision`, `derivedFrom`, `guard` (drift digest), `skipped[]`,
+  optional `display` metadata, and zod schemas for both directions of the wire.
+  
+  The module depends on nothing but zod, imports no other framework module, and
+  no other module imports it (lint-enforced as a leaf), so browsers can import it
+  and it can be lifted into its own package later without touching anything else.
+  It is deliberately **not** part of octaflow: a proposal is defined against a
+  step's output schema, never its execution trace, so any engine can emit one.
+  
+  The kit's `ProposalReviewCard.vue` renders every operation kind, defaults to
+  accepting, and emits a `ProposalDecision`; it needs framework `>=0.36.0` (the
+  peer range moves accordingly) and ships its `ai.review.*` messages in
+  `kitMessagesEn`.
+
 ## 0.35.0
 
 ### Minor Changes
