@@ -17,6 +17,7 @@
  * timestamp mixin — using it here would misrepresent what it is for.
  */
 import {
+  bigint,
   date,
   index,
   integer,
@@ -28,6 +29,7 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import type { LocaleMap } from '@octabits-io/framework/utils';
+import type { ProposalDecision, ResolvedOperation } from '@octabits-io/framework/proposal';
 import { bytea, scopedConfigColumns } from '@octabits-io/framework/drizzle/scope';
 import { eventOutboxColumns } from '@octabits-io/framework/drizzle/event-outbox';
 import { idempotencyKeyColumns } from '@octabits-io/framework/drizzle/idempotency';
@@ -58,6 +60,10 @@ export const contacts = pgTable(
     wishStart: date('wish_start', { mode: 'string' }),
     wishEnd: date('wish_end', { mode: 'string' }),
     wishNights: integer('wish_nights'),
+    // The AI-written one-line brief — the slot the contact-brief workflow
+    // proposes an update to. Nullable: most contacts have none, and "empty"
+    // is exactly what the proposal's `current` must be able to say.
+    brief: text('brief'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -116,5 +122,34 @@ export const jobAuditLog = pgTable('job_audit_log', { ...jobAuditColumns });
  */
 export const eventOutbox = pgTable('event_outbox', { ...eventOutboxColumns });
 
-export const schema = { contacts, notes, settings, idempotencyKey, jobAuditLog, eventOutbox };
+/**
+ * One row per applied AI proposal — the audit half of the review loop
+ * (`@octabits-io/framework/proposal`; see `ai/proposals.ts`). Keyed by the
+ * workflow that produced the proposal. `applied` holds the resolved
+ * operations exactly as written (edits folded in, `current` intact) and
+ * `created` the ids this host assigned to creates — together they are what
+ * `invertOperations` needs to revert, so a revert never re-reads the entity.
+ * `applied_at`/`reverted_at` are what the workflow wire view projects as
+ * `appliedAt`.
+ */
+export const proposalApplications = pgTable('proposal_applications', {
+  workflowId: bigint('workflow_id', { mode: 'number' }).primaryKey(),
+  scope: text('scope').notNull(),
+  decision: jsonb('decision').$type<ProposalDecision>().notNull(),
+  applied: jsonb('applied').$type<ResolvedOperation[]>().notNull(),
+  created: jsonb('created').$type<Record<string, string>>().notNull().default({}),
+  appliedAt: timestamp('applied_at', { withTimezone: true }).defaultNow().notNull(),
+  appliedBy: text('applied_by'),
+  revertedAt: timestamp('reverted_at', { withTimezone: true }),
+});
+
+export const schema = {
+  contacts,
+  notes,
+  settings,
+  idempotencyKey,
+  jobAuditLog,
+  eventOutbox,
+  proposalApplications,
+};
 export type Schema = typeof schema;

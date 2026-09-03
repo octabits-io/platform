@@ -29,6 +29,7 @@ import { SETTINGS_SCOPE_VALUE } from './services/settings.ts';
 import { buildContainer, createSystemScopeFactory } from './container.ts';
 import { welcomeEmailQueue } from './queues/welcome-email.ts';
 import { createAiRuntime } from './ai/runtime.ts';
+import { createDrizzleProposalApplicationStore, createProposalService } from './ai/proposals.ts';
 import { createDemoApp } from './app.ts';
 import { createBunServer } from './bun-server.ts';
 
@@ -132,10 +133,21 @@ await runServer({
     });
     await ai.start();
 
+    // The apply side of the review loop (ai/proposals.ts): the audit store over
+    // Drizzle, the services that own the rows a proposal names, and the engine
+    // the proposal is read back from.
+    const proposals = createProposalService({
+      engine: ai.engine,
+      contacts: container.resolve('contactsService'),
+      notes: container.resolve('notesService'),
+      applications: createDrizzleProposalApplicationStore(db),
+      dateProvider: container.resolve('dateProvider'),
+    });
+
     const app = createDemoApp({
       container,
       config,
-      ai,
+      ai: { engine: ai.engine, usage: ai.usage, partitionKey: ai.partitionKey, proposals },
       checkReady: async () => {
         await pool.query('SELECT 1');
       },

@@ -10,8 +10,12 @@
  *     flight, even one started in another tab.
  *   - `useAiCardState` — derives the idle/active/failed chip from the
  *     cross-page progress store.
- *   - `AppAiResultReviewCard` (kit SFC) — review-then-apply; "apply" is a
- *     domain write (create a follow-up note), not a server AI feature.
+ *   - `AppProposalReviewCard` (kit SFC) — the review half of the loop. The run's
+ *     last step stored a `Proposal` as its output; the card renders it (what
+ *     each value replaces, editable, partially acceptable) and emits a
+ *     `ProposalDecision`, which this component posts to the apply route. Apply
+ *     and revert are server writes with an audit row; `appliedAt` comes back on
+ *     the workflow itself, so the applied state survives a reload.
  * The progress store (`stores/aiProgress.ts`) is told about every trigger so
  * the navbar badge keeps tracking after this modal closes.
  */
@@ -23,6 +27,7 @@ import {
   useAiCardState,
   type AiWorkflowData,
 } from '@octabits-io/nuxt-ui-kit/ai'
+import type { Proposal, ProposalDecision } from '@octabits-io/framework/proposal'
 import { useApi } from '~/composables/useApi'
 import { call } from '~/composables/useApiCall'
 import { useApiError } from '~/composables/useApiError'
@@ -101,42 +106,66 @@ async function cancelRun() {
   void probe.refresh()
 }
 
-// --- Review-then-apply ------------------------------------------------------
+// --- Review → apply → revert -------------------------------------------------
 
-const reviewFields = computed(() => {
-  const output = guard.output.value
-  if (!output) return []
-  return [
-    { label: t('ai.brief.fields.summary'), value: output.summarize.summary },
-    { label: t('ai.brief.fields.followup'), value: output.followup.draft },
-  ]
-})
+/** The run's stored proposal — what the card renders. */
+const proposal = computed<Proposal | null>(() => guard.output.value?.propose ?? null)
+
+/** Set by the server from its audit row; null until applied, null again after revert. */
+const appliedAt = computed(() => guard.workflow.value?.appliedAt ?? null)
 
 const showReview = computed(
-  () => guard.isCompleted.value && reviewFields.value.length > 0 && !reviewDismissed.value,
+  () => guard.isCompleted.value && proposal.value !== null && appliedAt.value === null && !reviewDismissed.value,
 )
 
 const applying = ref(false)
+const reverting = ref(false)
 
-async function applyBrief() {
-  const output = guard.output.value
+async function applyDecision(decision: ProposalDecision) {
   const id = guard.workflow.value?.id
-  if (!output || !id) return
+  if (!id) return
   applying.value = true
   try {
-    const { error } = await call(api.notes.$post({
-      json: {
-        title: t('ai.brief.appliedTitle', { name: props.contact.name }),
-        body: `${output.summarize.summary}\n\n---\n\n${output.followup.draft}`,
-      },
+    const { data, error } = await call(api.ai.workflows[':id'].apply.$post({
+      param: { id: String(id) },
+      json: decision,
     }))
-    if (error) { toastError(error); return }
+    if (error) {
+      // Drift is the one expected refusal: the contact changed since the
+      // proposal was made. Re-read so the reviewer sees the current run state.
+      if (error.status === 409 && error.value.key === 'proposal_drift') {
+        toast.add({ title: t('ai.brief.drift'), color: 'warning' })
+        await guard.refresh()
+      } else {
+        toastError(error)
+      }
+      return
+    }
     progress.markApplied(id)
-    reviewDismissed.value = true
-    toast.add({ title: t('ai.brief.applied'), color: 'success' })
+    toast.add({
+      title: t('ai.brief.applied', { notes: Object.keys(data.created).length }),
+      color: 'success',
+    })
+    // `appliedAt` is projected from the audit row — one refresh picks it up.
+    await guard.refresh()
     emit('applied')
   } finally {
     applying.value = false
+  }
+}
+
+async function revertDecision() {
+  const id = guard.workflow.value?.id
+  if (!id) return
+  reverting.value = true
+  try {
+    const { error } = await call(api.ai.workflows[':id'].revert.$post({ param: { id: String(id) } }))
+    if (error) { toastError(error); return }
+    toast.add({ title: t('ai.brief.reverted'), color: 'success' })
+    await guard.refresh()
+    emit('applied')
+  } finally {
+    reverting.value = false
   }
 }
 
@@ -184,7 +213,7 @@ const steps = computed(() => guard.workflow.value?.steps ?? [])
       </UBadge>
     </div>
 
-    <!-- Live DAG view: fetch first, then summarize + followup in parallel. -->
+    <!-- Live DAG view: fetch first, then summarize + followup in parallel, then propose. -->
     <div v-if="steps.length > 0" class="flex flex-col gap-2">
       <UProgress :model-value="guard.progress.value * 100" />
       <div class="text-xs font-medium text-muted">{{ t('ai.brief.steps') }}</div>
@@ -222,11 +251,31 @@ const steps = computed(() => guard.workflow.value?.steps ?? [])
       :title="t('ai.brief.cancelled')"
     />
 
-    <AppAiResultReviewCard
-      v-if="showReview"
-      :fields="reviewFields"
-      @apply="applyBrief"
+    <AppProposalReviewCard
+      v-if="showReview && proposal"
+      :proposal="proposal"
+      :applying="applying"
+      @apply="applyDecision"
       @dismiss="dismissBrief"
     />
+
+    <!-- Applied: the audit row exists. Revert derives the inverse from it. -->
+    <div
+      v-else-if="appliedAt"
+      class="flex flex-wrap items-center justify-between gap-2 rounded border border-default p-3 text-sm"
+    >
+      <span>
+        <UIcon name="i-lucide-check" class="mr-1 size-4 text-success" />
+        {{ t('ai.brief.appliedAt', { at: new Date(appliedAt).toLocaleString() }) }}
+      </span>
+      <UButton
+        :label="t('ai.brief.revert')"
+        color="neutral"
+        variant="outline"
+        size="sm"
+        :loading="reverting"
+        @click="revertDecision"
+      />
+    </div>
   </div>
 </template>

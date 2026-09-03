@@ -15,6 +15,7 @@
   "dependencies": {
     "@internationalized/date": "^3.12.3",
     "@nuxt/ui": "^4.11.0",
+    "@octabits-io/framework": "workspace:^",
     "@octabits-io/nuxt-ui-kit": "workspace:*",
     "@pinia/nuxt": "^1.0.2",
     "date-fns": "^4.4.0",

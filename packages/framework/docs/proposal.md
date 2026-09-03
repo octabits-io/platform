@@ -84,6 +84,43 @@ const orphaned = danglingAfterDecision(proposal, decision); // children kept whi
 and applies `ops` itself. **Applying and reverting are the host's job**; the
 contract stores enough (`current`, `guard`, the decision) to make both auditable.
 
+## Apply-side helpers (`apply.ts`)
+
+Still pure, still zod-only — the parts every host would otherwise rewrite:
+
+- `driftDigest(value)` — the digest a producer stores in an update's `guard`
+  (`stableStringify` + cyrb53, same result in a browser and on a server) and
+  the host recomputes over the live value at apply time.
+- `detectDrift(operations, readCurrent)` — which accepted updates would
+  overwrite something other than what the reviewer saw. `readCurrent` returns
+  the live value or `undefined` for "cannot read" (skipped, not reported).
+- `invertOperations(applied, createdIds)` — the operations that undo an
+  application: updates swap `current`/`proposed` (the edited value is the new
+  `current`), creates become deletes of the ids the host assigned, deletes
+  become creates carrying `current` (with `existing` naming the original
+  entity), reorders swap. Revert is a second proposal, computed from the
+  audit row — never re-read from the entity.
+
+## The recipe — what a host writes
+
+The reference implementation is the demo server, end to end:
+
+| Piece | Where | What it does |
+|---|---|---|
+| **Producer** | [`apps/demo-server/src/ai/workflows.ts`](../../../apps/demo-server/src/ai/workflows.ts) (`propose` step) | Re-reads the row at emit time so `current` is a fact about the run; `proposeFields` with `guard: driftDigest(current)`; a `create` whose value is the reviewer-editable body; `skipped[]` for what the model returned empty; `provenance`. The proposal is the step's **output schema**. |
+| **Storage** | the workflow's own output (`output.propose`) | Nothing new to persist for the proposal itself — it is the run's outcome. |
+| **Anchor → table mapping** | [`apps/demo-server/src/ai/proposals.ts`](../../../apps/demo-server/src/ai/proposals.ts) (`applyOperation`) | The one switch that knows `contact`/`brief` is `contactsService.update` and a `notes` create is a note whose title the host supplies. Everything else is generic. |
+| **Apply** | same file (`apply`) + `POST /api/ai/workflows/:id/apply` | `validateProposal` → `resolveDecision` → `detectDrift` over the live row (409 `proposal_drift`) → writes in order → **audit row**. Refuses while an application stands. |
+| **Audit row** | [`proposal_applications`](../../../apps/demo-server/src/db/schema.ts) | Per workflow: the decision, the resolved operations as written, the ids assigned to creates, `applied_at`/`applied_by`/`reverted_at`. `appliedAt` on the wire is projected from it through `createFlowWorkflowRoutes`' `extendWorkflow.load`. |
+| **Revert** | same file (`revert`) + `POST …/revert` | `invertOperations` over the audit row, written through the same `applyOperation`. |
+| **Review surface** | [`apps/demo-web/app/components/AiContactBrief.vue`](../../../apps/demo-web/app/components/AiContactBrief.vue) | The kit's `ProposalReviewCard.vue` renders `output.propose`; the decision it emits is posted as-is. |
+
+What the demo leaves to a production host: one transaction around the writes
+(these services take no `tx`), a real principal in `applied_by`, and per-scope
+engine routing. What the contract does not yet do: field-level editing of a
+`create` whose value is a row with several fields — the generic card shows JSON
+for those.
+
 ## Wire
 
 `proposalSchema` and `proposalDecisionSchema` are zod schemas for both

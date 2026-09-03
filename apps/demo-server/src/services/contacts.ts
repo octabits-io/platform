@@ -37,6 +37,8 @@ export interface Contact {
   wishStart: string;
   wishEnd: string;
   wishNights: number | null;
+  /** The AI-written brief, or null — the slot the contact-brief proposal updates. */
+  brief: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -75,6 +77,7 @@ interface ContactRow {
   wishStart: string | null;
   wishEnd: string | null;
   wishNights: number | null;
+  brief: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -103,6 +106,7 @@ export function createContactsService({ db, pii, blindIndex, dateProvider }: Con
       wishStart: row.wishStart ?? '',
       wishEnd: row.wishEnd ?? '',
       wishNights: row.wishNights,
+      brief: row.brief,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     });
@@ -136,6 +140,7 @@ export function createContactsService({ db, pii, blindIndex, dateProvider }: Con
     wishStart: contacts.wishStart,
     wishEnd: contacts.wishEnd,
     wishNights: contacts.wishNights,
+    brief: contacts.brief,
     createdAt: contacts.createdAt,
     updatedAt: contacts.updatedAt,
   };
@@ -221,13 +226,14 @@ export function createContactsService({ db, pii, blindIndex, dateProvider }: Con
 
   async function update(
     id: string,
-    params: { name?: string; email?: string } & ContactWish,
+    params: { name?: string; email?: string; brief?: string | null } & ContactWish,
   ): Promise<Result<Contact, ContactByIdError>> {
     const changes: Partial<typeof contacts.$inferInsert> = {
       updatedAt: dateProvider.now(),
       ...wishColumns(params),
     };
     if (params.name !== undefined) changes.name = params.name;
+    if (params.brief !== undefined) changes.brief = params.brief;
     if (params.email !== undefined) {
       const encrypted = await encryptEmail(params.email);
       if (!encrypted.ok) return encrypted;

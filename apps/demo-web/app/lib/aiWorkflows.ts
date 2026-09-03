@@ -7,6 +7,7 @@
  * i18n label key.
  */
 import { createWorkflowRegistry } from '@octabits-io/nuxt-ui-kit/ai'
+import type { Proposal } from '@octabits-io/framework/proposal'
 
 export interface AiWorkflowDefinition {
   /** Server-side workflow type (`octaflow`'s `WorkflowDefinition.type`). */
@@ -22,9 +23,14 @@ export const CONTACT_BRIEF: AiWorkflowDefinition = {
 export const aiWorkflowRegistry = createWorkflowRegistry<AiWorkflowDefinition>()
 aiWorkflowRegistry.register(CONTACT_BRIEF)
 
-/** The output shape of the contact-brief workflow (one key per DAG step). */
+/**
+ * The output shape of the contact-brief workflow (one key per DAG step).
+ * `propose` is the run's stored proposal — what the review card renders and
+ * the apply route commits.
+ */
 export interface ContactBriefOutput {
   fetch: { name: string; email: string }
   summarize: { summary: string }
   followup: { draft: string }
+  propose: Proposal
 }

@@ -126,7 +126,7 @@
     "brief": {
       "action": "AI contact brief",
       "title": "AI contact brief",
-      "intro": "Runs a durable {'@'}octabits-io/flow workflow against the scripted in-memory model: fetch, then summary and follow-up draft in parallel.",
+      "intro": "Runs a durable octaflow workflow against the scripted in-memory model: fetch, then summary and follow-up draft in parallel, then a proposal — an update to the contact's brief that says what it replaces, and a follow-up note to create.",
       "start": "Generate brief",
       "cancel": "Cancel run",
       "running": "Workflow running…",
@@ -134,14 +134,18 @@
       "cancelled": "The run was cancelled.",
       "steps": "Steps",
       "fields": {
+        "brief": "Brief",
         "summary": "Summary",
-        "followup": "Follow-up draft"
+        "followup": "Follow-up note"
       },
-      "appliedTitle": "Follow-up: {name}",
-      "applied": "Follow-up note created",
+      "applied": "Applied — brief updated, {notes} note(s) created",
       "completedToast": "Contact brief for {name} is ready",
       "failedToast": "Contact brief for {name} failed",
-      "description": "Summarise the contact and draft a follow-up"
+      "description": "Summarise the contact and draft a follow-up",
+      "appliedAt": "Applied {at}",
+      "revert": "Revert",
+      "reverted": "Reverted — brief restored, follow-up note removed",
+      "drift": "The contact changed since this was proposed. Refreshed — please review again."
     },
     "activeBadge": "AI running"
   },

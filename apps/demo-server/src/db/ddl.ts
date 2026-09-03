@@ -50,6 +50,19 @@ const APP_DDL = `
   ALTER TABLE contacts ADD COLUMN IF NOT EXISTS wish_nights integer;
   ALTER TABLE notes ADD COLUMN IF NOT EXISTS public_title jsonb NOT NULL DEFAULT '{}'::jsonb;
   ALTER TABLE notes ADD COLUMN IF NOT EXISTS public_body jsonb NOT NULL DEFAULT '{}'::jsonb;
+  ALTER TABLE contacts ADD COLUMN IF NOT EXISTS brief text;
+
+  -- The audit row behind an applied AI proposal (schema.ts: proposalApplications).
+  CREATE TABLE IF NOT EXISTS proposal_applications (
+    workflow_id bigint PRIMARY KEY,
+    scope text NOT NULL,
+    decision jsonb NOT NULL,
+    applied jsonb NOT NULL,
+    created jsonb NOT NULL DEFAULT '{}'::jsonb,
+    applied_at timestamptz NOT NULL DEFAULT now(),
+    applied_by text,
+    reverted_at timestamptz
+  );
 
   CREATE TABLE IF NOT EXISTS settings (
     key text NOT NULL,

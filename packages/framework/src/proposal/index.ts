@@ -18,3 +18,4 @@
 export * from './types';
 export * from './build';
 export * from './schema';
+export * from './apply';

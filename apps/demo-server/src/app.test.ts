@@ -25,6 +25,8 @@ import { buildContainer } from './container.ts';
 import { createDemoApp } from './app.ts';
 import { createDemoApiKeys } from './api-keys.ts';
 import { createInMemoryAiRuntime } from './ai/testing.ts';
+import { createInMemoryProposalApplicationStore, createProposalService } from './ai/proposals.ts';
+import { createDateProvider } from '@octabits-io/framework/utils';
 import type { ContactsService } from './services/contacts.ts';
 import type { Schema } from './db/schema.ts';
 
@@ -53,7 +55,15 @@ beforeAll(async () => {
     host: { contactsService: {} as ContactsService, logger: silentLogger },
     logger: silentLogger,
   });
-  app = testableHonoApp(createDemoApp({ container, config, apiKeys, ai, checkReady: async () => {} }));
+  // The apply side is not exercised here (see ai/ai.test.ts); it only has to exist.
+  const proposals = createProposalService({
+    engine: ai.engine,
+    contacts: container.resolve('contactsService'),
+    notes: container.resolve('notesService'),
+    applications: createInMemoryProposalApplicationStore(),
+    dateProvider: createDateProvider(),
+  });
+  app = testableHonoApp(createDemoApp({ container, config, apiKeys, ai: { ...ai, proposals }, checkReady: async () => {} }));
 });
 
 describe('demo-server routes (no Postgres)', () => {
