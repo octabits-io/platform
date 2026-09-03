@@ -77,7 +77,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
   describe('deleteObjectsByPrefix prefix guard', () => {
     test('rejects a missing prefix without touching the database', async () => {
       const fake = makeFakePool();
-      const service = createPostgresObjectStorageService({ pool: fake.pool, createPublicUrl });
+      const service = createPostgresObjectStorageService({ db: fake.pool, createPublicUrl });
 
       const result = await service.deleteObjectsByPrefix({ namespace: 'n1' });
 
@@ -89,7 +89,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
 
     test('rejects an empty prefix without touching the database', async () => {
       const fake = makeFakePool();
-      const service = createPostgresObjectStorageService({ pool: fake.pool, createPublicUrl });
+      const service = createPostgresObjectStorageService({ db: fake.pool, createPublicUrl });
 
       const result = await service.deleteObjectsByPrefix({ namespace: 'n1', prefix: '' });
 
@@ -103,7 +103,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
         responder: (text) => (text.includes('DELETE') ? { rowCount: 3 } : { rows: [], rowCount: 0 }),
       });
       const service = createPostgresObjectStorageService({
-        pool: fake.pool,
+        db: fake.pool,
         createPublicUrl,
         autoCreateTable: false,
       });
@@ -122,7 +122,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
     test('autoCreateTable: false skips all runtime DDL (connect never called)', async () => {
       const fake = makeFakePool();
       const service = createPostgresObjectStorageService({
-        pool: fake.pool,
+        db: fake.pool,
         createPublicUrl,
         autoCreateTable: false,
       });
@@ -137,7 +137,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
 
     test('DDL bootstrap runs once (memoized) with the default advisory lock id', async () => {
       const fake = makeFakePool();
-      const service = createPostgresObjectStorageService({ pool: fake.pool, createPublicUrl });
+      const service = createPostgresObjectStorageService({ db: fake.pool, createPublicUrl });
 
       await service.getObjectData({ namespace: 'n1', key: 'a.txt' });
       await service.getObjectData({ namespace: 'n1', key: 'b.txt' });
@@ -151,7 +151,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
     test('a custom advisoryLockId is used for the bootstrap lock', async () => {
       const fake = makeFakePool();
       const service = createPostgresObjectStorageService({
-        pool: fake.pool,
+        db: fake.pool,
         createPublicUrl,
         advisoryLockId: 424242,
       });
@@ -165,7 +165,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
 
     test('bootstrap runs BEGIN…COMMIT in a transaction and releases the client', async () => {
       const fake = makeFakePool();
-      const service = createPostgresObjectStorageService({ pool: fake.pool, createPublicUrl });
+      const service = createPostgresObjectStorageService({ db: fake.pool, createPublicUrl });
 
       await service.getObjectData({ namespace: 'n1', key: 'a.txt' });
 
@@ -180,7 +180,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
 
     test('a failing bootstrap statement rolls back, releases, and surfaces internal_error', async () => {
       const fake = makeFakePool({ throwOnClient: (text) => text.includes('CREATE TABLE') });
-      const service = createPostgresObjectStorageService({ pool: fake.pool, createPublicUrl });
+      const service = createPostgresObjectStorageService({ db: fake.pool, createPublicUrl });
 
       const result = await service.getObjectData({ namespace: 'n1', key: 'a.txt' });
 
@@ -197,7 +197,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
     test('issues a single (namespace, key) upsert', async () => {
       const fake = makeFakePool();
       const service = createPostgresObjectStorageService({
-        pool: fake.pool,
+        db: fake.pool,
         createPublicUrl,
         autoCreateTable: false,
       });
@@ -244,7 +244,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
             : { rows: [], rowCount: 0 },
       });
       const service = createPostgresObjectStorageService({
-        pool: fake.pool,
+        db: fake.pool,
         createPublicUrl,
         autoCreateTable: false,
       });
@@ -268,7 +268,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
     test('returns not_found on zero rows', async () => {
       const fake = makeFakePool();
       const service = createPostgresObjectStorageService({
-        pool: fake.pool,
+        db: fake.pool,
         createPublicUrl,
         autoCreateTable: false,
       });
@@ -284,7 +284,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
     test('without a prefix filters by namespace only', async () => {
       const fake = makeFakePool();
       const service = createPostgresObjectStorageService({
-        pool: fake.pool,
+        db: fake.pool,
         createPublicUrl,
         autoCreateTable: false,
       });
@@ -300,7 +300,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
     test('with a prefix adds a key LIKE bound param', async () => {
       const fake = makeFakePool();
       const service = createPostgresObjectStorageService({
-        pool: fake.pool,
+        db: fake.pool,
         createPublicUrl,
         autoCreateTable: false,
       });
@@ -315,7 +315,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
     test('roots the empty namespace to the `` sentinel', async () => {
       const fake = makeFakePool();
       const service = createPostgresObjectStorageService({
-        pool: fake.pool,
+        db: fake.pool,
         createPublicUrl,
         autoCreateTable: false,
       });
@@ -347,7 +347,7 @@ describe('PostgresObjectStorageService (raw pg)', () => {
             : { rows: [], rowCount: 0 },
       });
       const provider = createPostgresObjectStorageUrlProvider({
-        pool: fake.pool,
+        db: fake.pool,
         createPublicUrl,
         autoCreateTable: false,
       });
@@ -364,6 +364,53 @@ describe('PostgresObjectStorageService (raw pg)', () => {
         expect(result.value.metadata).toEqual({});
         expect(result.value.lastModified).toBe('2026-01-02T03:04:05.000Z');
       }
+    });
+  });
+
+  describe('SqlExecutor form (embedded / RLS-scoped hosts)', () => {
+    test('runs the bootstrap through the executor transaction and normalizes bytea to Buffer', async () => {
+      // A host that implements the seam directly — no `pg` Pool anywhere. The
+      // driver hands back a plain Uint8Array for bytea (as PGlite does); the
+      // ObjectData contract still promises a Buffer.
+      const captured: { text: string; inTx: boolean }[] = [];
+      const executor = {
+        query: async <R,>(text: string) => {
+          captured.push({ text, inTx: false });
+          const rows = text.startsWith('SELECT data')
+            ? [{ data: new Uint8Array([104, 105]), size: '2', content_type: 'text/plain', metadata: null, updated_at: '2026-01-02T03:04:05.000Z' }]
+            : [];
+          return { rows: rows as R[], rowCount: rows.length };
+        },
+        async transaction<T>(fn: (tx: { query: <R>(text: string, params?: unknown[]) => Promise<{ rows: R[]; rowCount: number | null }> }) => Promise<T>) {
+          return fn({
+            query: async <R,>(text: string) => {
+              captured.push({ text, inTx: true });
+              return { rows: [] as R[], rowCount: 0 };
+            },
+          });
+        },
+      };
+      const service = createPostgresObjectStorageService({ db: executor, createPublicUrl });
+
+      const result = await service.getObjectData({ key: 'a.txt' });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(Buffer.isBuffer(result.value.data)).toBe(true);
+        expect(result.value.data.toString('utf8')).toBe('hi');
+        expect(result.value.size).toBe(2);
+        expect(result.value.lastModified).toBe('2026-01-02T03:04:05.000Z');
+      }
+      // Bootstrap (advisory lock + DDL) ran inside the executor's transaction;
+      // the read ran outside it.
+      expect(captured.filter((c) => c.inTx).map((c) => c.text)).toEqual([
+        'SELECT pg_advisory_xact_lock($1)',
+        expect.stringContaining('CREATE TABLE IF NOT EXISTS'),
+        expect.stringContaining('DO $$'),
+        expect.stringContaining('CREATE INDEX IF NOT EXISTS obj'),
+        expect.stringContaining('CREATE INDEX IF NOT EXISTS obj'),
+        expect.stringContaining('DO $$'),
+      ]);
+      expect(captured.filter((c) => !c.inTx)).toHaveLength(1);
     });
   });
 

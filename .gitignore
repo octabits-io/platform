@@ -7,6 +7,9 @@ dist/
 .nuxt/
 .output/
 .data/
+
+# PGlite data dir (apps/demo-server, the zero-config default backend)
+.pglite/
 .DS_Store
 bun.lock
 CLAUDE.md

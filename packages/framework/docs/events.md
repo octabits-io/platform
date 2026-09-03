@@ -11,7 +11,8 @@ Four subpaths, split so no import drags in a vendor SDK it doesn't need:
 | Subpath | Deps | Contents |
 | --- | --- | --- |
 | `./events` | `zod` | Envelope + schema, notify codec, hub, publisher, relay, SSE fetch handler |
-| `./events/postgres` | `pg` (optional peer) | `createPgNotifyListener` — the LISTEN side |
+| `./events/postgres` | `pg` (optional peer) | `createPgNotifyListener` — the LISTEN side, one dedicated connection |
+| `./events/pglite` | none (structural) | `createPgliteNotifyListener` — the LISTEN side for an embedded PGlite instance, in-process |
 | `./drizzle/event-outbox` | `drizzle-orm` (optional peer) | `eventOutboxColumns` + the outbox store |
 | `./hono/events` | `hono` (optional peer) | Thin sub-app wrapper over the fetch handler |
 | `./drizzle/broadcast` | `drizzle-orm` + `pg` (optional peers) | `createBroadcastChannel` — NOTIFY-only coordination hints, outside the event taxonomy (see below) |
@@ -157,6 +158,16 @@ is built in (full jitter); after a reconnect the relay re-reads every active
 scope from its watermark, because notifications sent while the listener was
 down are gone.
 
+On an embedded database none of that applies — the instance that NOTIFYs is
+the instance that listens — so `./events/pglite` is the same contract with no
+connection, no reconnect, and no peer dependency (it takes the instance,
+structurally):
+
+```ts
+import { createPgliteNotifyListener } from '@octabits-io/framework/events/pglite';
+const listener = createPgliteNotifyListener({ pglite, channel: 'app_events', logger });
+```
+
 If the store used for relay/replay reads serves many scopes on one dedicated
 connection, remember an RLS-scoped connection is a single client — the relay
 already serializes its reads, but the connection you bind is your choice
@@ -279,7 +290,8 @@ await db.transaction(async (tx) => {
 });
 
 // Subscribe side — one listener per process, DIRECT connection string (same
-// LISTEN constraints as the relay). onReconnect fires after a gap in which
+// LISTEN constraints as the relay) — or `listener: createPgliteNotifyListener(…)`
+// on an embedded database. onReconnect fires after a gap in which
 // messages may have been lost: flush whatever the channel invalidates.
 const sub = await invalidations.subscribe({
   connectionString: directDatabaseUrl,

@@ -29,14 +29,12 @@ Private workspace app. Never published.
 The server comes first — this app is a pure client and has no data of its own.
 
 ```bash
-# 1. Postgres for the demo server
-docker compose -f apps/demo-server/docker-compose.yml up -d --wait
-
-# 2. The API on :3101
+# 1. The API on :3101 — no Docker: it runs on embedded PGlite by default
+#    (set DATABASE_URL to use the compose-file Postgres instead, see its README)
+pnpm install
 pnpm --filter @octabits-io/demo-server start
 
-# 3. This app on :3100
-pnpm install
+# 2. This app on :3100
 pnpm --filter @octabits-io/demo-web dev
 ```
 

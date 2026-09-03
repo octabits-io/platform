@@ -1,5 +1,5 @@
 import { PgBoss } from 'pg-boss';
-import type { ConstructorOptions } from 'pg-boss';
+import type { ConstructorOptions, Db } from 'pg-boss';
 import { ok, err } from '../result/index.ts';
 import type { Result } from '../result/index.ts';
 import type { Logger } from '../logger/index.ts';
@@ -18,8 +18,26 @@ import type {
 import type { QueueError } from './types.ts';
 
 export interface BossManagerConfig {
-  /** PostgreSQL connection string */
-  connectionString: string;
+  /**
+   * PostgreSQL connection string — pg-boss opens (and owns) a pool on it.
+   * Exactly one of `connectionString` and `db` is required.
+   */
+  connectionString?: string;
+  /**
+   * A pg-boss `Db` adapter instead of a connection string: pg-boss then runs
+   * every statement through it and opens no pool of its own. This is how an
+   * embedded database is wired — `fromPglite(pglite)` from pg-boss — and how
+   * an existing ORM connection is shared (`fromDrizzle`, `fromKnex`, …).
+   * Pair an embedded backend with the matching {@link backend} profile.
+   */
+  db?: Db;
+  /**
+   * pg-boss backend profile (pg-boss default: `'postgres'`). `'pglite'` turns
+   * off the multi-connection machinery an embedded single-connection database
+   * cannot provide, and keeps LISTEN/NOTIFY in-process via the adapter's
+   * `listen`; `'cockroachdb'` & co. select their compatibility flags.
+   */
+  backend?: ConstructorOptions['backend'];
   /** Logger instance (injected — structural, no runtime coupling) */
   logger: Logger;
   /** Schema name for pg-boss tables (default: 'pgboss') */
@@ -128,6 +146,8 @@ export interface BossManager {
 export function createBossManager(config: BossManagerConfig): BossManager {
   const {
     connectionString,
+    db,
+    backend,
     logger,
     schema = 'pgboss',
     maintenanceIntervalSeconds = 60,
@@ -137,8 +157,18 @@ export function createBossManager(config: BossManagerConfig): BossManager {
     reindexIntervalSeconds,
   } = config;
 
+  if ((connectionString === undefined) === (db === undefined)) {
+    throw new Error(
+      'createBossManager needs exactly one of `connectionString` (pg-boss opens its own pool) ' +
+        'or `db` (a pg-boss Db adapter such as fromPglite / fromDrizzle).',
+    );
+  }
+
   const boss = new PgBoss({
-    connectionString,
+    // Spread, never `db: undefined`: same `'key' in config` validation story
+    // as `reindex` below.
+    ...(db !== undefined ? { db } : { connectionString }),
+    ...(backend !== undefined ? { backend } : {}),
     schema,
     // Harmless under `'producer'` — the subsystems these tune are never
     // started — but kept unconditional so the two roles differ in exactly the

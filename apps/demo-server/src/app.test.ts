@@ -9,9 +9,9 @@
  *
  * The container is built with inert stand-ins for `db`/`storage`/`boss`: the
  * routes under test either never resolve them (health, tools, protected) or
- * fail before touching them (RBAC 403, the scope guard's 400). Anything that
- * genuinely needs Postgres belongs in a docker-backed integration run, not
- * here.
+ * fail before touching them (RBAC 403, the scope guard's 400). The routes that
+ * genuinely need a database run in `app.pglite.test.ts` — the same app over an
+ * in-memory PGlite, still no Docker.
  */
 import { describe, it, expect, beforeAll } from 'bun:test';
 import { testRequest, testAuthenticatedRequest } from '@octabits-io/framework/server/testing';

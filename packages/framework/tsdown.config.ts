@@ -28,6 +28,7 @@ export default defineConfig({
     "ical/index": "src/ical/index.ts",
     "events/index": "src/events/index.ts",
     "events/postgres": "src/events/postgres.ts",
+    "events/pglite": "src/events/pglite.ts",
     "drizzle/event-outbox/index": "src/drizzle/event-outbox/index.ts",
     "drizzle/broadcast/index": "src/drizzle/broadcast/index.ts",
     "server/index": "src/server/index.ts",

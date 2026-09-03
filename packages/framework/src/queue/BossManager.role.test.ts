@@ -172,3 +172,31 @@ describe('createBossManager — reindex', () => {
     expect(optionsWith({ role: 'producer', reindex: false }).reindex).toBe(false);
   });
 });
+
+describe('createBossManager — database source', () => {
+  beforeEach(() => {
+    constructorOptions.length = 0;
+  });
+
+  it('passes a Db adapter and backend profile through, and hands pg-boss no connection string', () => {
+    // An embedded database (PGlite) or a shared ORM connection: pg-boss runs
+    // every statement through the adapter and opens no pool of its own.
+    const db = { executeSql: async () => ({ rows: [] }) };
+    const options = optionsWith({ connectionString: undefined, db, backend: 'pglite' });
+
+    expect(options.db).toBe(db);
+    expect(options.backend).toBe('pglite');
+    expect('connectionString' in options).toBe(false);
+  });
+
+  it('never spreads an undefined backend — pg-boss reads it with `in`', () => {
+    expect('backend' in optionsWith()).toBe(false);
+    expect('db' in optionsWith()).toBe(false);
+  });
+
+  it('demands exactly one of connectionString and db', () => {
+    const db = { executeSql: async () => ({ rows: [] }) };
+    expect(() => optionsWith({ connectionString: undefined })).toThrow(/exactly one of/);
+    expect(() => optionsWith({ db })).toThrow(/exactly one of/);
+  });
+});

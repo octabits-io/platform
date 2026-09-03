@@ -114,7 +114,8 @@ export interface EventOutboxStore {
 
 /**
  * Structural seam over the cross-process notification channel's receive side.
- * Implemented by `@octabits-io/framework/events/postgres` (LISTEN/NOTIFY).
+ * Implemented by `@octabits-io/framework/events/postgres` (LISTEN/NOTIFY over a
+ * dedicated connection) and `…/events/pglite` (in-process, embedded database).
  */
 export interface EventNotificationListener {
   /**

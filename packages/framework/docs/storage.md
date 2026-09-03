@@ -145,7 +145,10 @@ import { createPostgresObjectStorageService } from '@octabits-io/framework/stora
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const storage = createPostgresObjectStorageService({
-  pool, // a pg Pool
+  // A pg Pool — or any `SqlExecutor` (`query` + `transaction`), e.g. an embedded
+  // PGlite instance or an RLS-scoped connection; `poolExecutor`/`toExecutor` are
+  // exported for hosts that build the executor themselves.
+  db: pool,
   // build the public URL your app serves blobs from (see serve handler below).
   // `namespace` is `string | undefined` — undefined = root namespace (stored as '').
   createPublicUrl: (namespace, key) =>

@@ -5,7 +5,8 @@ A small **contact desk** API that exercises as much of
 service. It has two jobs:
 
 1. **Living documentation** — every route is a worked example of a framework
-   module against a real Postgres, not a snippet.
+   module against real Postgres — embedded (PGlite) by default, a server with
+   one env var — not a snippet.
 2. **Pre-release validation** — the framework was merged from five packages into
    one subpath-exported package and has not been published yet. This app is the
    consumer that proves the packaging works before it ships.
@@ -25,16 +26,34 @@ the way are collected under
 ## Run it
 
 ```bash
-# 1. Postgres on :5433 (user/password/db all "demo")
-docker compose -f apps/demo-server/docker-compose.yml up -d --wait
-
-# 2. From the repo root
+# From the repo root — no Docker needed
 pnpm install
 pnpm --filter @octabits-io/demo-server dev     # bun --watch
 # or: pnpm --filter @octabits-io/demo-server start
 ```
 
 Then `curl http://localhost:3101/health/ready` → `{"status":"ok","db":"connected"}`.
+
+That is the whole setup. With no `DATABASE_URL` the server runs on
+**[PGlite](https://pglite.dev)** — Postgres 18 compiled to WASM, embedded in
+the Bun process — persisted under `apps/demo-server/.pglite` (gitignored;
+`PGLITE_DATA_DIR=memory://` for a throwaway instance). Ready in about two
+seconds on a cold start. To run against a real server instead:
+
+```bash
+# Postgres on :5433 (user/password/db all "demo")
+docker compose -f apps/demo-server/docker-compose.yml up -d --wait
+DATABASE_URL=postgres://demo:demo@localhost:5433/demo pnpm --filter @octabits-io/demo-server dev
+```
+
+Both backends sit behind one seam, [`db/backend.ts`](./src/db/backend.ts)
+(`backend-postgres.ts` / `backend-pglite.ts`), and nothing else in the app
+knows which one it got: Drizzle, the flow store, pg-boss, the blob store, the
+event relay and the settings broadcast all take structural seams rather than
+`pg` types. The PGlite file documents what actually differs (one connection,
+in-process LISTEN/NOTIFY, driver value types, durability). Keep the Postgres
+path exercised — it is the one the framework's "against a real Postgres" claim
+rests on for deployments.
 
 Zero configuration is required — every value in [`.env.example`](./.env.example)
 has a working default, including committed **dev** PII keys. The app refuses to
@@ -151,9 +170,9 @@ saw nothing but preflight failures. A browser is the only client that tests CORS
 | `./proposal` | [`ai/workflows.ts`](./src/ai/workflows.ts) (`propose` step — the producer: `proposeFields` with `guard: driftDigest(current)`, `proposeCreate`, `skipped[]`, `provenance`; the proposal is the step's output schema) + [`ai/proposals.ts`](./src/ai/proposals.ts) (the host's half: anchor→table mapping, `validateProposal` → `resolveDecision` → `detectDrift` → writes → audit row in `proposal_applications`; revert via `invertOperations` through the same writes). The reference implementation the contract's docs point at — `docs/proposal.md` "The recipe" | ✅ |
 | `./hono/flow` | [`routes/ai.ts`](./src/routes/ai.ts) — `createFlowWorkflowRoutes` serves the generic workflow read/control routes (list/active/get/snapshot/cancel/resume) over flow's public wire view, mounted with `app.route('/workflows', …)` (the Hono factory has no `prefix` option — where you mount it is the prefix); `appliedAt` rides the `extendWorkflow` seam — projected from the `proposal_applications` audit row, batched once per request through `load` — and `ai_quota_exceeded → 429` (plus the `proposal_*` conflicts) via `errorOverrides`. Only the domain trigger route and `/usage` are hand-written. | ✅ |
 | `./queue` | [`queues/welcome-email.ts`](./src/queues/welcome-email.ts) — `defineQueue` + `BossManager`; dead letters persist to `job_audit_log` via `…/drizzle/job-audit-store` | ✅ |
-| `./storage` + `./storage/postgres` | [`routes/files.ts`](./src/routes/files.ts) — provider + `createWebResponse` + `objectStorageDdl` | ✅ |
+| `./storage` + `./storage/postgres` | [`routes/files.ts`](./src/routes/files.ts) — provider + `createWebResponse` + `objectStorageDdl`; the provider takes `db: Pool \| SqlExecutor` — [`db/backend.ts`](./src/db/backend.ts)'s `DemoSql` is that executor on both backends | ✅ |
 | `./mail` | [`services/mail.ts`](./src/services/mail.ts) — `createBaseMailService` + logger transport | ✅ |
-| `./events` + `./events/postgres` + `./drizzle/event-outbox` | [`routes/events.ts`](./src/routes/events.ts) — two-lane event fan-out end to end: `eventPublisher.emit(…, tx)` writes the outbox row + NOTIFY at COMMIT (durable) or inline payload (ephemeral); the publisher is typed — [`container.ts`](./src/container.ts) declares the event vocabulary once as Zod schemas (`DEMO_EVENT_SCHEMAS`), derives `DemoEventMap` from it, and passes both to `createEventPublisher<DemoEventMap>({ …, payloadSchemas })` so type/payload mismatches fail at compile time and unregistered types throw at runtime; [`main.ts`](./src/main.ts) runs the dedicated LISTEN connection + relay; `GET /api/events/stream` serves SSE via `app.mount()` (plain fetch handler — no route-type budget, no client types; the browser side is `@octabits-io/nuxt-ui-kit/events`). On Hono this is load-bearing rather than merely tidy: `createRequestScopeMiddleware` disposes its scope *before* the `Response` is returned, so anything long-lived has to live outside it — which `.mount()` gives for free. Try it: open `/events` in demo-web, or `curl -N localhost:3101/api/events/stream` and `POST /api/events/demo` with `{"lane":"durable"}` — reconnect with `Last-Event-ID: 0` to watch the outbox replay. | ✅ |
+| `./events` + `./events/postgres` + `./events/pglite` + `./drizzle/event-outbox` | [`routes/events.ts`](./src/routes/events.ts) — two-lane event fan-out end to end (the LISTEN side is `createPgNotifyListener` on Postgres and `createPgliteNotifyListener` on PGlite — [`db/backend-*.ts`](./src/db/backend.ts) picks; `…/drizzle/broadcast`'s `subscribe` takes the same `listener`): `eventPublisher.emit(…, tx)` writes the outbox row + NOTIFY at COMMIT (durable) or inline payload (ephemeral); the publisher is typed — [`container.ts`](./src/container.ts) declares the event vocabulary once as Zod schemas (`DEMO_EVENT_SCHEMAS`), derives `DemoEventMap` from it, and passes both to `createEventPublisher<DemoEventMap>({ …, payloadSchemas })` so type/payload mismatches fail at compile time and unregistered types throw at runtime; [`main.ts`](./src/main.ts) runs the dedicated LISTEN connection + relay; `GET /api/events/stream` serves SSE via `app.mount()` (plain fetch handler — no route-type budget, no client types; the browser side is `@octabits-io/nuxt-ui-kit/events`). On Hono this is load-bearing rather than merely tidy: `createRequestScopeMiddleware` disposes its scope *before* the `Response` is returned, so anything long-lived has to live outside it — which `.mount()` gives for free. Try it: open `/events` in demo-web, or `curl -N localhost:3101/api/events/stream` and `POST /api/events/demo` with `{"lane":"durable"}` — reconnect with `Last-Event-ID: 0` to watch the outbox replay. | ✅ |
 
 Honestly not covered here:
 
@@ -202,7 +221,7 @@ the engine derives that from their dependencies.
 | --- | --- | --- |
 | `.` (core) — `createWorkflowEngine`, `defineStep` types via `defineAiStep`, registry, `createInMemoryWorkflowStore`; the public wire view (`toPublicWorkflow`, `PUBLIC_WORKFLOW_SCHEMA`) is consumed indirectly through `…/hono/flow`'s route factory | [`ai/engine.ts`](./src/ai/engine.ts), [`ai/testing.ts`](./src/ai/testing.ts), [`routes/ai.ts`](./src/routes/ai.ts) | ✅ |
 | `./ai` — `defineAiStep`, `buildAiWorkflow`, `createAiWorkflowHooks`, `createCostEstimator`, `createAiQuotaService`, `createAiUsageAggregationService` | [`ai/workflows.ts`](./src/ai/workflows.ts), [`ai/engine.ts`](./src/ai/engine.ts), [`ai/runtime.ts`](./src/ai/runtime.ts); the consumer-SQL `AiUsageStore`/`AiUsageRecorder` seams live in [`ai/usage.ts`](./src/ai/usage.ts) over the `ai_*` tables | ✅ |
-| `./store-pg` — `createPgWorkflowStore`, `flowStoreDdl` | [`ai/runtime.ts`](./src/ai/runtime.ts); DDL applied in [`db/ddl.ts`](./src/db/ddl.ts) next to `objectStorageDdl()` | ✅ |
+| `./store-pg` — `createWorkflowStore` over the structural `SqlExecutor` seam (`createPgWorkflowStore` is the `pg`-Pool convenience over the same), `flowStoreDdl` | [`ai/runtime.ts`](./src/ai/runtime.ts) hands it [`db/backend.ts`](./src/db/backend.ts)'s `DemoSql`, so the store runs on Postgres and PGlite alike; DDL applied in [`db/ddl.ts`](./src/db/ddl.ts) next to `objectStorageDdl()` | ✅ |
 | `./dispatcher-pgboss` — dispatcher + step/DLQ workers | [`ai/runtime.ts`](./src/ai/runtime.ts) — on the **same** pg-boss instance `BossManager` owns (`boss.getBoss()`) | ✅ |
 | Not covered | `createPgStepGate`/`flowGateDdl` (global concurrency/rate gates), `createPgEventSink`/`flowEventDdl` (run-history timeline), `defineWaitStep`/`defineMapStep`/`defineSubWorkflowStep`/saga compensation, `createPgBossScheduler` (cron starts), `recoverStuckWorkflows` sweeps, 0.17's `when` guards/`join: 'any'`, wait/workflow deadlines, step heartbeats (`heartbeatTimeoutMs`), and `retryWorkflow` — the flow repo's `examples/` cover these | — |
 
@@ -218,6 +237,29 @@ no Docker.
 ## Notes for framework readers
 
 Things that cost time here and are worth knowing before you copy this code:
+
+- **PGlite is one connection, and the seams are what make that invisible.**
+  Everything the app wires — Drizzle (`drizzle-orm/pglite` + the framework's
+  `augmentDrizzle`), the flow store (`createWorkflowStore({ exec })`), the blob
+  provider (`db: SqlExecutor`), pg-boss (`db: fromPglite(…)`, `backend:
+  'pglite'`), the event relay and the broadcast (`…/events/pglite`) — takes a
+  structural seam, and [`db/backend-pglite.ts`](./src/db/backend-pglite.ts)
+  implements each once. Four driver-level differences it absorbs, all easy to
+  trip on when wiring PGlite yourself: `query()` runs **one statement** (DDL
+  scripts go through `exec()`); `bytea` comes back as a plain **`Uint8Array`**
+  (the framework's `bytea` column type and the blob provider normalize to
+  `Buffer`); `int8` is a string unless you pass `parsers: { [types.INT8]:
+  Number }` at construction (`pg`'s global parser registry, which the
+  framework's `createDrizzle` configures, is not consulted); and a data dir
+  is **one process at a time**.
+- **PGlite as a peer of `drizzle-orm` splits the package.** The moment
+  `@electric-sql/pglite` lands in a workspace package's deps, pnpm resolves a
+  second `drizzle-orm` instance for that package (its optional peer set now
+  differs), and `AppDatabase<Schema>` from the framework's copy stops being
+  assignable to tables from the app's copy — the error is TS complaining about
+  a *private property* (`shouldInlineParams`) of `SQL`. The fix is to give the
+  framework the same peer set: `@electric-sql/pglite` is a framework dev
+  dependency for exactly that reason.
 
 - **`createLoggerService(...)` returns a facade, not a `Logger`.** Every module
   wants the `Logger` — but keep the facade, don't destructure it away. With

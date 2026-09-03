@@ -5,16 +5,15 @@
  * `AiUsageStore` are structural interfaces the consumer implements against its
  * own tables (`…/ai/quota.ts`, `…/ai/usage-aggregation.ts` own the window math
  * and enforcement order above the seam). This file is that implementation —
- * raw `pg` over the three `ai_*` tables from `db/ddl.ts`, since the flow-owned
- * `flow_workflow` table it also counts from is not part of the app's Drizzle
- * schema.
+ * raw SQL (`DemoSql`, so it runs on Postgres and PGlite alike) over the three
+ * `ai_*` tables from `db/ddl.ts`, since the flow-owned `flow_workflow` table it
+ * also counts from is not part of the app's Drizzle schema.
  *
  * Also here: the `AiUsageRecorder` the AI hooks call around each step —
  * per-step rows into `ai_step_usage`, running workflow totals UPSERTed into
  * `ai_workflow_usage`, and on completion a daily rollup delegated to the
  * aggregation service (which UPSERTs `ai_usage_daily` through the store).
  */
-import type { Pool } from 'pg';
 import type {
   AiUsageStore,
   AiUsageRecorder,
@@ -26,13 +25,16 @@ import type {
   AiUsageCountQuery,
 } from 'octaflow/ai';
 import type { Logger } from '@octabits-io/framework/logger';
+import type { DemoSql } from '../db/backend.ts';
 
-export function createAiUsageStore(pool: Pool): AiUsageStore {
+type Sql = Pick<DemoSql, 'query'>;
+
+export function createAiUsageStore(sql: Sql): AiUsageStore {
   return {
     async countRunningWorkflows(partitionKey: string): Promise<number> {
       // 'pending' counts too: a created-but-not-yet-running workflow already
       // occupies a concurrency slot from the caller's point of view.
-      const res = await pool.query(
+      const res = await sql.query<{ count: number }>(
         `SELECT count(*)::int AS count FROM flow_workflow
          WHERE partition_key = $1 AND status IN ('pending', 'running')`,
         [partitionKey],
@@ -41,7 +43,7 @@ export function createAiUsageStore(pool: Pool): AiUsageStore {
     },
 
     async sumWorkflowCount(query: AiUsageCountQuery): Promise<number> {
-      const res = await pool.query(
+      const res = await sql.query<{ count: number }>(
         `SELECT coalesce(sum(workflow_count), 0)::int AS count FROM ai_usage_daily
          WHERE partition_key = $1 AND usage_date BETWEEN $2 AND $3`,
         [query.partitionKey, query.startDate, query.endDate],
@@ -50,7 +52,7 @@ export function createAiUsageStore(pool: Pool): AiUsageStore {
     },
 
     async addDailyUsage(delta: DailyUsageDelta): Promise<void> {
-      await pool.query(
+      await sql.query(
         `INSERT INTO ai_usage_daily (
            partition_key, usage_date, workflow_type, key_source, workflow_count,
            input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, estimated_cost_micros
@@ -78,7 +80,7 @@ export function createAiUsageStore(pool: Pool): AiUsageStore {
     },
 
     async aggregateByDate(query: AiUsageRangeQuery): Promise<UsageSummaryRow[]> {
-      const res = await pool.query(
+      const res = await sql.query<UsageSummaryRow>(
         `SELECT to_char(usage_date, 'YYYY-MM-DD') AS date,
                 sum(workflow_count)::int AS "workflowCount",
                 sum(input_tokens)::int AS "inputTokens",
@@ -95,7 +97,7 @@ export function createAiUsageStore(pool: Pool): AiUsageStore {
     },
 
     async aggregateByWorkflowType(query: AiUsageRangeQuery): Promise<UsageByTypeRow[]> {
-      const res = await pool.query(
+      const res = await sql.query<UsageByTypeRow>(
         `SELECT workflow_type AS "workflowType",
                 key_source AS "keySource",
                 sum(workflow_count)::int AS "workflowCount",
@@ -113,7 +115,7 @@ export function createAiUsageStore(pool: Pool): AiUsageStore {
 }
 
 export interface CreateAiUsageRecorderDeps {
-  pool: Pool;
+  sql: Sql;
   /** Rolls completed-workflow totals into `ai_usage_daily` (via the store's UPSERT). */
   aggregation: AiUsageAggregationService;
   partitionKey: string;
@@ -122,11 +124,11 @@ export interface CreateAiUsageRecorderDeps {
 
 /** The hooks-side recorder: step rows, workflow running totals, daily rollup. */
 export function createAiUsageRecorder(deps: CreateAiUsageRecorderDeps): AiUsageRecorder {
-  const { pool, aggregation, partitionKey, logger } = deps;
+  const { sql, aggregation, partitionKey, logger } = deps;
 
   return {
     async recordStepUsage({ stepId, workflowId, usage, costMicros }) {
-      await pool.query(
+      await sql.query(
         `INSERT INTO ai_step_usage (
            step_id, workflow_id, model_id, input_tokens, output_tokens,
            cache_read_tokens, cache_write_tokens, cost_micros
@@ -151,7 +153,7 @@ export function createAiUsageRecorder(deps: CreateAiUsageRecorderDeps): AiUsageR
     },
 
     async incrementWorkflowUsage({ workflowId, usage, costMicros }) {
-      await pool.query(
+      await sql.query(
         `INSERT INTO ai_workflow_usage (
            workflow_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_micros
          ) VALUES ($1, $2, $3, $4, $5, $6)
@@ -167,7 +169,13 @@ export function createAiUsageRecorder(deps: CreateAiUsageRecorderDeps): AiUsageR
     },
 
     async recordWorkflowDaily({ workflowId, workflowType, keySource, date }) {
-      const res = await pool.query(
+      const res = await sql.query<{
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens: number;
+        cacheWriteTokens: number;
+        costMicros: number;
+      }>(
         `SELECT input_tokens::int AS "inputTokens", output_tokens::int AS "outputTokens",
                 cache_read_tokens::int AS "cacheReadTokens", cache_write_tokens::int AS "cacheWriteTokens",
                 cost_micros::int AS "costMicros"

@@ -9,7 +9,6 @@
  */
 import { z } from 'zod';
 import {
-  DATABASE_CONFIG_SCHEMA,
   LOGGING_CONFIG_SCHEMA,
   MAIL_CONFIG_SCHEMA,
   booleanFromEnv,
@@ -41,7 +40,18 @@ const SCHEMA_CONFIG = z.object({
   port: z.coerce.number().int().positive(),
   /** Absolute base URL this API is reachable at — used to build blob public URLs. */
   publicBaseUrl: nonEmptyUrl(),
-  database: DATABASE_CONFIG_SCHEMA,
+  /**
+   * Where the data lives — one of two backends behind the same seam
+   * (`db/backend.ts`). `DATABASE_URL` set ⇒ a real Postgres; unset ⇒ PGlite,
+   * an embedded WASM Postgres inside this process, persisted under
+   * `PGLITE_DATA_DIR` (`memory://` for throwaway). Zero-config `bun dev`
+   * therefore needs no Docker; `docker compose up` + `DATABASE_URL` keeps the
+   * real-Postgres path exercised.
+   */
+  database: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('postgres'), url: nonEmptyUrl() }),
+    z.object({ kind: z.literal('pglite'), dataDir: nonEmptyString('PGLITE_DATA_DIR cannot be empty') }),
+  ]),
   logging: LOGGING_CONFIG_SCHEMA,
   pii: z.object({
     /** Age identity (AGE-SECRET-KEY-1…). Its recipient is derived at boot. */
@@ -88,6 +98,7 @@ export function loadConfig(): AppConfig {
   const ageIdentity = getEnv('DEMO_AGE_IDENTITY', DEV_AGE_IDENTITY);
   const blindIndexKey = getEnv('DEMO_BLIND_INDEX_KEY', DEV_BLIND_INDEX_KEY);
   const otlpEndpoint = getEnvOptional('OTLP_LOGS_ENDPOINT');
+  const databaseUrl = getEnvOptional('DATABASE_URL');
 
   // `assertNotInProduction` throws when the flag is truthy AND NODE_ENV is
   // production — the presence-flag here is "the committed dev key material is
@@ -100,9 +111,9 @@ export function loadConfig(): AppConfig {
   const parsed = parseConfig({
     port: getEnvNumber('PORT', 3101),
     publicBaseUrl: getEnv('PUBLIC_BASE_URL', 'http://localhost:3101'),
-    database: {
-      url: getEnv('DATABASE_URL', 'postgres://demo:demo@localhost:5433/demo'),
-    },
+    database: databaseUrl
+      ? { kind: 'postgres', url: databaseUrl }
+      : { kind: 'pglite', dataDir: getEnv('PGLITE_DATA_DIR', './.pglite') },
     logging: {
       level: getEnv('LOG_LEVEL', 'debug'),
       environment: getEnv('NODE_ENV', 'development'),

@@ -5,7 +5,10 @@ import type { ObjectStorageError } from '../../base/errors';
 import type { Pool, PoolClient } from 'pg';
 
 /**
- * Postgres blob provider on raw `pg` (nominal `Pool` type, optional peer).
+ * Postgres blob provider over a structural {@link SqlExecutor} seam. A `pg`
+ * `Pool` (optional peer) is the convenience form — `toExecutor` wraps it — and
+ * anything else that can run parameterized SQL and a transaction (an embedded
+ * PGlite instance, an RLS-scoped connection) implements the seam directly.
  *
  * Stores blobs in a self-owned `object_storage` table. `namespace` is the
  * optional logical partition from the ObjectStorageService contract; the root
@@ -16,6 +19,74 @@ import type { Pool, PoolClient } from 'pg';
 
 /** `timestamptz` comes back from `pg` as a `Date`; normalize to ISO 8601 text. */
 const iso = (v: Date | string): string => (v instanceof Date ? v.toISOString() : v);
+
+/**
+ * `bytea` comes back from `pg` as a `Buffer` but from an embedded driver (PGlite)
+ * as a plain `Uint8Array`; the `ObjectData` contract promises a `Buffer`.
+ * Zero-copy view when a conversion is needed.
+ */
+const toBuffer = (v: Buffer | Uint8Array): Buffer =>
+  Buffer.isBuffer(v) ? v : Buffer.from(v.buffer, v.byteOffset, v.byteLength);
+
+// --- the database seam ------------------------------------------------------
+
+/** Minimal query result shape the provider consumes (a structural subset of `pg`'s `QueryResult`). */
+export interface SqlResult<R> {
+  rows: R[];
+  rowCount: number | null;
+}
+
+/**
+ * The provider's only contact with the database. It issues raw parameterized
+ * (`$n`) SQL through this seam and never opens a connection of its own, so the
+ * host decides how queries run: a `pg` `Pool` (see {@link poolExecutor}), an
+ * embedded single-connection driver, or a connection that first sets
+ * transaction-local GUCs for Row Level Security.
+ *
+ * Same shape as `octaflow/store-pg`'s `SqlExecutor` on purpose, so one host
+ * object can serve both.
+ */
+export interface SqlExecutor {
+  query<R = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<SqlResult<R>>;
+  /** Run `fn` inside one transaction; commit on return, roll back on throw. */
+  transaction<T>(fn: (tx: Pick<SqlExecutor, 'query'>) => Promise<T>): Promise<T>;
+}
+
+/** A `pg` `Pool` as a {@link SqlExecutor}: pooled queries, one checked-out client per transaction. */
+export function poolExecutor(pool: Pool): SqlExecutor {
+  // `pg` types rows as `QueryResultRow`; the seam lets the caller name `R`.
+  const query =
+    (run: Pick<Pool | PoolClient, 'query'>): SqlExecutor['query'] =>
+    async <R,>(sql: string, params?: unknown[]) => {
+      const res = await run.query(sql, params);
+      return { rows: res.rows as R[], rowCount: res.rowCount };
+    };
+  return {
+    query: query(pool),
+    async transaction(fn) {
+      const client: PoolClient = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const result = await fn({ query: query(client) });
+        await client.query('COMMIT');
+        return result;
+      } catch (e) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw e;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
+
+/**
+ * Accept either form. A {@link SqlExecutor} is discriminated by its
+ * `transaction` method (a `pg` `Pool` has none).
+ */
+export function toExecutor(db: Pool | SqlExecutor): SqlExecutor {
+  return 'transaction' in db ? db : poolExecutor(db);
+}
 
 /** Root-namespace sentinel used only inside the table — never exposed to callers. */
 const namespaceColumnValue = (namespace: string | undefined): string => namespace ?? '';
@@ -105,7 +176,7 @@ export function objectStorageDdl(): string {
 
 /** Raw `object_storage` row from a full-object read (`bigint`→string, `timestamptz`→Date). */
 type ObjectRow = {
-  data: Buffer;
+  data: Buffer | Uint8Array;
   size: string;
   content_type: string;
   metadata: Record<string, string> | null;
@@ -144,16 +215,18 @@ export interface TableInitializerOptions {
   readonly advisoryLockId?: number;
 }
 
-// Configuration — a raw `pg` Pool for both the full service and the URL provider.
+// Configuration — the database seam for both the full service and the URL provider.
 export interface PostgresObjectStorageConfig extends TableInitializerOptions {
-  readonly pool: Pool;
+  /** A `pg` `Pool`, or any {@link SqlExecutor} (PGlite, an RLS-scoped connection, …). */
+  readonly db: Pool | SqlExecutor;
   createPublicUrl: (namespace: string | undefined, key: string) => string;
 }
 
-// URL provider config — same `{ pool }` shape as the full service config.
+// URL provider config — same `{ db }` shape as the full service config.
 export interface PostgresObjectStorageUrlProviderConfig extends TableInitializerOptions {
   createPublicUrl: (namespace: string | undefined, key: string) => string;
-  readonly pool: Pool;
+  /** A `pg` `Pool`, or any {@link SqlExecutor} (PGlite, an RLS-scoped connection, …). */
+  readonly db: Pool | SqlExecutor;
 }
 
 export interface PostgresObjectStorageUrlProvider extends ObjectStorageUrlProvider {
@@ -162,23 +235,7 @@ export interface PostgresObjectStorageUrlProvider extends ObjectStorageUrlProvid
   readonly getObjectData?: ObjectStorageService['getObjectData'];
 }
 
-// --- transaction + initializer helpers -------------------------------------
-
-/** Run `fn` inside a BEGIN/COMMIT transaction on a dedicated client (copied from flow). */
-async function withTx<T>(pool: Pool, fn: (client: PoolClient) => Promise<T>): Promise<T> {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const result = await fn(client);
-    await client.query('COMMIT');
-    return result;
-  } catch (e) {
-    await client.query('ROLLBACK').catch(() => {});
-    throw e;
-  } finally {
-    client.release();
-  }
-}
+// --- initializer helpers ---------------------------------------------------
 
 const DEFAULT_ADVISORY_LOCK_ID = 123456789;
 
@@ -187,7 +244,7 @@ const DEFAULT_ADVISORY_LOCK_ID = 123456789;
  * bootstrap (advisory-locked, in one transaction); subsequent calls are no-ops.
  * Skipped entirely when `autoCreateTable: false`.
  */
-const createTableInitializer = (pool: Pool, options?: TableInitializerOptions) => {
+const createTableInitializer = (db: SqlExecutor, options?: TableInitializerOptions) => {
   const autoCreateTable = options?.autoCreateTable ?? true;
   const lockId = options?.advisoryLockId ?? DEFAULT_ADVISORY_LOCK_ID;
   let initialized = false;
@@ -198,10 +255,10 @@ const createTableInitializer = (pool: Pool, options?: TableInitializerOptions) =
     }
 
     try {
-      await withTx(pool, async (client) => {
-        await client.query('SELECT pg_advisory_xact_lock($1)', [lockId]);
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT pg_advisory_xact_lock($1)', [lockId]);
         for (const stmt of INITIALIZER_STATEMENTS) {
-          await client.query(stmt);
+          await tx.query(stmt);
         }
       });
 
@@ -221,11 +278,11 @@ const createTableInitializer = (pool: Pool, options?: TableInitializerOptions) =
 };
 
 /**
- * Creates a `getObjectData` implementation bound to a pool. Reusable by both
- * the URL provider and the full service.
+ * Creates a `getObjectData` implementation bound to the executor. Reusable by
+ * both the URL provider and the full service.
  */
 const createGetObjectData = (
-  pool: Pool,
+  db: SqlExecutor,
   ensureTableExists: () => Promise<Result<void, ObjectStorageError>>,
 ): ObjectStorageService['getObjectData'] => {
   return async ({ namespace, key }: { namespace?: string; key: string }) => {
@@ -235,7 +292,7 @@ const createGetObjectData = (
     }
 
     try {
-      const result = await pool.query<ObjectRow>(
+      const result = await db.query<ObjectRow>(
         `SELECT data, size, content_type, metadata, updated_at FROM object_storage WHERE namespace = $1 AND key = $2 LIMIT 1`,
         [namespaceColumnValue(namespace), key],
       );
@@ -255,7 +312,7 @@ const createGetObjectData = (
       return {
         ok: true,
         value: {
-          data: obj.data,
+          data: toBuffer(obj.data),
           size: Number(obj.size),
           contentType: obj.content_type,
           metadata: obj.metadata ?? {},
@@ -285,8 +342,9 @@ export const createPostgresObjectStorageUrlProvider = (
     },
   };
 
-  const ensureTableExists = createTableInitializer(config.pool, config);
-  const getObjectData = createGetObjectData(config.pool, ensureTableExists);
+  const db = toExecutor(config.db);
+  const ensureTableExists = createTableInitializer(db, config);
+  const getObjectData = createGetObjectData(db, ensureTableExists);
   return { ...base, getObjectData };
 };
 
@@ -325,10 +383,11 @@ export interface PostgresObjectStorageService extends ObjectStorageService {
 export const createPostgresObjectStorageService = (
   config: PostgresObjectStorageConfig,
 ): PostgresObjectStorageService => {
-  const { pool, createPublicUrl } = config;
+  const { createPublicUrl } = config;
+  const db = toExecutor(config.db);
 
   // Use shared table initializer
-  const ensureTableExists = createTableInitializer(pool, config);
+  const ensureTableExists = createTableInitializer(db, config);
 
   const getPublicUrl: ObjectStorageService['getPublicUrl'] = ({ namespace, key }) => {
     return createPublicUrl(namespace, key);
@@ -352,7 +411,7 @@ export const createPostgresObjectStorageService = (
         conds.push(`key LIKE $${args.length}`);
       }
 
-      const results = await pool.query<ListRow>(
+      const results = await db.query<ListRow>(
         `SELECT key, size, content_type, metadata FROM object_storage WHERE ${conds.join(' AND ')} ORDER BY key`,
         args,
       );
@@ -427,7 +486,7 @@ export const createPostgresObjectStorageService = (
       // Single atomic upsert (also fixes the old select-then-write race). Relies
       // on the object_storage_namespace_key_unique constraint from the initializer
       // / objectStorageDdl().
-      await pool.query(
+      await db.query(
         `INSERT INTO object_storage (namespace, key, data, size, content_type, metadata)
          VALUES ($1, $2, $3, $4, $5, $6::jsonb)
          ON CONFLICT (namespace, key) DO UPDATE SET
@@ -470,7 +529,7 @@ export const createPostgresObjectStorageService = (
     }
 
     try {
-      await pool.query(
+      await db.query(
         `DELETE FROM object_storage WHERE namespace = $1 AND key = $2`,
         [namespaceColumnValue(namespace), key],
       );
@@ -508,7 +567,7 @@ export const createPostgresObjectStorageService = (
     }
 
     try {
-      const result = await pool.query(
+      const result = await db.query(
         `DELETE FROM object_storage WHERE namespace = $1 AND key LIKE $2`,
         [namespaceColumnValue(namespace), `${prefix}%`],
       );
@@ -527,7 +586,7 @@ export const createPostgresObjectStorageService = (
   };
 
   // Use shared getObjectData implementation
-  const getObjectData = createGetObjectData(pool, ensureTableExists);
+  const getObjectData = createGetObjectData(db, ensureTableExists);
 
   return {
     type: 'postgres' as const,

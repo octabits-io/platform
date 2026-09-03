@@ -62,6 +62,13 @@ const manager = createBossManager({
 });
 await manager.start();
 
+// …or over an embedded database instead of a connection string. pg-boss then
+// runs every statement through the adapter and opens no pool of its own;
+// LISTEN/NOTIFY stays in-process. `backend: 'pglite'` switches off the
+// multi-connection machinery a single-connection database cannot provide.
+import { fromPglite } from 'pg-boss';
+const embedded = createBossManager({ db: fromPglite(pglite), backend: 'pglite', logger });
+
 // 2. A typed, validated queue domain
 const SCHEMA_EMAIL_JOB = SCHEMA_SCOPED_JOB_PAYLOAD.extend({
   to: z.string().email(),

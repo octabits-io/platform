@@ -49,17 +49,21 @@ import {
 
 /**
  * Custom `bytea` column type — maps a PostgreSQL `bytea` to a Node.js `Buffer`
- * on both the driver and application side. Used for the encrypted key material.
+ * on the application side. Used for the encrypted key material.
+ *
+ * `pg` already hands back a `Buffer`; an embedded driver (PGlite) hands back a
+ * plain `Uint8Array`, which is wrapped zero-copy so the application side sees
+ * one type either way.
  */
-export const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+export const bytea = customType<{ data: Buffer; driverData: Uint8Array }>({
   dataType() {
     return "bytea";
   },
-  toDriver(value: Buffer): Buffer {
+  toDriver(value: Buffer): Uint8Array {
     return value;
   },
-  fromDriver(value: Buffer): Buffer {
-    return value;
+  fromDriver(value: Uint8Array): Buffer {
+    return Buffer.isBuffer(value) ? value : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
   },
 });
 

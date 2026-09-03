@@ -15,9 +15,11 @@
  *
  * The LISTEN side reuses `events/postgres`' dedicated-connection listener,
  * inheriting its deployment constraints: subscribe with a **direct**
- * (non-pooled, non-PgBouncer) connection string. The publish side is one
- * `pg_notify(...)` on the consumer's regular Drizzle connection — pooled is
- * fine. Two publish methods with distinct contracts:
+ * (non-pooled, non-PgBouncer) connection string — or hand `subscribe` a
+ * ready `EventNotificationListener` (e.g. `events/pglite` for an embedded
+ * database). The publish side is one `pg_notify(...)` on the consumer's
+ * regular Drizzle connection — pooled is fine. Two publish methods with
+ * distinct contracts:
  *
  * - {@link BroadcastChannel.publish} — best-effort hint on a regular
  *   connection; database failures are logged, never thrown.
@@ -66,9 +68,7 @@ export interface CreateBroadcastChannelDeps<T> {
   }) => EventNotificationListener;
 }
 
-export interface BroadcastSubscribeOptions<T> {
-  /** Direct (non-pooled, non-PgBouncer) connection string — LISTEN requirement. */
-  connectionString: string;
+export interface BroadcastSubscribeHandlers<T> {
   /**
    * Called once per received, schema-valid message. Exceptions are caught
    * and logged — a faulty handler must not take the listener down.
@@ -81,6 +81,26 @@ export interface BroadcastSubscribeOptions<T> {
    */
   onReconnect?: () => void;
 }
+
+/**
+ * Where the LISTEN runs: a direct connection string (the default listener
+ * from `events/postgres` opens a dedicated connection on it), or a ready
+ * listener the caller built — `events/pglite`'s for an embedded database,
+ * or a test double.
+ */
+export type BroadcastSubscribeOptions<T> = BroadcastSubscribeHandlers<T> &
+  (
+    | {
+        /** Direct (non-pooled, non-PgBouncer) connection string — LISTEN requirement. */
+        connectionString: string;
+        listener?: undefined;
+      }
+    | {
+        /** A listener on the same database the publish side notifies. */
+        listener: EventNotificationListener;
+        connectionString?: undefined;
+      }
+  );
 
 export interface BroadcastSubscription {
   stop(): Promise<void>;
@@ -157,11 +177,10 @@ export function createBroadcastChannel<T>(deps: CreateBroadcastChannelDeps<T>): 
   }
 
   async function subscribe(options: BroadcastSubscribeOptions<T>): Promise<BroadcastSubscription> {
-    const listener = createListener({
-      connectionString: options.connectionString,
-      channel,
-      logger,
-    });
+    const listener =
+      options.listener !== undefined
+        ? options.listener
+        : createListener({ connectionString: options.connectionString, channel, logger });
 
     await listener.start({
       onNotification: (raw) => {

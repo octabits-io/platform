@@ -12,10 +12,10 @@
  * DDL at runtime (its default lazy bootstrap would need DDL privileges on every
  * request path — even a plain read).
  */
-import type { Pool } from 'pg';
 import { objectStorageDdl } from '@octabits-io/framework/storage/postgres';
 import { flowStoreDdl } from 'octaflow/store-pg';
 import type { Logger } from '@octabits-io/framework/logger';
+import type { DemoSql } from './backend.ts';
 
 const APP_DDL = `
   CREATE TABLE IF NOT EXISTS contacts (
@@ -152,9 +152,11 @@ const APP_DDL = `
 `;
 
 /** Create every table this app needs. Idempotent — safe on every boot. */
-export async function ensureSchema(pool: Pool, logger: Logger): Promise<void> {
-  await pool.query(APP_DDL);
-  await pool.query(objectStorageDdl());
-  await pool.query(flowStoreDdl());
+export async function ensureSchema(sql: Pick<DemoSql, 'exec'>, logger: Logger): Promise<void> {
+  // `exec`, not `query`: these are multi-statement scripts, which only the
+  // simple query protocol accepts (PGlite's `query` is strictly one statement).
+  await sql.exec(APP_DDL);
+  await sql.exec(objectStorageDdl());
+  await sql.exec(flowStoreDdl());
   logger.info('Schema ensured');
 }
