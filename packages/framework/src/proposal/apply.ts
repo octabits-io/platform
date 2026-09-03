@@ -20,6 +20,7 @@ import type {
   ProposedOperation,
   ReorderOperation,
   ResolvedOperation,
+  Reversibility,
   UpdateOperation,
 } from './types';
 
@@ -103,6 +104,26 @@ export function detectDrift(
 }
 
 // ============================================================================
+// Reversibility
+// ============================================================================
+
+const REVERSIBILITY_RANK: Record<Reversibility, number> = { reversible: 0, compensable: 1, irreversible: 2 };
+
+/**
+ * The worst reversibility among a set of operations — what a ledger row
+ * records for the application as a whole, and what an autonomy ladder gates
+ * on. An operation that does not say is `reversible`.
+ */
+export function reversibilityOf(operations: readonly Pick<ProposedOperation, 'reversibility'>[]): Reversibility {
+  let worst: Reversibility = 'reversible';
+  for (const op of operations) {
+    const value = op.reversibility ?? 'reversible';
+    if (REVERSIBILITY_RANK[value] > REVERSIBILITY_RANK[worst]) worst = value;
+  }
+  return worst;
+}
+
+// ============================================================================
 // Revert
 // ============================================================================
 
@@ -114,6 +135,10 @@ export interface InversePlan {
   operations: ProposedOperation[];
   /** Creates that could not be inverted because no created id was recorded for their `ref`. */
   missing: string[];
+  /** Operations declared `irreversible` — not inverted; the host has nothing it can write. */
+  irreversible: string[];
+  /** Operations declared `compensable` — inverted, but the inverse is a correction, not an undo. */
+  compensable: string[];
 }
 
 /**
@@ -129,13 +154,25 @@ export interface InversePlan {
  * Guards are not carried over: the revert targets what the application
  * wrote, and whether that has since moved is a question the host asks with
  * `detectDrift` against the returned updates if it wants to.
+ *
+ * Reversibility is honoured: an `irreversible` operation is left out and
+ * named, a `compensable` one is inverted and named, so a host can say "two
+ * things were undone, one was corrected, one could not be" instead of
+ * claiming a clean revert it did not perform.
  */
 export function invertOperations(applied: readonly ResolvedOperation[], created: CreatedIds): InversePlan {
   const operations: ProposedOperation[] = [];
   const missing: string[] = [];
+  const irreversible: string[] = [];
+  const compensable: string[] = [];
 
   for (let i = applied.length - 1; i >= 0; i--) {
     const op = applied[i]!;
+    if (op.reversibility === 'irreversible') {
+      irreversible.push(op.id);
+      continue;
+    }
+    if (op.reversibility === 'compensable') compensable.push(op.id);
     switch (op.op) {
       case 'update': {
         const inverse: UpdateOperation = {
@@ -196,5 +233,5 @@ export function invertOperations(applied: readonly ResolvedOperation[], created:
     }
   }
 
-  return { operations, missing };
+  return { operations, missing, irreversible, compensable };
 }

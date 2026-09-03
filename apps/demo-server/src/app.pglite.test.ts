@@ -28,7 +28,8 @@ import type { DatabaseBackend } from './db/backend.ts';
 import { ensureSchema } from './db/ddl.ts';
 import { welcomeEmailQueue } from './queues/welcome-email.ts';
 import { createInMemoryAiRuntime } from './ai/testing.ts';
-import { createInMemoryProposalApplicationStore, createProposalService } from './ai/proposals.ts';
+import { createProposalService } from './ai/proposals.ts';
+import { createInMemoryAgentLedgerStore } from '@octabits-io/framework/drizzle/agent-ledger';
 
 const silentLogger: Logger = {
   debug: () => {}, info: () => {}, warn: () => {}, error: () => {},
@@ -83,7 +84,7 @@ beforeAll(async () => {
     engine: ai.engine,
     contacts: container.resolve('contactsService'),
     notes: container.resolve('notesService'),
-    applications: createInMemoryProposalApplicationStore(),
+    ledger: createInMemoryAgentLedgerStore(),
     dateProvider: createDateProvider(),
   });
   honoApp = createDemoApp({ container, config, ai: { ...ai, proposals }, checkReady: () => backend.checkReady() });

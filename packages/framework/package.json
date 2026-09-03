@@ -205,6 +205,11 @@
       "import": "./dist/drizzle/job-audit-store/index.js",
       "default": "./dist/drizzle/job-audit-store/index.js"
     },
+    "./drizzle/agent-ledger": {
+      "types": "./dist/drizzle/agent-ledger/index.d.ts",
+      "import": "./dist/drizzle/agent-ledger/index.js",
+      "default": "./dist/drizzle/agent-ledger/index.js"
+    },
     "./queue": {
       "types": "./dist/queue/index.d.ts",
       "import": "./dist/queue/index.js",

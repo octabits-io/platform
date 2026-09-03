@@ -40,6 +40,7 @@ export default defineConfig({
     "hono/events": "src/hono/events.ts",
     "hono/openapi": "src/hono/openapi.ts",
     "drizzle/job-audit-store/index": "src/drizzle/job-audit-store/index.ts",
+    "drizzle/agent-ledger/index": "src/drizzle/agent-ledger/index.ts",
     "queue/index": "src/queue/index.ts",
     "storage/index": "src/storage/index.ts",
     "storage/s3": "src/storage/s3.ts",

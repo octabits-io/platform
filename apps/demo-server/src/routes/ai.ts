@@ -22,8 +22,9 @@
  *   service (an AI-layer concern, not a core engine projection);
  * - `/workflows/:id/apply` and `/revert` — the host's half of the review loop
  *   (`ai/proposals.ts`): a reviewer's `ProposalDecision` in, the rows a
- *   proposal names written, an audit row kept, and `appliedAt` projected from
- *   that row through the `extendWorkflow` seam.
+ *   proposal names written, a ledger row kept (who acted, on whose behalf,
+ *   what was written, how to undo it), and `appliedAt` projected from that
+ *   row through the `extendWorkflow` seam.
  */
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -162,16 +163,24 @@ export function createAiRoutes({ engine, usage, partitionKey, proposals }: AiRou
       describeApiRoute({
         summary: 'Undo an applied proposal',
         description:
-          'Derives the inverse operations from the audit row (`invertOperations`) and writes them through the same path apply used. 409 `proposal_not_applied` / `proposal_already_reverted` otherwise.',
+          'Derives the inverse operations from the ledger row (`invertOperations`) and writes them through the same path apply used. Irreversible operations are named, not undone. 409 `proposal_not_applied` / `proposal_already_reverted` otherwise.',
         tags: TAGS,
         responses: {
-          ...successResponses(200, z.object({ revertedAt: z.string(), missing: z.array(z.string()) })),
+          ...successResponses(
+            200,
+            z.object({
+              revertedAt: z.string(),
+              missing: z.array(z.string()),
+              irreversible: z.array(z.string()),
+              compensable: z.array(z.string()),
+            }),
+          ),
           ...errorResponses(400, 404, 409, 429, 500),
         },
       }),
       octApiValidator('param', SCHEMA_ID_PARAM),
       async (c) => {
-        const reverted = await proposals.revert(c.req.valid('param').id);
+        const reverted = await proposals.revert(c.req.valid('param').id, c.req.header('x-demo-role') ?? null);
         if (!reverted.ok) return errorJson(c, reverted.error);
         return c.json(reverted.value);
       },
@@ -186,18 +195,18 @@ export function createAiRoutes({ engine, usage, partitionKey, proposals }: AiRou
         errorOverrides: AI_ERROR_OVERRIDES,
         extendWorkflow: {
           // `appliedAt` is the kit's vocabulary, not flow's. It is projected
-          // from this app's audit row (`proposal_applications`), batched once
-          // per request through `load` — never stored on the workflow.
+          // from the agent ledger (latest row per workflow), batched once per
+          // request through `load` — never stored on the workflow.
           schema: { appliedAt: z.string().nullable(), revertedAt: z.string().nullable() },
           load: async (workflows) => {
-            const rows = await proposals.applications.getMany(workflows.map((w) => w.id));
+            const rows = await proposals.ledger.findByWorkflows(workflows.map((w) => w.id));
             return rows.ok ? rows.value : new Map();
           },
           project: (workflow, loaded) => {
-            const application = loaded?.get(workflow.id);
+            const entry = loaded?.get(String(workflow.id));
             return {
-              appliedAt: application && application.revertedAt === null ? application.appliedAt : null,
-              revertedAt: application?.revertedAt ?? null,
+              appliedAt: entry && entry.revertedAt === null ? entry.appliedAt : null,
+              revertedAt: entry?.revertedAt ?? null,
             };
           },
         },

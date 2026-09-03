@@ -46,7 +46,14 @@ Two mechanisms fall out of that:
 - `display` — optional per-operation `label`/`labelKey`, `control`, `maxLength`,
   `hint`, `order`, so one generic renderer stands in for a bespoke review
   component per workflow.
-- `applied` — set by the host once a decision is committed (`at`, `by`, `accepted`).
+- `applied` — set by the host once a decision is committed (`at`, `by`, `accepted`, `principal`).
+- `principal` on `provenance` and on `applied` — who acted, for whom, under which
+  grant (`{ kind, id, onBehalfOf?, authorizationId? }`). An agent is a principal,
+  not a process: the audit row names both parties.
+- `reversibility` on an operation — `reversible` (default: writing `current` back
+  restores the world), `compensable` (the write reverts, a side effect does not),
+  `irreversible` (nothing the host can write undoes it). `invertOperations`
+  honours it and `reversibilityOf` gives the worst class for a ledger row.
 
 ## Building one (server side)
 
@@ -111,8 +118,8 @@ The reference implementation is the demo server, end to end:
 | **Storage** | the workflow's own output (`output.propose`) | Nothing new to persist for the proposal itself — it is the run's outcome. |
 | **Anchor → table mapping** | [`apps/demo-server/src/ai/proposals.ts`](../../../apps/demo-server/src/ai/proposals.ts) (`applyOperation`) | The one switch that knows `contact`/`brief` is `contactsService.update` and a `notes` create is a note whose title the host supplies. Everything else is generic. |
 | **Apply** | same file (`apply`) + `POST /api/ai/workflows/:id/apply` | `validateProposal` → `resolveDecision` → `detectDrift` over the live row (409 `proposal_drift`) → writes in order → **audit row**. Refuses while an application stands. |
-| **Audit row** | [`proposal_applications`](../../../apps/demo-server/src/db/schema.ts) | Per workflow: the decision, the resolved operations as written, the ids assigned to creates, `applied_at`/`applied_by`/`reverted_at`. `appliedAt` on the wire is projected from it through `createFlowWorkflowRoutes`' `extendWorkflow.load`. |
-| **Revert** | same file (`revert`) + `POST …/revert` | `invertOperations` over the audit row, written through the same `applyOperation`. |
+| **Ledger row** | [`./drizzle/agent-ledger`](./foundation.md#octabits-ioframeworkdrizzleagent-ledger), table in [`schema.ts`](../../../apps/demo-server/src/db/schema.ts) | Per application: the principal (agent, on behalf of whom, under which grant), mode, the decision, the resolved operations as written, the ids assigned to creates, the reversibility class, `applied_at`/`reverted_at`/`reverted_by`. `appliedAt` on the wire is projected from it through `createFlowWorkflowRoutes`' `extendWorkflow.load`. |
+| **Revert** | same file (`revert`) + `POST …/revert` | `invertOperations` over the ledger row, written through the same `applyOperation`; `irreversible` operations are named, not undone. |
 | **Review surface** | [`apps/demo-web/app/components/AiContactBrief.vue`](../../../apps/demo-web/app/components/AiContactBrief.vue) | The kit's `ProposalReviewCard.vue` renders `output.propose`; the decision it emits is posted as-is. |
 
 What the demo leaves to a production host: one transaction around the writes

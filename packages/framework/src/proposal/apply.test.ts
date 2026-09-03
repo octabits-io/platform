@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectDrift, driftDigest, invertOperations, stableStringify } from './apply';
+import { detectDrift, driftDigest, invertOperations, reversibilityOf, stableStringify } from './apply';
 import { entityAnchor, resolveDecision, buildProposal, proposeFields } from './build';
 import type { ResolvedOperation } from './types';
 
@@ -79,6 +79,22 @@ describe('invertOperations', () => {
     const applied: ResolvedOperation[] = [
       { id: 'c1', op: 'create', collection: 'notes', ref: 'n', value: 'body', edited: false },
     ];
-    expect(invertOperations(applied, {})).toEqual({ operations: [], missing: ['n'] });
+    expect(invertOperations(applied, {})).toEqual({ operations: [], missing: ['n'], irreversible: [], compensable: [] });
+  });
+
+  it('leaves irreversible operations out and names them, and names compensable ones it did invert', () => {
+    const applied: ResolvedOperation[] = [
+      { id: 'u1', op: 'update', target: entityAnchor('listing', 1), path: ['title'], current: 'a', proposed: 'b', edited: false },
+      { id: 'c1', op: 'create', collection: 'messages', ref: 'm', value: 'Hello guest', reversibility: 'irreversible', edited: false },
+      { id: 'u2', op: 'update', target: entityAnchor('listing', 1), path: ['price'], current: 10, proposed: 12, reversibility: 'compensable', edited: false },
+    ];
+    const plan = invertOperations(applied, { m: 'msg-1' });
+
+    expect(plan.irreversible).toEqual(['c1']);
+    expect(plan.compensable).toEqual(['u2']);
+    expect(plan.operations.map((o) => o.id)).toEqual(['revert-u2', 'revert-u1']);
+    expect(reversibilityOf(applied)).toBe('irreversible');
+    expect(reversibilityOf(applied.filter((o) => o.id !== 'c1'))).toBe('compensable');
+    expect(reversibilityOf([])).toBe('reversible');
   });
 });

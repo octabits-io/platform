@@ -13,162 +13,51 @@
  *   3. **The drift check.** `detectDrift` over the live row, with the same
  *      `driftDigest` the producer used. A guard mismatch is a 409, not a
  *      silent overwrite.
- *   4. **The audit row.** One `proposal_applications` row per application:
- *      the decision, the resolved operations as written, the ids the host
- *      assigned to creates. That row is what `appliedAt` on the wire is
- *      projected from, and what revert reads — a revert never re-reads the
- *      entity to guess what "before" was.
- *   5. **Revert as a second application.** `invertOperations` turns the audit
+ *   4. **The ledger row.** One `agent_ledger` row per application
+ *      (`…/drizzle/agent-ledger`): the principal — the agent, on whose behalf,
+ *      under which grant — the mode, the decision, the operations as written,
+ *      the ids this host assigned to creates, and the reversibility class.
+ *      That row is what `appliedAt` on the wire is projected from, and what
+ *      revert reads — a revert never re-reads the entity to guess "before".
+ *   5. **Revert as a second application.** `invertOperations` turns the ledger
  *      row into the operations that undo it, and they go through the same
- *      `applyOperation`. Nothing revert-specific touches a table.
+ *      `applyOperation`. Irreversible operations are named, not undone.
  *
  * What a production host adds and this demo does not: one transaction around
- * the writes (these services take no `tx`), authorization (the demo has a
- * role header, not an identity), and per-scope routing of the engine.
+ * the writes (these services take no `tx`), a real principal with a grant
+ * record (the demo has a role header, so `onBehalfOf` is that and
+ * `authorizationId` is absent), and per-scope routing of the engine.
  */
-import { eq, inArray } from 'drizzle-orm';
 import { ok, err } from '@octabits-io/framework/result';
 import type { OctError, Result } from '@octabits-io/framework/result';
-import { withDbErrorHandling } from '@octabits-io/framework/drizzle/db';
-import type { OctDatabaseError } from '@octabits-io/framework/drizzle/db';
-import type { AppDatabase } from '@octabits-io/framework/drizzle/factory';
 import type { DateProvider } from '@octabits-io/framework/utils';
+import type { DrizzleAgentLedgerStore } from '@octabits-io/framework/drizzle/agent-ledger';
 import {
   detectDrift,
   invertOperations,
   parseEntityRef,
   proposalSchema,
   resolveDecision,
+  reversibilityOf,
   validateProposal,
 } from '@octabits-io/framework/proposal';
 import type {
+  Principal,
   Proposal,
   ProposalDecision,
   ProposedOperation,
   ResolvedOperation,
 } from '@octabits-io/framework/proposal';
-import { proposalApplications, type Schema } from '../db/schema.ts';
 import type { Contact, ContactsService } from '../services/contacts.ts';
 import type { NotesService } from '../services/notes.ts';
 import type { DemoAiEngine } from './engine.ts';
-import { PROPOSAL_TARGETS } from './workflows.ts';
-
-// ============================================================================
-// The audit row
-// ============================================================================
-
-export interface ProposalApplicationRecord {
-  workflowId: number;
-  scope: string;
-  decision: ProposalDecision;
-  /** The operations exactly as written — edits folded in, `current` intact. */
-  applied: ResolvedOperation[];
-  /** Ids this host assigned to creates, by the create's `ref`. */
-  created: Record<string, string>;
-  appliedAt: string;
-  appliedBy: string | null;
-  revertedAt: string | null;
-}
-
-export interface ProposalApplicationStore {
-  get(workflowId: number): Promise<Result<ProposalApplicationRecord | null, OctDatabaseError>>;
-  /** Batched read for the workflow list projection (`extendWorkflow.load`). */
-  getMany(workflowIds: number[]): Promise<Result<Map<number, ProposalApplicationRecord>, OctDatabaseError>>;
-  /** Insert, or replace a reverted application with a fresh one. */
-  upsert(record: ProposalApplicationRecord): Promise<Result<void, OctDatabaseError>>;
-  markReverted(workflowId: number, revertedAt: string): Promise<Result<void, OctDatabaseError>>;
-}
-
-/** The Drizzle store over `proposal_applications` (schema.ts). */
-export function createDrizzleProposalApplicationStore(db: AppDatabase<Schema>): ProposalApplicationStore {
-  type Row = typeof proposalApplications.$inferSelect;
-  const toRecord = (row: Row): ProposalApplicationRecord => ({
-    workflowId: row.workflowId,
-    scope: row.scope,
-    decision: row.decision,
-    applied: row.applied,
-    created: row.created,
-    appliedAt: row.appliedAt.toISOString(),
-    appliedBy: row.appliedBy,
-    revertedAt: row.revertedAt?.toISOString() ?? null,
-  });
-
-  return {
-    get: (workflowId) =>
-      withDbErrorHandling(async () => {
-        const [row] = await db
-          .select()
-          .from(proposalApplications)
-          .where(eq(proposalApplications.workflowId, workflowId))
-          .limit(1);
-        return ok(row ? toRecord(row) : null);
-      }),
-    getMany: (workflowIds) =>
-      withDbErrorHandling(async () => {
-        if (workflowIds.length === 0) return ok(new Map());
-        const rows = await db
-          .select()
-          .from(proposalApplications)
-          .where(inArray(proposalApplications.workflowId, workflowIds));
-        return ok(new Map(rows.map((row) => [row.workflowId, toRecord(row)])));
-      }),
-    upsert: (record) =>
-      withDbErrorHandling(async () => {
-        const values = {
-          workflowId: record.workflowId,
-          scope: record.scope,
-          decision: record.decision,
-          applied: record.applied,
-          created: record.created,
-          appliedAt: new Date(record.appliedAt),
-          appliedBy: record.appliedBy,
-          revertedAt: record.revertedAt ? new Date(record.revertedAt) : null,
-        };
-        await db
-          .insert(proposalApplications)
-          .values(values)
-          .onConflictDoUpdate({ target: proposalApplications.workflowId, set: values });
-        return ok(undefined);
-      }),
-    markReverted: (workflowId, revertedAt) =>
-      withDbErrorHandling(async () => {
-        await db
-          .update(proposalApplications)
-          .set({ revertedAt: new Date(revertedAt) })
-          .where(eq(proposalApplications.workflowId, workflowId));
-        return ok(undefined);
-      }),
-  };
-}
-
-/** The no-database twin, for the in-memory test runtime. */
-export function createInMemoryProposalApplicationStore(): ProposalApplicationStore {
-  const rows = new Map<number, ProposalApplicationRecord>();
-  return {
-    get: async (workflowId) => ok(rows.get(workflowId) ?? null),
-    getMany: async (workflowIds) =>
-      ok(new Map(workflowIds.flatMap((id) => (rows.has(id) ? [[id, rows.get(id)!] as const] : [])))),
-    upsert: async (record) => {
-      rows.set(record.workflowId, { ...record });
-      return ok(undefined);
-    },
-    markReverted: async (workflowId, revertedAt) => {
-      const row = rows.get(workflowId);
-      if (row) rows.set(workflowId, { ...row, revertedAt });
-      return ok(undefined);
-    },
-  };
-}
-
-// ============================================================================
-// The service
-// ============================================================================
+import { CONTACT_BRIEF_AGENT, PROPOSAL_TARGETS } from './workflows.ts';
 
 export interface ProposalServiceDeps {
   engine: Pick<DemoAiEngine, 'getWorkflowStatus'>;
   contacts: Pick<ContactsService, 'getById' | 'update'>;
   notes: Pick<NotesService, 'create' | 'delete'>;
-  applications: ProposalApplicationStore;
+  ledger: DrizzleAgentLedgerStore;
   dateProvider: DateProvider;
 }
 
@@ -182,11 +71,15 @@ export interface RevertResult {
   revertedAt: string;
   /** Creates that could not be undone because no id was recorded for them. */
   missing: string[];
+  /** Operations that were declared irreversible and therefore left in place. */
+  irreversible: string[];
+  /** Operations undone by a correction rather than a clean reversal. */
+  compensable: string[];
 }
 
 const failure = (key: string, message: string): OctError => ({ key, message });
 
-export function createProposalService({ engine, contacts, notes, applications, dateProvider }: ProposalServiceDeps) {
+export function createProposalService({ engine, contacts, notes, ledger, dateProvider }: ProposalServiceDeps) {
   /** The proposal a completed run stored as its `propose` step output. */
   async function loadProposal(workflowId: number): Promise<Result<Proposal, OctError>> {
     const workflow = await engine.getWorkflowStatus(workflowId);
@@ -209,6 +102,12 @@ export function createProposalService({ engine, contacts, notes, applications, d
     }
     return contacts.getById(ref.id);
   }
+
+  /** The agent as the acting principal, delegated by whoever pressed Apply. */
+  const actingAs = (onBehalfOf: string | null): Principal => ({
+    ...CONTACT_BRIEF_AGENT,
+    ...(onBehalfOf ? { onBehalfOf } : {}),
+  });
 
   const isBriefUpdate = (op: ProposedOperation) =>
     op.op === 'update'
@@ -270,11 +169,11 @@ export function createProposalService({ engine, contacts, notes, applications, d
     const proposal = await loadProposal(workflowId);
     if (!proposal.ok) return proposal;
 
-    const existing = await applications.get(workflowId);
-    if (!existing.ok) return existing;
-    if (existing.value && existing.value.revertedAt === null) {
+    const standing = await ledger.findByWorkflow(workflowId);
+    if (!standing.ok) return standing;
+    if (standing.value && standing.value.revertedAt === null) {
       return err(
-        failure('proposal_already_applied', `Workflow ${workflowId} was applied at ${existing.value.appliedAt}`),
+        failure('proposal_already_applied', `Workflow ${workflowId} was applied at ${standing.value.appliedAt}`),
       );
     }
 
@@ -306,48 +205,49 @@ export function createProposalService({ engine, contacts, notes, applications, d
       if (written.value) created[written.value.ref] = written.value.id;
     }
 
-    const appliedAt = dateProvider.now().toISOString();
-    const stored = await applications.upsert({
-      workflowId,
+    const recorded = await ledger.record({
+      principal: actingAs(appliedBy),
+      mode: 'reviewed',
       scope: proposal.value.scope,
+      workflowId,
       decision,
-      applied: resolved,
+      operations: resolved,
       created,
-      appliedAt,
-      appliedBy,
-      revertedAt: null,
+      reversibility: reversibilityOf(resolved),
+      appliedAt: dateProvider.now().toISOString(),
     });
-    if (!stored.ok) return stored;
+    if (!recorded.ok) return recorded;
 
-    return ok({ appliedAt, created });
+    return ok({ appliedAt: recorded.value.appliedAt, created });
   }
 
   /** Undo an application: the inverse operations, through the same writes. */
-  async function revert(workflowId: number): Promise<Result<RevertResult, OctError>> {
-    const existing = await applications.get(workflowId);
-    if (!existing.ok) return existing;
-    if (!existing.value) return err(failure('proposal_not_applied', `Workflow ${workflowId} has not been applied`));
-    if (existing.value.revertedAt !== null) {
-      return err(failure('proposal_already_reverted', `Workflow ${workflowId} was reverted at ${existing.value.revertedAt}`));
+  async function revert(workflowId: number, revertedBy: string | null): Promise<Result<RevertResult, OctError>> {
+    const standing = await ledger.findByWorkflow(workflowId);
+    if (!standing.ok) return standing;
+    if (!standing.value) return err(failure('proposal_not_applied', `Workflow ${workflowId} has not been applied`));
+    if (standing.value.revertedAt !== null) {
+      return err(failure('proposal_already_reverted', `Workflow ${workflowId} was reverted at ${standing.value.revertedAt}`));
     }
 
-    const contact = await contactOf(existing.value.scope);
+    const contact = await contactOf(standing.value.scope);
     if (!contact.ok) return contact;
 
-    const plan = invertOperations(existing.value.applied, existing.value.created);
+    // The ledger stored what this host wrote — its own `ResolvedOperation[]`.
+    const plan = invertOperations(standing.value.operations as ResolvedOperation[], standing.value.created);
     for (const op of plan.operations) {
       const written = await applyOperation(op, contact.value);
       if (!written.ok) return written;
     }
 
     const revertedAt = dateProvider.now().toISOString();
-    const marked = await applications.markReverted(workflowId, revertedAt);
+    const marked = await ledger.markReverted(standing.value.id, { at: revertedAt, by: revertedBy ?? 'unknown' });
     if (!marked.ok) return marked;
 
-    return ok({ revertedAt, missing: plan.missing });
+    return ok({ revertedAt, missing: plan.missing, irreversible: plan.irreversible, compensable: plan.compensable });
   }
 
-  return { loadProposal, apply, revert, applications };
+  return { loadProposal, apply, revert, ledger };
 }
 
 export type ProposalService = ReturnType<typeof createProposalService>;

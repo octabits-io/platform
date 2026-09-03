@@ -493,3 +493,23 @@ describe('isEmptyProposal', () => {
     expect(isEmptyProposal(proposal)).toBe(true);
   });
 });
+
+describe('principal and reversibility on the wire', () => {
+  it('round-trips the delegation chain and the reversibility class through the schemas', () => {
+    const proposal = buildProposal({
+      scope: 'listing:1',
+      operations: [
+        { id: 'c1', op: 'create', collection: 'messages', ref: 'm', value: 'Hello', reversibility: 'irreversible' },
+      ],
+      provenance: {
+        model: 'm',
+        principal: { kind: 'agent', id: 'ai:guest-reply', onBehalfOf: 'user-7', authorizationId: 'grant-3' },
+      },
+    });
+    const parsed = proposalSchema.parse(proposal);
+    expect(parsed.provenance?.principal).toEqual({ kind: 'agent', id: 'ai:guest-reply', onBehalfOf: 'user-7', authorizationId: 'grant-3' });
+    expect(parsed.operations[0]?.reversibility).toBe('irreversible');
+    expect(() => proposalSchema.parse({ ...proposal, provenance: { principal: { kind: 'robot', id: 'x' } } })).toThrow();
+    expect(() => proposalSchema.parse({ ...proposal, operations: [{ ...proposal.operations[0], reversibility: 'maybe' }] })).toThrow();
+  });
+});

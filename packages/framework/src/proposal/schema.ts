@@ -70,11 +70,22 @@ export const derivationSchema = z.object({
   refs: z.array(z.string()).optional(),
 });
 
+export const principalSchema = z.object({
+  kind: z.enum(['agent', 'user', 'system']),
+  id: z.string().min(1),
+  label: z.string().optional(),
+  onBehalfOf: z.string().min(1).optional(),
+  authorizationId: z.string().min(1).optional(),
+});
+
+export const reversibilitySchema = z.enum(['reversible', 'compensable', 'irreversible']);
+
 const operationBase = {
   id: z.string().min(1),
   group: z.string().optional(),
   display: changeDisplaySchema.optional(),
   derivedFrom: derivationSchema.optional(),
+  reversibility: reversibilitySchema.optional(),
 };
 
 export const updateOperationSchema = z.object({
@@ -136,11 +147,13 @@ export const proposalProvenanceSchema = z.object({
   costMicros: z.number().int().nonnegative().optional(),
   keySource: z.string().optional(),
   generatedAt: z.string().optional(),
+  principal: principalSchema.optional(),
 });
 
 export const proposalApplicationSchema = z.object({
   at: z.string(),
   by: z.string(),
+  principal: principalSchema.optional(),
   accepted: z.array(z.string().min(1)),
 });
 

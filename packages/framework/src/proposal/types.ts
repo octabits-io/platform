@@ -151,6 +151,53 @@ export interface Derivation {
 }
 
 // ============================================================================
+// Who acted, and whether it can be undone
+// ============================================================================
+
+/**
+ * The delegation chain on an agent action: who acted, for whom, under which
+ * grant. This is what makes an agent a principal rather than a process — the
+ * audit row names both parties honestly, and a grant can be revoked
+ * independently of the agent and of the human's own session.
+ *
+ * A person acting directly is `{ kind: 'user', id }` with neither delegation
+ * field. An agent acting under a grant carries both. `authorizationId` names
+ * the host's grant record; the contract does not define what a grant contains.
+ */
+export interface Principal {
+  kind: 'agent' | 'user' | 'system';
+  id: string;
+  label?: string;
+  /** For an agent: the user whose grant it acted under. */
+  onBehalfOf?: string;
+  /** For an agent: the grant that permitted the action. */
+  authorizationId?: string;
+}
+
+/**
+ * Whether applying an operation can be undone by the contract's own means.
+ *
+ *   `reversible`    — writing `current` back restores the world. The default
+ *                     for the four data operations, and what `invertOperations`
+ *                     assumes.
+ *   `compensable`   — the write itself reverts, but a side effect it triggered
+ *                     does not (a notification went out); the inverse is a
+ *                     correction, not an undo. Inverted, and flagged.
+ *   `irreversible`  — nothing the host can write undoes it (a charge, a
+ *                     message to a third party). Never inverted; an autonomy
+ *                     ladder caps these at review.
+ *
+ * "Everything is reversible" is false on day one without this distinction.
+ */
+export type Reversibility = 'reversible' | 'compensable' | 'irreversible';
+
+export const REVERSIBILITY = {
+  reversible: 'reversible',
+  compensable: 'compensable',
+  irreversible: 'irreversible',
+} as const;
+
+// ============================================================================
 // Operations
 // ============================================================================
 
@@ -170,6 +217,12 @@ export interface OperationBase {
   group?: string;
   display?: ChangeDisplay;
   derivedFrom?: Derivation;
+  /**
+   * How the host's apply of this operation behaves. Absent means
+   * `reversible` — the data operations are, unless the host's apply has side
+   * effects it cannot take back. Producers set it when they know better.
+   */
+  reversibility?: Reversibility;
 }
 
 /** Change a value on something that exists (or on a pending create). */
@@ -306,6 +359,8 @@ export interface ProposalProvenance {
   keySource?: string;
   /** When the run that produced these values completed (ISO 8601). */
   generatedAt?: string;
+  /** Who produced the proposal — the agent, and the grant it ran under. */
+  principal?: Principal;
 }
 
 /** The disposition of a proposal that has been acted on. */
@@ -314,6 +369,11 @@ export interface ProposalApplication {
   at: string;
   /** Identifier of whoever applied it — a user id, an automation name. */
   by: string;
+  /**
+   * Who applied it, as a principal. On autopilot this is the agent again,
+   * with `onBehalfOf` naming the human whose grant allowed it to skip review.
+   */
+  principal?: Principal;
   /**
    * Ids of the operations actually committed. A partial accept is the normal
    * case, so this is not derivable from the proposal.

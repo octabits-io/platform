@@ -983,6 +983,37 @@ sink, so those jobs are log-only. `record()` returns the outcome
 swallowed error is a silently lost audit trail — `defineQueue` catches it, logs
 `Failed to run DLQ audit sink`, and keeps the batch alive).
 
+#### `@octabits-io/framework/drizzle/agent-ledger`
+
+The append-only record of what agents did, under whose grant, and how to undo
+it — the audit and undo log behind the review loop
+([`./proposal`](./proposal.md)), and the row an agent-as-principal writes on
+every action. One row per applied action, whether it waited for a human
+decision (`reviewed`), ran under a grant that allowed it to skip review
+(`autopilot`), or was a person acting directly (`manual`). Deliberately **not**
+event sourcing: rows stay the truth; the ledger says who changed them and how
+to put them back.
+
+- `agentLedgerColumns` — spreadable column-set: the delegation chain
+  (`actorKind`, `actorId`, `actorLabel`, `onBehalfOf`, `authorizationId`),
+  `mode`, `scope`, `workflowId`, `decision`, `operations` (as written, with
+  what each replaced — a proposal host stores its `ResolvedOperation[]`),
+  `created` (ids assigned to creates), `reversibility` (the worst class among
+  the operations), `appliedAt`, `revertedAt`, `revertedBy`. The scope column is
+  yours to declare.
+- `createDrizzleAgentLedgerStore({ db, table, scope? })` — `record`, `get`,
+  `findByWorkflow` / `findByWorkflows` (latest row per workflow, so a
+  re-applied run supersedes its reverted application), `listByActor` (the
+  per-agent timeline), `markReverted` (rows are never deleted).
+  `createInMemoryAgentLedgerStore()` is the no-database twin.
+- Record types are structural **duplicates** of `./proposal`'s `Principal` and
+  `Reversibility` — no import; the proposal module stays a leaf.
+
+Scoping: `{ column, value }` stamps every write and filters every read;
+`{ column }` stamps from `entry.scopeKey` and **refuses** an entry without one
+(a ledger row with no owner is worse than a failed write); omitted → single
+scope.
+
 #### `@octabits-io/framework/drizzle/config`
 
 Generic **config store** over any key/value table (spread

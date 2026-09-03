@@ -52,17 +52,29 @@ const APP_DDL = `
   ALTER TABLE notes ADD COLUMN IF NOT EXISTS public_body jsonb NOT NULL DEFAULT '{}'::jsonb;
   ALTER TABLE contacts ADD COLUMN IF NOT EXISTS brief text;
 
-  -- The audit row behind an applied AI proposal (schema.ts: proposalApplications).
-  CREATE TABLE IF NOT EXISTS proposal_applications (
-    workflow_id bigint PRIMARY KEY,
+  -- The agent ledger (schema.ts: agentLedger, columns from …/drizzle/agent-ledger):
+  -- who acted under whose grant, what was written, and how to undo it.
+  DROP TABLE IF EXISTS proposal_applications;
+  CREATE TABLE IF NOT EXISTS agent_ledger (
+    id bigserial PRIMARY KEY,
+    actor_kind text NOT NULL,
+    actor_id text NOT NULL,
+    actor_label text,
+    on_behalf_of text,
+    authorization_id text,
+    mode text NOT NULL,
     scope text NOT NULL,
-    decision jsonb NOT NULL,
-    applied jsonb NOT NULL,
-    created jsonb NOT NULL DEFAULT '{}'::jsonb,
+    workflow_id text,
+    decision jsonb,
+    operations jsonb NOT NULL,
+    created jsonb,
+    reversibility text NOT NULL,
     applied_at timestamptz NOT NULL DEFAULT now(),
-    applied_by text,
-    reverted_at timestamptz
+    reverted_at timestamptz,
+    reverted_by text
   );
+  CREATE INDEX IF NOT EXISTS agent_ledger_workflow_idx ON agent_ledger (workflow_id);
+  CREATE INDEX IF NOT EXISTS agent_ledger_actor_idx ON agent_ledger (actor_id, applied_at DESC);
 
   CREATE TABLE IF NOT EXISTS settings (
     key text NOT NULL,

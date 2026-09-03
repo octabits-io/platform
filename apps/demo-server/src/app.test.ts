@@ -25,7 +25,8 @@ import { buildContainer } from './container.ts';
 import { createDemoApp } from './app.ts';
 import { createDemoApiKeys } from './api-keys.ts';
 import { createInMemoryAiRuntime } from './ai/testing.ts';
-import { createInMemoryProposalApplicationStore, createProposalService } from './ai/proposals.ts';
+import { createProposalService } from './ai/proposals.ts';
+import { createInMemoryAgentLedgerStore } from '@octabits-io/framework/drizzle/agent-ledger';
 import { createDateProvider } from '@octabits-io/framework/utils';
 import type { ContactsService } from './services/contacts.ts';
 import type { Schema } from './db/schema.ts';
@@ -60,7 +61,7 @@ beforeAll(async () => {
     engine: ai.engine,
     contacts: container.resolve('contactsService'),
     notes: container.resolve('notesService'),
-    applications: createInMemoryProposalApplicationStore(),
+    ledger: createInMemoryAgentLedgerStore(),
     dateProvider: createDateProvider(),
   });
   app = testableHonoApp(createDemoApp({ container, config, apiKeys, ai: { ...ai, proposals }, checkReady: async () => {} }));

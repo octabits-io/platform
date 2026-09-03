@@ -60,6 +60,14 @@ export interface AiHost {
 
 export const CONTACT_BRIEF_TYPE = 'contact-brief';
 
+/**
+ * The agent, as a principal. The demo has no grant record, so the delegation
+ * fields (`onBehalfOf`, `authorizationId`) are filled in at apply time from
+ * what the request knows — a real host carries the grant the run was started
+ * under and stamps it here.
+ */
+export const CONTACT_BRIEF_AGENT = { kind: 'agent', id: 'ai:contact-brief', label: 'Contact brief' } as const;
+
 /** The proposal's addressing vocabulary — what the apply side maps back to tables. */
 export const PROPOSAL_TARGETS = {
   /** `update` target type; the contact row. */
@@ -196,6 +204,7 @@ const propose = defineAiStep<
         // Single-scope demo: the platform key paid (engine.ts resolves the same).
         keySource: 'platform',
         generatedAt: new Date().toISOString(),
+        principal: CONTACT_BRIEF_AGENT,
       },
     });
   },

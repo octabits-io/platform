@@ -26,7 +26,9 @@ import type { Proposal, ProposedOperation } from '@octabits-io/framework/proposa
 import type { ContactsService } from '../services/contacts.ts';
 import type { NotesService } from '../services/notes.ts';
 import { createInMemoryAiRuntime, type InMemoryAiRuntime } from './testing.ts';
-import { createInMemoryProposalApplicationStore, createProposalService } from './proposals.ts';
+import { createProposalService } from './proposals.ts';
+import { createInMemoryAgentLedgerStore } from '@octabits-io/framework/drizzle/agent-ledger';
+import type { DrizzleAgentLedgerStore } from '@octabits-io/framework/drizzle/agent-ledger';
 import { CONTACT_BRIEF_TYPE } from './workflows.ts';
 
 const silentLogger: Logger = {
@@ -71,6 +73,7 @@ const notesStub = {
 
 let app: ReturnType<typeof testableHonoApp>;
 let ai: InMemoryAiRuntime;
+let ledger: DrizzleAgentLedgerStore;
 
 interface WorkflowData {
   id: number;
@@ -94,11 +97,12 @@ beforeAll(async () => {
   });
   ai = createInMemoryAiRuntime({ host: { contactsService: contactsStub, logger: silentLogger }, logger: silentLogger });
   // The apply side, on the same in-memory engine plus the two domain stubs.
+  ledger = createInMemoryAgentLedgerStore();
   const proposals = createProposalService({
     engine: ai.engine,
     contacts: contactsStub,
     notes: notesStub,
-    applications: createInMemoryProposalApplicationStore(),
+    ledger,
     dateProvider: createDateProvider(),
   });
   app = testableHonoApp(createDemoApp({ container, config, ai: { ...ai, proposals }, checkReady: async () => {} }));
@@ -267,7 +271,11 @@ describe('proposal review loop (apply / revert)', () => {
     expect(update.display?.control).toBe('multiline');
     expect(create).toMatchObject({ collection: 'notes', ref: 'followup' });
     expect(String(create.value)).toContain('Hi Ada Lovelace');
-    expect(proposal.provenance).toMatchObject({ model: 'demo-mock-model', keySource: 'platform' });
+    expect(proposal.provenance).toMatchObject({
+      model: 'demo-mock-model',
+      keySource: 'platform',
+      principal: { kind: 'agent', id: 'ai:contact-brief' },
+    });
     expect(proposal.applied).toBeNull();
   });
 
@@ -278,6 +286,7 @@ describe('proposal review loop (apply / revert)', () => {
 
     const applied = await testRequest(app, 'POST', `/api/ai/workflows/${workflowId}/apply`, {
       body: { accepted: [update.id, create.id], edits: [{ id: update.id, value: 'Edited brief' }] },
+      headers: { 'x-demo-role': 'admin' },
     });
     expect(applied.status).toBe(200);
     const { appliedAt, created } = applied.data as { appliedAt: string; created: Record<string, string> };
@@ -290,9 +299,20 @@ describe('proposal review loop (apply / revert)', () => {
     expect(note.body).toBe(String(create.value));
     expect(created.followup).toBe(note.id);
 
-    // The wire view projects appliedAt from the audit row.
+    // The wire view projects appliedAt from the ledger row.
     const res = await testRequest(app, 'GET', `/api/ai/workflows/${workflowId}`);
     expect((res.data as WorkflowData).appliedAt).toBe(appliedAt);
+
+    // The ledger row names the agent as the principal, delegated by whoever applied.
+    const entry = await ledger.findByWorkflow(workflowId);
+    expect(entry.ok && entry.value).toMatchObject({
+      principal: { kind: 'agent', id: 'ai:contact-brief', onBehalfOf: 'admin' },
+      mode: 'reviewed',
+      reversibility: 'reversible',
+      created: { followup: note.id },
+      revertedAt: null,
+    });
+    expect(entry.ok && (entry.value?.decision as { accepted: string[] }).accepted).toEqual([update.id, create.id]);
 
     const again = await testRequest(app, 'POST', `/api/ai/workflows/${workflowId}/apply`, {
       body: { accepted: [update.id] },
@@ -332,9 +352,16 @@ describe('proposal review loop (apply / revert)', () => {
     expect(currentBrief()).not.toBe('Before');
     expect(notesState.size).toBe(1);
 
-    const reverted = await testRequest(app, 'POST', `/api/ai/workflows/${workflowId}/revert`);
+    const reverted = await testRequest(app, 'POST', `/api/ai/workflows/${workflowId}/revert`, {
+      headers: { 'x-demo-role': 'admin' },
+    });
     expect(reverted.status).toBe(200);
-    expect((reverted.data as { missing: string[] }).missing).toEqual([]);
+    expect(reverted.data as object).toMatchObject({ missing: [], irreversible: [], compensable: [] });
+
+    // Rows are never deleted: the ledger row is marked, by whom and when.
+    const entry = await ledger.findByWorkflow(workflowId);
+    expect(entry.ok && entry.value).toMatchObject({ revertedBy: 'admin' });
+    expect(entry.ok && entry.value?.revertedAt).not.toBeNull();
     expect(currentBrief()).toBe('Before');
     expect(notesState.size).toBe(0);
 
