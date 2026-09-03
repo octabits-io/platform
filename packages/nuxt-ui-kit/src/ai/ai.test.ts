@@ -1,11 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { effectScope } from 'vue';
-import type { AiWorkflowData } from './types.ts';
-import { isTerminalStatus, isActiveStatus } from './types.ts';
+import type { AiWorkflowData } from './core/types.ts';
+import { isTerminalStatus, isActiveStatus } from './core/types.ts';
 import { useAiWorkflow } from './useAiWorkflow.ts';
 import { createAiProgressCore } from './progressCore.ts';
 import { useAiCardState } from './useAiCardState.ts';
-import { createWorkflowRegistry } from './registry.ts';
+import { createWorkflowRegistry } from './core/registry.ts';
 
 const wf = (over: Partial<AiWorkflowData> = {}): AiWorkflowData => ({
   id: 1,

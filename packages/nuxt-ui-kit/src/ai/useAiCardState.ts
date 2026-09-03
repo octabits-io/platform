@@ -1,6 +1,6 @@
 import { computed, toValue, type MaybeRefOrGetter } from 'vue';
-import type { TrackedWorkflow } from './progressCore.ts';
-import { isActiveStatus, type AiWorkflowStatus } from './types.ts';
+import type { TrackedWorkflow } from './core/progressStore.ts';
+import { deriveAiCardState } from './core/cardState.ts';
 
 /** The slice of the progress store the card state machine needs. */
 export interface AiProgressLike {
@@ -12,6 +12,8 @@ export interface AiProgressLike {
  * Shared state machine for AI trigger/suggestion cards. Derives the card
  * phase from the workflow tracked in the (injected) progress store for the
  * given entityRef.
+ *
+ * Vue binding of `deriveAiCardState` (core).
  */
 export function useAiCardState(
   store: AiProgressLike,
@@ -19,21 +21,10 @@ export function useAiCardState(
   hasActiveWorkflow?: MaybeRefOrGetter<boolean | undefined>,
 ) {
   const trackedWorkflow = computed(() => store.getByEntityRef(toValue(entityRef)));
-
-  const cardState = computed<'active' | 'failed' | 'idle'>(() => {
-    const tracked = trackedWorkflow.value;
-    if (tracked) {
-      if (isActiveStatus(tracked.status as AiWorkflowStatus)) return 'active';
-      if (tracked.status === 'failed') return 'failed';
-    }
-    if (toValue(hasActiveWorkflow)) return 'active';
-    return 'idle';
-  });
-
-  const failedWorkflow = computed(() => {
-    const tracked = trackedWorkflow.value;
-    return tracked?.status === 'failed' ? tracked : null;
-  });
+  const derived = computed(() =>
+    deriveAiCardState({ tracked: trackedWorkflow.value, hasActiveWorkflow: toValue(hasActiveWorkflow) }),
+  );
+  const failedWorkflow = computed(() => derived.value.failedWorkflow);
 
   function dismissFailure() {
     if (failedWorkflow.value) {
@@ -43,7 +34,7 @@ export function useAiCardState(
 
   return {
     trackedWorkflow,
-    cardState,
+    cardState: computed(() => derived.value.cardState),
     failedWorkflow,
     dismissFailure,
   };

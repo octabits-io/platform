@@ -6,7 +6,7 @@ import { defineComponent, h, nextTick, ref } from 'vue';
 import { mount } from '@vue/test-utils';
 import { useActiveAiWorkflowProbe } from './useActiveAiWorkflowProbe.ts';
 import { useAiWorkflowGuard } from './useAiWorkflowGuard.ts';
-import type { AiWorkflowData, AiWorkflowStatus } from './types.ts';
+import type { AiWorkflowData, AiWorkflowStatus } from './core/types.ts';
 
 function workflow(status: AiWorkflowStatus, over: Partial<AiWorkflowData> = {}): AiWorkflowData {
   return {

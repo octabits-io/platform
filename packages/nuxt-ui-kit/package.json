@@ -8,6 +8,7 @@
     "build": "tsdown",
     "clean": "rm -rf dist",
     "test": "vitest run",
+    "lint": "node scripts/check-boundaries.mjs",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "tsdown"
   },
@@ -51,6 +52,11 @@
       "types": "./dist/ai/index.d.ts",
       "import": "./dist/ai/index.js",
       "default": "./dist/ai/index.js"
+    },
+    "./ai/core": {
+      "types": "./dist/ai/core/index.d.ts",
+      "import": "./dist/ai/core/index.js",
+      "default": "./dist/ai/core/index.js"
     },
     "./events": {
       "types": "./dist/events/index.d.ts",

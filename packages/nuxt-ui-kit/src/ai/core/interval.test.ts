@@ -1,7 +1,8 @@
 /**
- * The pausable interval behind every polling composable in `./ai` (workflow
- * polling, the active-workflow probe). It exists to avoid a `@vueuse/core`
- * peer for one helper, which makes it the kit's own responsibility to prove
+ * The pausable interval behind every polling state machine in `./ai/core`
+ * (workflow polling, the progress store, the active-workflow probe). It exists
+ * to avoid a `@vueuse/core` peer for one helper, which makes it the kit's own
+ * responsibility to prove
  * the two properties every caller relies on: `resume` is idempotent (a second
  * call must not start a second timer that polls twice as fast), and `pause`
  * really clears it (callers pause in teardown — a leaked timer keeps polling a
@@ -18,7 +19,7 @@ describe('createPausableInterval', () => {
     const fn = vi.fn();
     const interval = createPausableInterval(fn, 1000);
 
-    expect(interval.isActive.value).toBe(false);
+    expect(interval.isActive()).toBe(false);
     vi.advanceTimersByTime(5_000);
     expect(fn).not.toHaveBeenCalled();
   });
@@ -28,7 +29,7 @@ describe('createPausableInterval', () => {
     const interval = createPausableInterval(fn, 1000);
 
     interval.resume();
-    expect(interval.isActive.value).toBe(true);
+    expect(interval.isActive()).toBe(true);
     // No leading call: the first tick is one interval away.
     expect(fn).not.toHaveBeenCalled();
 
@@ -55,7 +56,7 @@ describe('createPausableInterval', () => {
     interval.resume();
     vi.advanceTimersByTime(2_000);
     interval.pause();
-    expect(interval.isActive.value).toBe(false);
+    expect(interval.isActive()).toBe(false);
 
     vi.advanceTimersByTime(10_000);
     expect(fn).toHaveBeenCalledTimes(2);
@@ -73,7 +74,19 @@ describe('createPausableInterval', () => {
       interval.pause();
       interval.pause();
     }).not.toThrow();
-    expect(interval.isActive.value).toBe(false);
+    expect(interval.isActive()).toBe(false);
+  });
+
+  it('reports transitions through onActiveChange, once per change', () => {
+    const onActiveChange = vi.fn();
+    const interval = createPausableInterval(() => {}, 1000, onActiveChange);
+
+    interval.resume();
+    interval.resume();
+    interval.pause();
+    interval.pause();
+
+    expect(onActiveChange.mock.calls).toEqual([[true], [false]]);
   });
 
   it('does not await an async callback — a slow poll cannot stall the timer', async () => {

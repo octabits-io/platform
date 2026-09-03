@@ -10,6 +10,7 @@ export default defineConfig({
     "zod/index": "src/zod/index.ts",
     "dates/index": "src/dates/index.ts",
     "ai/index": "src/ai/index.ts",
+    "ai/core/index": "src/ai/core/index.ts",
     "events/index": "src/events/index.ts",
   },
   format: "esm",
