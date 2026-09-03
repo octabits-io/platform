@@ -109,8 +109,19 @@ export interface KitMessages {
       title: string;
       description: string;
       currentValue: string;
+      currentEmpty: string;
       apply: string;
       dismiss: string;
+      noChanges: string;
+      derivedFrom: string;
+      linksExisting: string;
+      charsRecommended: string;
+      skipped: string;
+      dangling: string;
+      willUpdate: string;
+      willCreate: string;
+      willDelete: string;
+      willReorder: string;
     };
   };
 }
@@ -201,8 +212,19 @@ export const kitMessagesEn: KitMessages = {
       title: 'AI suggestion',
       description: 'Review the generated result before applying it.',
       currentValue: 'Current',
+      currentEmpty: 'Currently empty',
       apply: 'Apply',
       dismiss: 'Dismiss',
+      noChanges: 'Nothing to review \u2014 the run produced no changes.',
+      derivedFrom: 'Translated from',
+      linksExisting: 'Links to existing record {id}',
+      charsRecommended: '{minLength}\u2013{maxLength} characters recommended',
+      skipped: 'Not proposed: {count}',
+      dangling: '{count} kept item(s) depend on something you rejected and cannot be applied.',
+      willUpdate: 'to update',
+      willCreate: 'to create',
+      willDelete: 'to remove',
+      willReorder: 'reordered',
     },
   },
 };

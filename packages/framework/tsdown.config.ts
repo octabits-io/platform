@@ -6,6 +6,7 @@ export default defineConfig({
     "ioc/index": "src/ioc/index.ts",
     "logger/index": "src/logger/index.ts",
     "utils/index": "src/utils/index.ts",
+    "proposal/index": "src/proposal/index.ts",
     "config-schema/index": "src/config-schema/index.ts",
     "rbac/index": "src/rbac/index.ts",
     "auth/index": "src/auth/index.ts",

@@ -8,6 +8,12 @@
  *                  signing, vault, captcha, pii, drizzle, ical, events, server)
  *       → may import each other; must never import an app module or an
  *         app-tier vendor SDK
+ *   leaf modules  (proposal)
+ *       → base-tier vendor rules, but may import NO other module, and no
+ *         other module may import them. `proposal` is the AI reviewable-
+ *         outcome contract: browsers import it, and it is parked here until
+ *         a second consumer wants it under its own name — keeping it a leaf
+ *         both ways is what makes that extraction a path rename.
  *   app modules   (hono, queue, storage, mail, zitadel)
  *       → may import base modules; must never import each other, and each
  *         is confined to its own vendor SDKs
@@ -26,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src');
 
 const APP_MODULES = ['hono', 'queue', 'storage', 'mail', 'zitadel'];
+const LEAF_MODULES = ['proposal'];
 
 // Vendor SDKs that belong to exactly one app module. '@scope' entries match the
 // whole scope. Base-tier vendors (pg, drizzle-orm, jose, zod, altcha-lib,
@@ -55,7 +62,10 @@ const RULES = {
   storage: { internal: [''], externals: [...BANNED_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
   mail: { internal: [''], externals: [...BANNED_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS] },
   zitadel: { internal: [''], externals: [...BANNED_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS] },
-  // base tier: all of src/ outside the app modules
+  // leaf: nothing internal in either direction (base files importing it are
+  // caught because '' does not list it).
+  proposal: { internal: [], externals: [...BANNED_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
+  // base tier: all of src/ outside the app and leaf modules
   '': { internal: [], externals: [...BANNED_VENDORS, ...HONO_VENDORS, ...GLUE_SHARED_VENDORS, ...QUEUE_VENDORS, ...STORAGE_VENDORS, ...MAIL_VENDORS, ...HTTP_VENDORS] },
 };
 
@@ -69,11 +79,11 @@ function walk(dir) {
   return out;
 }
 
-/** module a file belongs to (first path segment under src/ if an app module, else '' = base) */
+/** module a file belongs to (first path segment under src/ if an app or leaf module, else '' = base) */
 function moduleOf(absPath) {
   const rel = relative(SRC, absPath);
   const seg = rel.split(/[\\/]/);
-  return APP_MODULES.includes(seg[0]) ? seg[0] : '';
+  return APP_MODULES.includes(seg[0]) || LEAF_MODULES.includes(seg[0]) ? seg[0] : '';
 }
 
 /** package name of a bare import specifier ('@aws-sdk/client-s3' → '@aws-sdk/client-s3', 'pg-boss/x' → 'pg-boss') */

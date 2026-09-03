@@ -31,6 +31,7 @@ There is no root export — every module lives behind a subpath.
 | Import | What it is | Docs |
 |---|---|---|
 | `./result` `./ioc` `./logger` `./utils` | Result types, IoC container (3 lifetimes + scopes), structured logger, helpers | [foundation](./docs/foundation.md) |
+| `./proposal` | The AI reviewable-outcome contract: a run's result as typed operations (`update`/`create`/`delete`/`reorder`) against existing records, with what each replaces, provenance, drift guard, partial accept, zod wire schemas. zod only, browser-safe, imports no other module | [proposal](./docs/proposal.md) |
 | `./config-schema` `./rbac` `./auth` `./signing` `./vault` `./captcha` `./captcha/altcha` | Zod config fragments, RBAC subset checks, JWT/API-key auth, scoped HKDF signing, Vault secret loader, captcha contract + ALTCHA | [foundation](./docs/foundation.md) |
 | `./pii` | PII encryption: AES-256-GCM + age-format hybrid, blind indexes, per-scope keys | [foundation](./docs/foundation.md) |
 | `./drizzle/*` | Drizzle ORM helpers: error→Result mapping, factory, migrations, one-shot data backfills, scope column-sets, CRUD, RLS (+ GUC-scope factory bridging `./ioc`), idempotency, scoped config, scoped-key store, job-audit store | [foundation](./docs/foundation.md) |

@@ -1,7 +1,7 @@
 {
   "name": "@octabits-io/framework",
   "version": "0.35.0",
-  "description": "Opinionated server framework toolkit: Result types, IoC, logger, RBAC, auth, signing, Vault, captcha, PII encryption, Drizzle helpers, iCal ingestion, Hono middleware & MCP harness, pg-boss queues, blob storage, mail dispatch, and a Zitadel management client — one package, granular subpath exports",
+  "description": "Opinionated server framework toolkit: Result types, IoC, the AI proposal (reviewable-outcome) contract, logger, RBAC, auth, signing, Vault, captcha, PII encryption, Drizzle helpers, iCal ingestion, Hono middleware & MCP harness, pg-boss queues, blob storage, mail dispatch, and a Zitadel management client — one package, granular subpath exports",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -34,6 +34,11 @@
       "types": "./dist/utils/index.d.ts",
       "import": "./dist/utils/index.js",
       "default": "./dist/utils/index.js"
+    },
+    "./proposal": {
+      "types": "./dist/proposal/index.d.ts",
+      "import": "./dist/proposal/index.js",
+      "default": "./dist/proposal/index.js"
     },
     "./config-schema": {
       "types": "./dist/config-schema/index.d.ts",
