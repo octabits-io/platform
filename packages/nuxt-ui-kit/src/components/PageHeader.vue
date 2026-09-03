@@ -56,12 +56,30 @@ const props = withDefaults(defineProps<{
   utility?: boolean
   /** Optional grouped overflow items. Alternative to using the #overflow slot. */
   overflowItems?: DropdownMenuItem[][]
+  /**
+   * Width (px) the heading must keep before the action cluster is allowed to
+   * share its row. Below it the cluster WRAPS under the heading instead of
+   * crushing it. `compact` only, and only with a `#title` slot.
+   *
+   * Exists for record headers whose title is CONTENT rather than chrome — the
+   * CMS page and blog-post panels, where the title is a 60–80 character SEO
+   * headline and the only place it is shown in full. The compact heading's
+   * `flex: 1 1 0%` makes its hypothetical width zero, so the actions never
+   * wrap and the heading takes whatever they leave: in a 508px split pane
+   * that was 148px, and the title rendered one word per line, 297px tall.
+   *
+   * Unset (the default) keeps basis-0 and today's behaviour: a heading that
+   * truncates and never costs a second row. Set it when the title must be
+   * read, not recognised.
+   */
+  headingMinWidth?: number
 }>(), {
   back: false,
   loading: false,
   density: 'default',
   utility: true,
   overflowItems: () => [],
+  headingMinWidth: undefined,
 })
 
 const { t } = useI18n()
@@ -165,6 +183,19 @@ const headingClass = computed(() => {
   return props.density === 'compact' ? 'min-w-0 flex-1' : 'min-w-0'
 })
 /**
+ * `flex: 1 1 <headingMinWidth>px` in place of `flex-1`'s `1 1 0%`: the
+ * heading's hypothetical width becomes the floor the caller asked for, so a
+ * wrap container places the action cluster on a second row as soon as floor
+ * plus cluster no longer fit — and the heading then grows into the whole
+ * first row. Same grow/shrink as before; only the basis changes, so headers
+ * wide enough for both still render one row. Inline style because the number
+ * is per caller and Tailwind cannot extract an interpolated class.
+ */
+const headingStyle = computed(() =>
+  props.density === 'compact' && slots.title && props.headingMinWidth
+    ? { flex: `1 1 ${props.headingMinWidth}px` }
+    : undefined)
+/**
  * `basis-0 grow`: the subtitle claims NO width of its own and only fills what
  * the title leaves. Sharing the shrink proportionally (the plain `truncate`
  * this had) meant a long subtitle and a short title shrank together, and in a
@@ -191,7 +222,7 @@ const subtitleClass = computed(() => inlineHeading.value
     <!-- Skipped entirely when there is nothing to head with: a compact band
          may legitimately carry actions alone (the page title is already in the
          breadcrumb), and an empty box here would still take the `gap-2`. -->
-    <div v-if="$slots.title || title || subtitle || loading" :class="headingClass">
+    <div v-if="$slots.title || title || subtitle || loading" :class="headingClass" :style="headingStyle">
       <slot name="title">
         <USkeleton v-if="loading" class="h-7 w-40" />
         <h1 v-else-if="title" :class="titleClass">{{ title }}</h1>
@@ -204,8 +235,10 @@ const subtitleClass = computed(() => inlineHeading.value
     </div>
 
     <!-- flex-wrap: labeled actions overflow narrow (mobile) viewports otherwise —
-         the outer header wraps rows, but this cluster must wrap internally too. -->
-    <div class="ml-auto flex flex-wrap items-center gap-1">
+         the outer header wraps rows, but this cluster must wrap internally too.
+         justify-end: when it does, the overflow row keeps the cluster's right
+         edge instead of starting at its left one. -->
+    <div class="ml-auto flex flex-wrap items-center justify-end gap-1">
       <slot name="actions" />
       <PageActionMenu
         v-if="overflowItems.length"
