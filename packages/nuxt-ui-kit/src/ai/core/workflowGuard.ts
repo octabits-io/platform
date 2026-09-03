@@ -32,7 +32,10 @@ export function createWorkflowGuard<TOutput>(poller: WorkflowPoller<TOutput>, op
         poller.setWorkflow(existing);
         poller.start(pollFn);
       } else if (existing) {
-        // Terminal workflow — show its state but don't poll
+        // Terminal workflow — show its state but don't poll. The poll function
+        // is still attached so `refresh` can re-read it (an apply changes what
+        // the wire says about a finished run).
+        poller.attach(pollFn);
         poller.setWorkflow(existing);
       }
     } catch {

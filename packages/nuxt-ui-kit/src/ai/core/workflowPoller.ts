@@ -81,11 +81,15 @@ export function createWorkflowPoller<TOutput = unknown>(options: WorkflowPollerO
       const data = await activePollFn();
       if (!data) return;
 
+      const previous = store.get().workflow;
       patch({ workflow: data });
 
       if (isTerminalStatus(data.status)) {
         timer.pause();
-        notifyTerminal(data);
+        // Notify on the transition only: a refresh of a run that was already
+        // terminal (re-reading it after an apply) is not a completion.
+        const wasTerminal = previous !== null && isTerminalStatus(previous.status);
+        if (!wasTerminal) notifyTerminal(data);
       }
     } catch {
       // Silently ignore poll errors — next poll will retry
@@ -111,6 +115,15 @@ export function createWorkflowPoller<TOutput = unknown>(options: WorkflowPollerO
       .catch(() => {
         patch({ isLoading: false });
       });
+  }
+
+  /**
+   * Remember a poll function without starting the interval — for a run that
+   * is already terminal when the host learns about it. `refresh` then re-reads
+   * it on demand (after an apply, say), while nothing polls a finished run.
+   */
+  function attach(pollFn: PollFn<TOutput>) {
+    activePollFn = pollFn;
   }
 
   function stop() {
@@ -147,6 +160,7 @@ export function createWorkflowPoller<TOutput = unknown>(options: WorkflowPollerO
   return {
     ...observable,
     start,
+    attach,
     stop,
     cancel,
     refresh,

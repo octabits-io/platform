@@ -128,6 +128,25 @@ describe('createWorkflowPoller', () => {
     expect(poller.get().workflow?.status).toBe('completed');
   });
 
+  it('fires the terminal callback on the transition, not on every terminal read', async () => {
+    const onCompleted = vi.fn();
+    const poller = createWorkflowPoller({ interval: 100, onCompleted });
+    poller.setWorkflow(wf('completed'));
+    poller.attach(async () => wf('completed', { appliedAt: 'now' }));
+
+    await poller.refresh();
+    await poller.refresh();
+    expect(onCompleted).not.toHaveBeenCalled();
+    expect(poller.get().workflow?.appliedAt).toBe('now');
+
+    // A run that was active and finishes still notifies exactly once.
+    const fresh = createWorkflowPoller({ interval: 100, onCompleted });
+    const answers = [wf('running'), wf('completed')];
+    fresh.start(async () => answers.shift() ?? wf('completed'));
+    await vi.advanceTimersByTimeAsync(250);
+    expect(onCompleted).toHaveBeenCalledOnce();
+  });
+
   it('stop halts polling and refresh is a no-op without a poll function', async () => {
     const pollFn = vi.fn(async () => wf('running'));
     const poller = createWorkflowPoller({ interval: 100 });
@@ -162,14 +181,24 @@ describe('createWorkflowGuard', () => {
     poller.stop();
   });
 
-  it('shows a terminal run without polling, and triggers when idle', async () => {
-    const pollFn = vi.fn(async () => wf('running'));
+  it('shows a terminal run without polling, refreshes it on demand, and triggers when idle', async () => {
+    // The wire keeps saying "completed" (with, say, a fresh appliedAt) — a
+    // refresh must re-read it, not turn it back into a running poll.
+    const pollFn = vi.fn(async () => wf('completed', { appliedAt: '2026-09-03T00:00:00Z' }));
     const poller = createWorkflowPoller({ interval: 1_000_000 });
     const guard = createWorkflowGuard(poller, { checkFn: async () => wf('completed'), pollFn });
 
     await guard.rehydrate();
     expect(poller.get().workflow?.status).toBe('completed');
     expect(pollFn).not.toHaveBeenCalled();
+
+    // A finished run is not polled, but it can be re-read — that is how an
+    // apply's `appliedAt` reaches the surface without a page reload.
+    await poller.refresh();
+    expect(pollFn).toHaveBeenCalledTimes(1);
+    expect(poller.get().workflow?.appliedAt).toBe('2026-09-03T00:00:00Z');
+    expect(poller.get().isPolling).toBe(false);
+    pollFn.mockClear();
 
     expect(await guard.trigger(async () => {})).toBe(true);
     expect(pollFn).toHaveBeenCalled();
