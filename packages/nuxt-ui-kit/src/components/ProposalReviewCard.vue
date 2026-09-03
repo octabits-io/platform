@@ -52,8 +52,15 @@ const props = withDefaults(
     applying?: boolean
     /** Label for a variant key ('de' → 'Deutsch'). Identity by default. */
     variantLabel?: (variant: string) => string
+    /**
+     * One readable line for a structured value — what the host shows as the
+     * current value of a rich-text or JSON-shaped slot. Without it a document
+     * renders as its JSON, which is faithful and unreadable. Return null or
+     * undefined to fall back to the default preview.
+     */
+    formatValue?: (value: JsonValue, operation: ProposedOperation) => string | null | undefined
   }>(),
-  { applying: false, variantLabel: undefined },
+  { applying: false, variantLabel: undefined, formatValue: undefined },
 )
 
 const emit = defineEmits<{
@@ -153,9 +160,14 @@ function setTextValue(id: string, value: string) {
   edited.value[id] = value
 }
 
-/** A value as one readable line. Structured values fall back to compact JSON. */
-function preview(value: JsonValue | undefined): string | null {
+/**
+ * A value as one readable line. The host's `formatValue` goes first (it knows
+ * its document shapes); structured values otherwise fall back to compact JSON.
+ */
+function preview(value: JsonValue | undefined, operation: ProposedOperation): string | null {
   if (value === undefined || value === null || value === '') return null
+  const formatted = props.formatValue?.(value, operation)
+  if (formatted != null) return formatted === '' ? null : formatted
   if (typeof value === 'string') return value
   if (typeof value === 'number' || typeof value === 'boolean') return String(value)
   return JSON.stringify(value)
@@ -254,11 +266,11 @@ function submit() {
              proposal was built, so this is a fact about the run rather than a
              best-effort read from the browser. -->
         <p
-          v-if="op.op === 'update' && preview(op.current)"
+          v-if="op.op === 'update' && preview(op.current, op)"
           class="mt-1 line-clamp-2 text-xs text-muted"
         >
           <span class="text-dimmed">{{ t('ai.review.currentValue') }}:</span>
-          {{ preview(op.current) }}
+          {{ preview(op.current, op) }}
         </p>
 
         <!-- Where the value came from, when that is not the value it replaces
@@ -321,7 +333,7 @@ function submit() {
 
         <!-- delete: what is about to be lost -->
         <p v-else-if="op.op === 'delete'" class="mt-1 line-clamp-2 text-xs text-muted line-through">
-          {{ preview(op.current) ?? t('ai.review.currentEmpty') }}
+          {{ preview(op.current, op) ?? t('ai.review.currentEmpty') }}
         </p>
 
         <!-- reorder: the sequence, before and after -->

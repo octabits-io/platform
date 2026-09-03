@@ -223,8 +223,10 @@ function toEntry(row: Record<string, unknown>): AgentLedgerEntry {
     operations: row.operations,
     created: (row.created as Record<string, string> | null) ?? {},
     reversibility: row.reversibility as LedgerReversibility,
-    appliedAt: row.appliedAt as string,
-    revertedAt: (row.revertedAt as string | null) ?? null,
+    // `mode: 'string'` hands back Postgres' own text form ("2026-09-03 18:13:11.09+00");
+    // consumers and the in-memory store speak ISO, so the row does too.
+    appliedAt: toIso(row.appliedAt as string),
+    revertedAt: row.revertedAt == null ? null : toIso(row.revertedAt as string),
     revertedBy: (row.revertedBy as string | null) ?? null,
   };
 }
@@ -248,6 +250,11 @@ function toEntry(row: Record<string, unknown>): AgentLedgerEntry {
  * `{ column }` → stamped from `entry.scopeKey` (refused when absent) and reads
  * are unfiltered — for a process-wide writer that serves many scopes.
  */
+const toIso = (value: string): string => {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+};
+
 export function createDrizzleAgentLedgerStore(deps: CreateDrizzleAgentLedgerStoreDeps): DrizzleAgentLedgerStore {
   const { db, table, scope } = deps;
   // Internal typed view (see ../db/internal.ts): the public seam stays

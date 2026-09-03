@@ -88,6 +88,17 @@ describe('createDrizzleAgentLedgerStore — record', () => {
     });
   });
 
+  it('hands back ISO timestamps whatever text form the driver returned', async () => {
+    const { db } = makeDb([
+      { id: 5, actorKind: 'agent', actorId: 'a', mode: 'reviewed', scope: 's', workflowId: '42', operations: [], reversibility: 'reversible', appliedAt: '2026-09-03 18:13:11.096624+00', revertedAt: '2026-09-03 18:13:34.118+00' },
+    ]);
+    const store = createDrizzleAgentLedgerStore({ db, table: unscopedLedger });
+
+    const found = await store.findByWorkflow(42);
+    expect(found.ok && found.value?.appliedAt).toBe('2026-09-03T18:13:11.096Z');
+    expect(found.ok && found.value?.revertedAt).toBe('2026-09-03T18:13:34.118Z');
+  });
+
   it('refuses an entry it cannot scope instead of writing an ownerless row', async () => {
     const { db, insertValues } = makeDb();
     const store = createDrizzleAgentLedgerStore({ db, table: agentLedger, scope: { column: 'tenantId' } });

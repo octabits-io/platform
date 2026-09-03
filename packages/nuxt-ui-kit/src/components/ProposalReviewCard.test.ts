@@ -10,7 +10,7 @@ import {
   proposeCreate,
   proposeFields,
 } from '@octabits-io/framework/proposal';
-import type { Proposal, ProposalDecision } from '@octabits-io/framework/proposal';
+import type { JsonValue, Proposal, ProposalDecision } from '@octabits-io/framework/proposal';
 
 /**
  * `ProposalReviewCard` is the generic review surface: it must render every
@@ -182,6 +182,28 @@ describe('ProposalReviewCard', () => {
     // Provenance is part of the review, not a footnote.
     expect(wrapper.text()).toContain('claude-sonnet-4-6');
     expect(wrapper.text()).toContain('0.0184 USD');
+  });
+
+  it('lets the host format a structured current value instead of showing its JSON', () => {
+    const doc = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Alter Text' }] }] };
+    const proposal = buildProposal({
+      scope: 'listing:88',
+      operations: proposeFields({
+        target: listing,
+        current: { description: doc },
+        proposed: { description: { ...doc, content: [] } },
+        display: { description: { control: 'richtext', label: 'Description' } },
+      }),
+    });
+
+    const bare = mount(ProposalReviewCard, { props: { proposal } });
+    expect(bare.text()).toContain('"type":"doc"');
+
+    const formatted = mount(ProposalReviewCard, {
+      props: { proposal, formatValue: (value: JsonValue) => (typeof value === 'object' ? 'Alter Text' : null) },
+    });
+    expect(formatted.text()).toContain('Alter Text');
+    expect(formatted.text()).not.toContain('"type":"doc"');
   });
 
   it('emits a decision carrying only the kept operations, with edits', async () => {
