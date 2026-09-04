@@ -1,5 +1,11 @@
 # @octabits-io/framework
 
+## 0.36.2
+
+### Patch Changes
+
+- [`d1f5537`](https://github.com/octabits-io/platform/commit/d1f553726fe3f3c37f3a6b665e92647592d00f94) - `./mail/smtp`: the optional `nodemailer` peer range now accepts v10 (`^7 || ^8 || ^9 || ^10`). Nodemailer 10's only breaking change is requiring Node 20+; it now ships its own type declarations, so a consumer on v10 no longer needs `@types/nodemailer`.
+
 ## 0.36.1
 
 ### Patch Changes
