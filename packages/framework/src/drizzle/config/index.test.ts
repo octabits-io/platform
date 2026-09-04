@@ -615,7 +615,7 @@ describe('unscoped config store (no scope)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Null-default keys — memoized absent resolutions (perf: reynt §9)
+// Null-default keys — memoized absent resolutions
 // ---------------------------------------------------------------------------
 
 describe('null-default keys are memoized as absent resolutions', () => {

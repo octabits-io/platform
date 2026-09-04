@@ -109,7 +109,7 @@ export function createRequestScopeMiddleware<
     // Route-mount overlap dedupe: Hono's `.route()` copies a sub-app's
     // `use('*')` middleware into the parent, where it also matches sibling
     // paths under the same mount prefix — so one request can hit this
-    // middleware once per overlapping module (operator-api's nested listing
+    // middleware once per overlapping module (a consumer's nested resource
     // routes stacked four scopes, each pinning a pooled RLS connection for
     // the rest of the request). The first run owns the scope; later runs
     // step aside. Deduping by contextKey assumes overlapping mounts share

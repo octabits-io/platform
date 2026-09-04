@@ -8,8 +8,8 @@ import { ref, computed, watch } from 'vue';
  * value is deliberately ignored rather than awaited: the watcher is a
  * fire-and-forget notification, not a lifecycle the caller can join. Typing it
  * `() => void` instead made every async loader passed here a
- * `no-misused-promises` finding at the call site (18 of them in reynt's
- * console) for a shape that is correct by design.
+ * `no-misused-promises` finding at every call site, for a shape that is
+ * correct by design.
  */
 export function usePagination(options: {
   defaultLimit?: number;

@@ -146,17 +146,17 @@ describe('registerErrorHandler', () => {
   });
 
   it('statusErrorWithSet works in a Hono handler via a set shim (route-glue parity)', async () => {
-    // The reynt route idiom `if (!result.ok) return statusErrorWithSet(set, result.error)`
+    // The Elysia-era route idiom `if (!result.ok) return statusErrorWithSet(set, result.error)`
     // maps to Hono as a two-liner with a local set object.
     const app = new Hono().get('/svc', (c) => {
       const set: { status?: number | string } = {};
-      const body = statusErrorWithSet(set, { key: 'listing_not_found', message: 'no such listing' });
+      const body = statusErrorWithSet(set, { key: 'record_not_found', message: 'no such record' });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return c.json(body, set.status as any);
     });
     const res = await testRequest(testableHonoApp(app), 'GET', '/svc');
     expect(res.status).toBe(404);
-    expect(res.data).toEqual({ key: 'listing_not_found', message: 'no such listing' });
+    expect(res.data).toEqual({ key: 'record_not_found', message: 'no such record' });
   });
 });
 

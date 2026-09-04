@@ -1,7 +1,7 @@
 /**
  * The on-Bun conninfo-failure branch of `createClientIpMiddleware`.
  *
- * Regression origin: reynt's four Bun adapters handed the server to Hono as
+ * Regression origin: a consumer's Bun adapters handed the server to Hono as
  * `app.fetch(request, { bunServer })`, but `hono/bun`'s `getBunServer` reads
  * `'server' in c.env ? c.env.server : c.env` — so it fell through to the env
  * object itself, `requestIP` was missing, `getConnInfo` threw, and the catch

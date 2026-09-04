@@ -60,12 +60,12 @@ Two mechanisms fall out of that:
 ```ts
 const nextId = createIdFactory();
 const proposal = buildProposal({
-  scope: 'listing:88',
+  scope: 'article:88',
   operations: proposeFields({
-    target: entityAnchor('listing', 88),
+    target: entityAnchor('article', 88),
     variant: 'de',
-    current: { title: 'Ferienwohnung Seeblick 3', excerpt: null },
-    proposed: { title: 'Seeblick 3 — Balkon über dem Kochelsee', excerpt: 'Zwei Zimmer.' },
+    current: { title: 'Erster Entwurf', excerpt: null },
+    proposed: { title: 'Erster Entwurf, überarbeitet', excerpt: 'Zwei Absätze.' },
     display: { title: { control: 'text', maxLength: 120 } },
     nextId,
   }),

@@ -30,7 +30,7 @@
  *
  * Framework note: this is 20 lines of app code, not a missing framework
  * feature. But every `hc` consumer writes some version of it, so it is the
- * shape reynt should copy rather than reinvent per page.
+ * shape a consumer should copy rather than reinvent per page.
  */
 import type { ClientResponse } from 'hono/client'
 

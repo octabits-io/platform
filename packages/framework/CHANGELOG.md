@@ -358,7 +358,7 @@
   `HTTPException` for a malformed JSON body, an unparseable `FormData` body and a
   failed bearer check, and answers with a bare `text/plain` body — which a client
   expecting the framework's JSON error envelope cannot read. Such a failure was
-  observable from neither side. (Found in reynt: a bodyless request that carried a
+  observable from neither side. (Found in a consumer: a bodyless request that carried a
   JSON content-type turned into `400 Malformed JSON in request body`, and the
   console could only report a generic "Bad Request".)
 
@@ -711,7 +711,7 @@ for opentelemetry format`, so every exported record was silently dropped
 
 ### Minor Changes
 
-- [`f56675c`](https://github.com/octabits-io/platform/commit/f56675c717a180760c94d1b10a468a3c87e5b8cc) - Two `./hono` gaps surfaced by the first consumer wave (reynt customer-api):
+- [`f56675c`](https://github.com/octabits-io/platform/commit/f56675c717a180760c94d1b10a468a3c87e5b8cc) - Two `./hono` gaps surfaced by the first consumer wave:
 
   - `createHonoApp` accepts a `hono` option (Hono constructor options for the
     composed serving app). Passing `{ strict: false }` restores Elysia's
@@ -869,7 +869,7 @@ for opentelemetry format`, so every exported record was silently dropped
 
 ### Patch Changes
 
-- [`eb82de9`](https://github.com/octabits-io/platform/commit/eb82de9f01cd7bcfcdb187dbbd8fedd3e88e6849) - elysia errors: map `*_invalid_status` keys to 409 (they previously fell through the generic conventions to a redacted 500 "Internal error" — hit in production by reynt's booking-draft `mark-confirmed`), and log 5xx `ApiError`s in `createErrorHandler` so redacted responses leave a server-side trace.
+- [`eb82de9`](https://github.com/octabits-io/platform/commit/eb82de9f01cd7bcfcdb187dbbd8fedd3e88e6849) - elysia errors: map `*_invalid_status` keys to 409 (they previously fell through the generic conventions to a redacted 500 "Internal error" — hit in production by a consumer's status-transition route), and log 5xx `ApiError`s in `createErrorHandler` so redacted responses leave a server-side trace.
 
 ## 0.7.0
 

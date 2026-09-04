@@ -8,7 +8,7 @@
  * folding engine step statuses to display states), and this factory owns the
  * *serving conventions*: error-key → status mapping via {@link createErrorMapper},
  * and the 200-with-body cancel response (kept for wire parity with the Elysia
- * factory — reynt clients read `{ cancelled: true }`).
+ * factory — existing clients read `{ cancelled: true }`).
  *
  * Only the routes that are identical for every flow consumer live here — pure
  * engine projections: list, active-probe, get, status snapshot, cancel,

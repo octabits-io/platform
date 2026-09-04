@@ -61,8 +61,8 @@ describe('useWizardStepValidation', () => {
     })
 
     it('re-derives when a schema Ref changes', () => {
-      // Real callers pass a `computed(() => schema)` (see
-      // ListingManualCreateFlow.vue), not `ref(schema)` — computed() doesn't
+      // Real callers pass a `computed(() => schema)` (a multi-step
+      // create wizard does), not `ref(schema)` — computed() doesn't
       // deep-wrap its return value, so the zod schema instance stays
       // untouched. `ref()` would deep-reactive-wrap it and break zod's
       // internal non-configurable properties; this test mirrors real usage.
