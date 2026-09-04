@@ -41,6 +41,28 @@ export interface LocaleFieldTranslateScope {
   canTranslate: boolean;
   translating: boolean;
   translate: () => void;
+  /**
+   * The locale tab currently shown, so a slotted action that writes into the
+   * field ("insert the default text") lands on the value the operator is
+   * looking at rather than on the default locale.
+   */
+  activeLocale: string;
+}
+
+/**
+ * A field placeholder is either one string for every tab or a `LocaleMap` —
+ * the latter for hints that are themselves per-locale content (the built-in
+ * text an empty override falls back to, in that locale). Resolves the map
+ * through the usual fallback chain (`de-formal` → `de`) so a register-variant
+ * tab shows its base's hint when it has none of its own.
+ */
+export function resolveFieldPlaceholder(
+  placeholder: string | LocaleMap<string> | undefined,
+  locale: string,
+  defaultLocale: string,
+): string | undefined {
+  if (placeholder === undefined || typeof placeholder === 'string') return placeholder;
+  return resolveLocale(placeholder, locale, defaultLocale) ?? undefined;
 }
 
 /** What a quick-translate provider returns — drives the sparkle button. */

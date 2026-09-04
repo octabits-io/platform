@@ -65,8 +65,12 @@ itself, so it has no Nuxt dependency, only `vue`.
   `createAiProgressCore` (cross-page tracking + completion/applied signals —
   the setup body of the app's progress store), `useAiCardState`,
   `useActiveAiWorkflowProbe`, `createWorkflowRegistry`, and
-  `./components/AiResultReviewCard.vue`; dialog/float shells stay in the app
-  (thin views over this state, registry- and router-coupled)
+  `./components/AiResultReviewCard.vue` and `./components/ProposalReviewCard.vue`
+  (the generic review surface for a `@octabits-io/framework/proposal` `Proposal`:
+  every operation kind, a decision out, a `richtext` slot for the host's editor
+  and a `formatValue` prop for the host's one-line rendering of structured
+  values); dialog/float shells stay in the app (thin views over this state,
+  registry- and router-coupled)
 
 ## Components ship as source
 

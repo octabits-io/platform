@@ -122,6 +122,21 @@ The reference implementation is the demo server, end to end:
 | **Revert** | same file (`revert`) + `POST …/revert` | `invertOperations` over the ledger row, written through the same `applyOperation`; `irreversible` operations are named, not undone. |
 | **Review surface** | [`apps/demo-web/app/components/AiContactBrief.vue`](../../../apps/demo-web/app/components/AiContactBrief.vue) | The kit's `ProposalReviewCard.vue` renders `output.propose`; the decision it emits is posted as-is. |
 
+The second reference is a production consumer, and it is the one to copy for
+the common case — a run that writes **LocaleMap fields of one record**. There
+the loop is written once, in a `proposals/` module of the consumer's core:
+`buildLocaleFieldsProposal` takes a spec (field list, per-field `display`,
+agent principal) and emits the `propose` step's output;
+`createLocaleFieldsProposalApplier` takes a host (`load`, `readLeaf`, `write`)
+and owns validation, decision, drift, the ledger row and the revert; a reader
+service lists the ledger and dispatches reverts back to the hosts. Two hosts
+share it — fields as columns on the row, and fields as leaves inside a JSON
+column — and the only thing that would not generalise was where the field list
+lived (the workflow and its proposal describe each other, so the list has to
+be a leaf module). The console side is one component over `ProposalReviewCard`
+plus a ten-line wrapper per record type naming its endpoints, and a ledger
+page with Revert.
+
 What the demo leaves to a production host: one transaction around the writes
 (these services take no `tx`), a real principal in `applied_by`, and per-scope
 engine routing. What the contract does not yet do: field-level editing of a

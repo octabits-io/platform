@@ -3,6 +3,7 @@ import { nextTick, ref, type ModelRef } from 'vue';
 import {
   createLocaleDisplay,
   pruneLocaleMap,
+  resolveFieldPlaceholder,
   useLocaleField,
   useLocaleTabs,
   type LocaleFieldSource,
@@ -191,5 +192,26 @@ describe('createLocaleDisplay', () => {
     expect(display({ en: 'Hello', de: 'Hallo' })).toBe('Hello');
     defaultLocale.value = 'de';
     expect(display({ en: 'Hello', de: 'Hallo' })).toBe('Hallo');
+  });
+});
+
+describe('resolveFieldPlaceholder', () => {
+  it('passes a plain string through for every tab', () => {
+    expect(resolveFieldPlaceholder('Type here', 'de', 'en')).toBe('Type here');
+    expect(resolveFieldPlaceholder(undefined, 'de', 'en')).toBeUndefined();
+  });
+
+  it('picks the active tab\'s hint from a per-locale map', () => {
+    const map = { en: 'Dear {FirstName}', de: 'Liebe/r {FirstName}' };
+    expect(resolveFieldPlaceholder(map, 'de', 'en')).toBe('Liebe/r {FirstName}');
+  });
+
+  it('falls a register-variant tab through to its base, then to the default locale', () => {
+    // A `de-formal` tab with no hint of its own shows the `de` hint — the
+    // same chain the stored value follows — and an unknown locale shows the
+    // default locale's, never nothing.
+    const map = { en: 'Dear', de: 'Liebe/r' };
+    expect(resolveFieldPlaceholder(map, 'de-formal', 'en')).toBe('Liebe/r');
+    expect(resolveFieldPlaceholder(map, 'fr', 'en')).toBe('Dear');
   });
 });

@@ -12,6 +12,7 @@ import UInput from '@nuxt/ui/components/Input.vue'
 import UTooltip from '@nuxt/ui/components/Tooltip.vue'
 import UButton from '@nuxt/ui/components/Button.vue'
 import {
+  resolveFieldPlaceholder,
   useLocaleField,
   useLocaleFieldContext,
   type LocaleFieldTranslateScope,
@@ -36,7 +37,11 @@ const props = defineProps<{
   label?: string
   description?: string
   help?: string
-  placeholder?: string
+  /**
+   * One string for every tab, or a `LocaleMap` for a hint that is itself
+   * per-locale content (see `resolveFieldPlaceholder`).
+   */
+  placeholder?: string | LocaleMap<string>
   /** Form field path — wires validation errors to this field. */
   name?: string
   /** Marks the default-locale value as required (visual only). */
@@ -62,10 +67,14 @@ defineSlots<{
 const { t } = useI18n()
 const { useSource, useTranslate } = useLocaleFieldContext()
 
-const { items, active, activeValue, indicatorOf, translateSource, translateTargets } = useLocaleField(
+const { items, active, activeValue, indicatorOf, defaultLocale, translateSource, translateTargets } = useLocaleField(
   model,
   useSource(),
   () => props.registerOverride ?? false,
+)
+
+const activePlaceholder = computed(() =>
+  resolveFieldPlaceholder(props.placeholder, active.value, defaultLocale.value),
 )
 
 // The translate provider is optional app wiring — without it the sparkle
@@ -82,6 +91,7 @@ const aiScope = computed<LocaleFieldTranslateScope>(() => ({
   canTranslate: translator?.canTranslate.value ?? false,
   translating: translator?.translating.value ?? false,
   translate: () => translator?.translate(),
+  activeLocale: active.value,
 }))
 </script>
 
@@ -123,7 +133,7 @@ const aiScope = computed<LocaleFieldTranslateScope>(() => ({
       </div>
       <UInput
         v-model="activeValue"
-        :placeholder="placeholder"
+        :placeholder="activePlaceholder"
         :maxlength="maxlength"
         class="w-full"
       />
