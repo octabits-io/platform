@@ -1,5 +1,11 @@
 # @octabits-io/nuxt-ui-kit
 
+## 0.22.0
+
+### Minor Changes
+
+- [`36f21d2`](https://github.com/octabits-io/platform/commit/36f21d268ff88b39cefb65cf70ad2e4a63a91556) - `LocaleInput` / `LocaleTextarea`: `placeholder` accepts a `LocaleMap<string>` beside a plain string, resolved for the active tab through the usual fallback chain (`resolveFieldPlaceholder`, exported from `./locale`). The `#ai` slot scope gains `activeLocale`, so a slotted action can write into the tab the operator is looking at.
+
 ## 0.21.0
 
 ### Minor Changes
