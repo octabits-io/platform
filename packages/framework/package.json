@@ -380,7 +380,7 @@
     "jose": "^6.2.10",
     "node-mailjet": "^6.0.11",
     "nodemailer": "^9.1.0",
-    "octaflow": "^0.17.0",
+    "octaflow": "^0.17.2",
     "pg": "^8.23.0",
     "pg-boss": "^12.29.0",
     "testcontainers": "^12.1.0",
