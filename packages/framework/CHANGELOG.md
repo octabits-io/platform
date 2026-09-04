@@ -1,5 +1,11 @@
 # @octabits-io/framework
 
+## 0.36.1
+
+### Patch Changes
+
+- [`f15e013`](https://github.com/octabits-io/platform/commit/f15e013687333efe58f8bb2c9a552ca77c7bf94f) - `createDrizzleAgentLedgerStore` returns `appliedAt` / `revertedAt` as ISO strings. Drizzle's `mode: 'string'` timestamp hands back Postgres' own text form (`2026-09-03 18:13:11.096624+00`), which leaked through `record()` into API responses.
+
 ## 0.36.0
 
 ### Minor Changes
